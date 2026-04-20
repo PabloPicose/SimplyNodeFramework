@@ -114,25 +114,24 @@ void EventLoop::run() {
     if (m_stop.load()) {
       break;
     }
-    if (m_tasks.empty() && m_nodesToDelete.empty() && m_rootNodes.empty() &&
-        m_timers.empty()) {
+    
+    // Exit if no work remains (generic check)
+    if (!hasPendingWorkLocked()) {
       break;
     }
 
     std::chrono::steady_clock::time_point nextDeadline;
     if (nextTimerDeadlineLocked(nextDeadline)) {
+      // We have timers, wait until the next one is due
       m_cv.wait_until(lock, nextDeadline, [this] {
-        return !m_tasks.empty() || !m_nodesToDelete.empty() ||
-               hasDueTimerLocked(std::chrono::steady_clock::now()) ||
-               m_stop.load();
+        return hasPendingWorkLocked() || m_stop.load();
       });
       continue;
     }
 
+    // No timers but may have other work, wait generically
     m_cv.wait(lock, [this] {
-      return !m_tasks.empty() || !m_nodesToDelete.empty() ||
-             hasDueTimerLocked(std::chrono::steady_clock::now()) ||
-             m_stop.load();
+      return hasPendingWorkLocked() || m_stop.load();
     });
   }
 }
@@ -197,7 +196,12 @@ void EventLoop::cancelTimer(Timer* timer) {
 bool EventLoop::hasPendingWork() const {
   // Caller must not hold m_mutex.
   std::lock_guard<std::mutex> lock(m_mutex);
-  return !m_tasks.empty() || !m_nodesToDelete.empty();
+  return !m_tasks.empty() || !m_nodesToDelete.empty() || !m_timers.empty();
+}
+
+bool EventLoop::hasPendingWorkLocked() const {
+  // Caller must hold m_mutex.
+  return !m_tasks.empty() || !m_nodesToDelete.empty() || !m_timers.empty();
 }
 
 bool EventLoop::popNextTask(Task& task) {

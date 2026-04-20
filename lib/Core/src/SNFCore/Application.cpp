@@ -56,7 +56,13 @@ int Application::run() {
   return 0;
 }
 
-void Application::quit() { m_quit = true; }
+void Application::quit() {
+  m_quit = true;
+  std::lock_guard<std::mutex> lock(m_eventLoopsMutex);
+  for (auto& [threadId, loop] : m_eventLoops) {
+    loop->stop();
+  }
+}
 
 std::size_t Application::getRootNodesCount() const {
   if (EventLoop* loop = mainEventLoop()) {
@@ -189,6 +195,16 @@ void Application::unregisterAliveNode(Node* node) {
     throw std::runtime_error("Node not found in the alive nodes");
   }
   m_aliveNodes.erase(node);
+}
+
+bool Application::allEventLoopsIdle() const {
+  std::lock_guard<std::mutex> lock(m_eventLoopsMutex);
+  for (const auto& [threadId, loop] : m_eventLoops) {
+    if (loop->hasPendingWork()) {
+      return false;
+    }
+  }
+  return true;
 }
 
 }

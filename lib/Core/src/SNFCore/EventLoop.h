@@ -46,9 +46,10 @@ public:
   std::size_t pendingDeleteCount() const;
   std::size_t registeredNodesCount() const;
   std::size_t activeTimerCount() const;
+  bool hasPendingWork() const;
 
 private:
-  bool hasPendingWork() const;
+  bool hasPendingWorkLocked() const;
   bool popNextTask(Task& task);
   std::vector<Node*> takePendingDeletes();
 

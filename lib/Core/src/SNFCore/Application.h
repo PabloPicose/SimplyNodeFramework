@@ -71,6 +71,12 @@ class Application {
 
   size_t getEventLoopCount() const;
 
+  /**
+   * @brief Check if all EventLoops have no pending work (tasks, deletes, timers).
+   * @return True if all EventLoops are idle, false otherwise.
+   */
+  bool allEventLoopsIdle() const;
+
  private:
   void pushRootNodeDeleteLater(Node* node);
 

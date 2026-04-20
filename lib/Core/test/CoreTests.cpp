@@ -7,7 +7,7 @@
 #include "SNFCore/EventLoop.h"
 #include "SNFCore/Node.h"
 #include "SNFCore/NodePtr.h"
-// #include "SNFCore/Timer.h"
+#include "SNFCore/Timer.h"
 
 using namespace snf;
 
@@ -484,6 +484,120 @@ TEST_F(CoreFixture, deleteLaterOnChildAlsoDeletesGrandchild) {
   // Clean up parent
   parent->deleteLater();
   Application::instance()->run();
+}
+
+TEST_F(CoreFixture, eventLoopHasPendingWorkWithTask) {
+  EventLoop* loop = Application::instance()->getOrCreateCurrentThreadEventLoop();
+  ASSERT_NE(loop, nullptr);
+
+  EXPECT_FALSE(loop->hasPendingWork());
+
+  loop->post([]() {});
+
+  EXPECT_TRUE(loop->hasPendingWork());
+
+  loop->run();
+
+  EXPECT_FALSE(loop->hasPendingWork());
+}
+
+TEST_F(CoreFixture, eventLoopHasPendingWorkWithDelete) {
+  TestNode* node = new TestNode();
+  EventLoop* loop = node->ownerEventLoop();
+  ASSERT_NE(loop, nullptr);
+
+  EXPECT_FALSE(loop->hasPendingWork());
+
+  node->deleteLater();
+
+  EXPECT_TRUE(loop->hasPendingWork());
+
+  loop->run();
+
+  EXPECT_FALSE(loop->hasPendingWork());
+}
+
+TEST_F(CoreFixture, allEventLoopsIdleWhenNoWork) {
+  EXPECT_TRUE(Application::instance()->allEventLoopsIdle());
+}
+
+TEST_F(CoreFixture, allEventLoopsIdleReturnsFalseWhenWorkerHasWork) {
+  std::mutex mutex;
+  std::condition_variable cv;
+  bool posted = false;
+
+  std::thread worker([&]() {
+    EventLoop* loop = Application::instance()->getOrCreateCurrentThreadEventLoop();
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      loop->post([]() {});
+      posted = true;
+    }
+    cv.notify_one();
+    // Delay so the main thread can observe hasPendingWork() before the task drains
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    loop->run();
+  });
+
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    cv.wait(lock, [&]() { return posted; });
+  }
+
+  EXPECT_FALSE(Application::instance()->allEventLoopsIdle());
+
+  worker.join();
+
+  EXPECT_TRUE(Application::instance()->allEventLoopsIdle());
+}
+
+TEST_F(CoreFixture, quitStopsAllEventLoops) {
+  using namespace std::chrono_literals;
+
+  std::thread::id workerThreadId;
+  std::mutex mutex;
+  std::condition_variable cv;
+  bool workerReady = false;
+  bool runReturned = false;
+  std::chrono::steady_clock::duration runDuration{};
+
+  std::thread worker([&]() {
+    workerThreadId = std::this_thread::get_id();
+    EventLoop* loop = Application::instance()->getOrCreateCurrentThreadEventLoop();
+    ASSERT_NE(loop, nullptr);
+
+    // Keep the loop blocked on a future deadline so quit() must wake it.
+    Timer timer;
+    timer.setSingleShot(true);
+    timer.start(std::chrono::seconds(2));
+
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      workerReady = true;
+    }
+    cv.notify_one();
+
+    const auto startedAt = std::chrono::steady_clock::now();
+    loop->run();
+    runDuration = std::chrono::steady_clock::now() - startedAt;
+    runReturned = true;
+  });
+
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    cv.wait(lock, [&]() { return workerReady; });
+  }
+
+  // Wait until the worker has registered its EventLoop
+  while (Application::instance()->getEventLoopByThreadId(workerThreadId) == nullptr) {
+    std::this_thread::yield();
+  }
+
+  Application::instance()->quit();
+  worker.join();
+
+  EXPECT_TRUE(runReturned);
+  EXPECT_LT(runDuration, std::chrono::seconds(1));
 }
 
 int main(int argc, char** argv) {

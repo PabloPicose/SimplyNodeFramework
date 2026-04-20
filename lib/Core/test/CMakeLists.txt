@@ -10,3 +10,4 @@ target_link_libraries(SNFCoreTests
 )
 
 add_test(NAME SNFCoreTests COMMAND SNFCoreTests)
+set_tests_properties(SNFCoreTests PROPERTIES TIMEOUT 10)

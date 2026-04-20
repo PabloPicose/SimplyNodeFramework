@@ -68,9 +68,6 @@ TEST_F(TimerFixture, singleShotTimerFiresOnOwnerThread) {
   timer.timeout.connect([&]() {
     ++timeoutCount;
     callbackThread = std::this_thread::get_id();
-    EventLoop* loop = timer.ownerEventLoop();
-    ASSERT_NE(loop, nullptr);
-    loop->post([loop]() { loop->stop(); });
   });
 
   timer.start(15);
@@ -87,15 +84,20 @@ TEST_F(TimerFixture, repeatingTimerCanBeStoppedFromTimeout) {
   int timeoutCount = 0;
   timer.timeout.connect([&]() {
     ++timeoutCount;
-    if (timeoutCount < 3) {
-      return;
+    if (timeoutCount >= 3) {
+      timer.stop();
     }
-
-    timer.stop();
-    EventLoop* loop = timer.ownerEventLoop();
-    ASSERT_NE(loop, nullptr);
-    loop->post([loop]() { loop->stop(); });
   });
+
+  // Create a shutdown timer to stop the loop after enough time has passed
+  Timer shutdownTimer;
+  shutdownTimer.setSingleShot(true);
+  shutdownTimer.timeout.connect([&]() {
+    if (EventLoop* loop = shutdownTimer.ownerEventLoop()) {
+      loop->post([loop]() { loop->stop(); });
+    }
+  });
+  shutdownTimer.start(50);
 
   timer.start(5);
   app->run();
@@ -110,11 +112,8 @@ TEST_F(TimerFixture, disconnectedTimeoutDoesNotInvokeSlot) {
 
   int disconnectedCount = 0;
   Connection connection = timer.timeout.connect([&]() { ++disconnectedCount; });
-  timer.timeout.connect([&]() {
-    EventLoop* loop = timer.ownerEventLoop();
-    ASSERT_NE(loop, nullptr);
-    loop->post([loop]() { loop->stop(); });
-  });
+  int emitted = 0;
+  timer.timeout.connect([&]() { ++emitted; });
 
   connection.disconnect();
   EXPECT_FALSE(connection.connected());
@@ -123,6 +122,7 @@ TEST_F(TimerFixture, disconnectedTimeoutDoesNotInvokeSlot) {
   app->run();
 
   EXPECT_EQ(disconnectedCount, 0);
+  EXPECT_EQ(emitted, 1);
 }
 
 TEST_F(TimerFixture, staticSingleShotExecutesOnCreationThread) {
@@ -144,6 +144,7 @@ TEST_F(TimerFixture, queuedConnectionRunsOnReceiverThread) {
   std::mutex mutex;
   std::condition_variable cv;
   bool ready = false;
+  bool callbackExecuted = false;
   std::thread::id workerThreadId;
   NodePtr<TimeoutReceiver> receiver(nullptr);
 
@@ -160,6 +161,10 @@ TEST_F(TimerFixture, queuedConnectionRunsOnReceiverThread) {
     }
     cv.notify_one();
 
+    // Create a simple timer to keep the loop alive while we wait for the callback
+    Timer keepAliveTimer;
+    keepAliveTimer.start(100);  // 100ms timeout, longer than we need
+
     loop->run();
   });
 
@@ -173,6 +178,9 @@ TEST_F(TimerFixture, queuedConnectionRunsOnReceiverThread) {
   Signal<int> signal;
   signal.connect(receiver, &TimeoutReceiver::onValue, ConnectionType::Queued);
   signal.emit(42);
+
+  // Give the worker thread time to process the queued callback
+  std::this_thread::sleep_for(50ms);
 
   worker.join();
 
