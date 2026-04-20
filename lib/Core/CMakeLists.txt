@@ -13,6 +13,7 @@ target_sources(SNFCore
         "${SNFCORE_DIR}/NodePtr.cpp"
         "${SNFCORE_DIR}/Timer.cpp"
         "${SNFCORE_DIR}/EventLoop.cpp"
+        "${SNFCORE_DIR}/Connection.cpp"
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS "${SRC_DIR}"
@@ -22,6 +23,7 @@ target_sources(SNFCore
             "${SNFCORE_DIR}/NodePtr.h"
             "${SNFCORE_DIR}/Timer.h"
             "${SNFCORE_DIR}/EventLoop.h"
+            "${SNFCORE_DIR}/Connection.h"
 )
 
 target_include_directories(SNFCore

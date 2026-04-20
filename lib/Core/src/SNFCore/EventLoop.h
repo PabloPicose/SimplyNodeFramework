@@ -1,6 +1,8 @@
 #pragma once
 
+#include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <queue>
@@ -11,6 +13,7 @@
 
 namespace snf {
 class Node;
+class Timer;
 
 class EventLoop {
 public:
@@ -33,15 +36,31 @@ public:
   void run();
   void stop();
 
+  void scheduleTimer(Timer* timer,
+                     std::chrono::steady_clock::time_point deadline,
+                     std::uint64_t generation);
+  void cancelTimer(Timer* timer);
+
   bool isInThisThread() const noexcept;
 
   std::size_t pendingDeleteCount() const;
   std::size_t registeredNodesCount() const;
+  std::size_t activeTimerCount() const;
 
 private:
   bool hasPendingWork() const;
   bool popNextTask(Task& task);
   std::vector<Node*> takePendingDeletes();
+
+  struct TimerEntry {
+    Timer* timer = nullptr;
+    std::chrono::steady_clock::time_point deadline{};
+    std::uint64_t generation = 0;
+  };
+
+  bool hasDueTimerLocked(std::chrono::steady_clock::time_point now) const;
+  bool nextTimerDeadlineLocked(std::chrono::steady_clock::time_point& deadline) const;
+  std::vector<TimerEntry> takeDueTimers(std::chrono::steady_clock::time_point now);
 
 private:
   mutable std::mutex m_mutex;
@@ -50,6 +69,7 @@ private:
   std::vector<Node*> m_nodesToDelete;
   std::vector<Node*> m_nodes;
   std::vector<Node*> m_rootNodes;
+  std::vector<TimerEntry> m_timers;
   std::atomic_bool m_stop{false};
   const std::thread::id m_owner;
 };

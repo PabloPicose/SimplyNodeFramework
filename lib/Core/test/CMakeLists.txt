@@ -1,5 +1,6 @@
 add_executable(SNFCoreTests
     CoreTests.cpp
+    TimerTests.cpp
 )
 
 target_link_libraries(SNFCoreTests

@@ -2,6 +2,7 @@
 
 #include <SNFCore/Node.h>
 #include <SNFCore/NodePtr.h>
+#include <SNFCore/Timer.h>
 
 #include <algorithm>
 
@@ -91,6 +92,13 @@ void EventLoop::run() {
       }
     }
 
+    for (TimerEntry& timerEntry :
+         takeDueTimers(std::chrono::steady_clock::now())) {
+      if (timerEntry.timer) {
+        timerEntry.timer->dispatchTimeout(timerEntry.generation);
+      }
+    }
+
     // Tick all root nodes.
     std::vector<Node*> roots;
     {
@@ -106,16 +114,25 @@ void EventLoop::run() {
     if (m_stop.load()) {
       break;
     }
-    if (m_tasks.empty() && m_nodesToDelete.empty() && m_rootNodes.empty()) {
+    if (m_tasks.empty() && m_nodesToDelete.empty() && m_rootNodes.empty() &&
+        m_timers.empty()) {
       break;
     }
-    // If there are roots but no pending tasks/deletes, wait for something
-    // to be posted before running the root tick again.
-    if (m_rootNodes.empty()) {
-      break;
+
+    std::chrono::steady_clock::time_point nextDeadline;
+    if (nextTimerDeadlineLocked(nextDeadline)) {
+      m_cv.wait_until(lock, nextDeadline, [this] {
+        return !m_tasks.empty() || !m_nodesToDelete.empty() ||
+               hasDueTimerLocked(std::chrono::steady_clock::now()) ||
+               m_stop.load();
+      });
+      continue;
     }
+
     m_cv.wait(lock, [this] {
-      return !m_tasks.empty() || !m_nodesToDelete.empty() || m_stop.load();
+      return !m_tasks.empty() || !m_nodesToDelete.empty() ||
+             hasDueTimerLocked(std::chrono::steady_clock::now()) ||
+             m_stop.load();
     });
   }
 }
@@ -143,6 +160,40 @@ std::size_t EventLoop::registeredNodesCount() const {
   return m_nodes.size();
 }
 
+std::size_t EventLoop::activeTimerCount() const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  return m_timers.size();
+}
+
+void EventLoop::scheduleTimer(Timer* timer,
+                              std::chrono::steady_clock::time_point deadline,
+                              std::uint64_t generation) {
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_timers.erase(std::remove_if(m_timers.begin(),
+                                  m_timers.end(),
+                                  [timer](const TimerEntry& entry) {
+                                    return entry.timer == timer;
+                                  }),
+                   m_timers.end());
+    m_timers.push_back(TimerEntry{timer, deadline, generation});
+  }
+  m_cv.notify_one();
+}
+
+void EventLoop::cancelTimer(Timer* timer) {
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_timers.erase(std::remove_if(m_timers.begin(),
+                                  m_timers.end(),
+                                  [timer](const TimerEntry& entry) {
+                                    return entry.timer == timer;
+                                  }),
+                   m_timers.end());
+  }
+  m_cv.notify_one();
+}
+
 bool EventLoop::hasPendingWork() const {
   // Caller must not hold m_mutex.
   std::lock_guard<std::mutex> lock(m_mutex);
@@ -165,6 +216,45 @@ std::vector<Node*> EventLoop::takePendingDeletes() {
   std::vector<Node*> nodesToDelete;
   nodesToDelete.swap(m_nodesToDelete);
   return nodesToDelete;
+}
+
+bool EventLoop::hasDueTimerLocked(
+    std::chrono::steady_clock::time_point now) const {
+  return std::any_of(m_timers.begin(), m_timers.end(), [now](const TimerEntry& entry) {
+    return entry.deadline <= now;
+  });
+}
+
+bool EventLoop::nextTimerDeadlineLocked(
+    std::chrono::steady_clock::time_point& deadline) const {
+  if (m_timers.empty()) {
+    return false;
+  }
+
+  const auto it = std::min_element(
+      m_timers.begin(),
+      m_timers.end(),
+      [](const TimerEntry& lhs, const TimerEntry& rhs) {
+        return lhs.deadline < rhs.deadline;
+      });
+  deadline = it->deadline;
+  return true;
+}
+
+std::vector<EventLoop::TimerEntry> EventLoop::takeDueTimers(
+    std::chrono::steady_clock::time_point now) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  std::vector<TimerEntry> dueTimers;
+  auto it = m_timers.begin();
+  while (it != m_timers.end()) {
+    if (it->deadline <= now) {
+      dueTimers.push_back(*it);
+      it = m_timers.erase(it);
+      continue;
+    }
+    ++it;
+  }
+  return dueTimers;
 }
 
 } // namespace snf
