@@ -4,6 +4,7 @@
 #include <SNFCore/Node.h>
 
 #include <cstdint>
+#include <functional>
 #include <mutex>
 
 namespace snf {
@@ -68,12 +69,15 @@ private:
     std::uint32_t interestToNative(IOEventFlags flags) const;
     IOEventFlags nativeToInterest(std::uint32_t nativeEvents) const;
     void syncRegistration(bool wasActive);
+    bool isRegistrationCurrent(int fd, std::uint64_t generation) const;
+    std::function<void(std::uint32_t)> makeDispatchCallback(int fd, std::uint64_t generation);
 
 private:
     mutable std::mutex m_mutex;
     int m_fd = -1;
     IOEventFlags m_interest = IOEventFlags::Read;
     bool m_active = false;
+    std::uint64_t m_registrationGeneration = 0;
 };
 
 }  // namespace snf

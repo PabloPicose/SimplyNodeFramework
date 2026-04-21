@@ -34,7 +34,9 @@ void IOEvent::setDescriptor(int fd)
     }
 
     int previousFd = -1;
+    int currentFd = -1;
     bool wasActive = false;
+    std::uint64_t generation = 0;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         if (m_fd == fd) {
@@ -44,20 +46,20 @@ void IOEvent::setDescriptor(int fd)
         previousFd = m_fd;
         wasActive = m_active;
         m_fd = fd;
+        ++m_registrationGeneration;
+        generation = m_registrationGeneration;
+        currentFd = m_fd;
     }
 
     if (EventLoop* loop = ownerEventLoop(); loop) {
         if (wasActive && previousFd >= 0) {
             loop->unregisterIO(previousFd);
         }
-        if (wasActive && m_fd >= 0) {
-            loop->registerIO(m_fd,
+
+        if (wasActive && currentFd >= 0) {
+            loop->registerIO(currentFd,
                              interestToNative(interest()),
-                             [self = NodePtr<IOEvent>(this)](std::uint32_t events) {
-                                 if (self) {
-                                     self->handleEvents(events);
-                                 }
-                             });
+                             makeDispatchCallback(currentFd, generation));
         }
     }
 
@@ -119,6 +121,7 @@ void IOEvent::start()
         std::lock_guard<std::mutex> lock(m_mutex);
         if (! m_active) {
             m_active = true;
+            ++m_registrationGeneration;
             shouldStart = true;
         }
     }
@@ -149,7 +152,10 @@ void IOEvent::stop()
         std::lock_guard<std::mutex> lock(m_mutex);
         fd = m_fd;
         wasActive = m_active;
-        m_active = false;
+        if (m_active) {
+            m_active = false;
+            ++m_registrationGeneration;
+        }
     }
 
     if (wasActive && fd >= 0) {
@@ -218,26 +224,47 @@ IOEventFlags IOEvent::nativeToInterest(std::uint32_t nativeEvents) const
 void IOEvent::syncRegistration(bool wasActive)
 {
     if (EventLoop* loop = ownerEventLoop()) {
-        const int fd = descriptor();
+        int fd = -1;
+        IOEventFlags interestFlags = IOEventFlags::None;
+        bool active = false;
+        std::uint64_t generation = 0;
+
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            fd = m_fd;
+            interestFlags = m_interest;
+            active = m_active;
+            generation = m_registrationGeneration;
+        }
+
         if (fd < 0) {
             return;
         }
 
         if (wasActive && loop->hasIOWatch(fd)) {
-            loop->modifyIO(fd, interestToNative(interest()));
+            loop->modifyIO(fd, interestToNative(interestFlags));
             return;
         }
 
-        if (isActive()) {
-            loop->registerIO(fd,
-                             interestToNative(interest()),
-                             [self = NodePtr<IOEvent>(this)](std::uint32_t events) {
-                                 if (self) {
-                                     self->handleEvents(events);
-                                 }
-                             });
+        if (active) {
+            loop->registerIO(fd, interestToNative(interestFlags), makeDispatchCallback(fd, generation));
         }
     }
+}
+
+bool IOEvent::isRegistrationCurrent(int fd, std::uint64_t generation) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_fd == fd && m_registrationGeneration == generation && m_active;
+}
+
+std::function<void(std::uint32_t)> IOEvent::makeDispatchCallback(int fd, std::uint64_t generation)
+{
+    return [self = NodePtr<IOEvent>(this), fd, generation](std::uint32_t events) {
+        if (self && self->isRegistrationCurrent(fd, generation)) {
+            self->handleEvents(events);
+        }
+    };
 }
 
 }  // namespace snf

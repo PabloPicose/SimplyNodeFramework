@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <string>
 #include <thread>
@@ -152,4 +153,160 @@ TEST_F(TcpSocketFixture, defaultIsNonBlockingAndCanChangeMode)
     EXPECT_TRUE(socket.isBlocking());
     socket.setBlocking(false);
     EXPECT_FALSE(socket.isBlocking());
+}
+
+TEST_F(TcpSocketFixture, closeFromMultipleThreadsEmitsDisconnectedOnce)
+{
+    TcpSocket socket(false);
+
+    bool didConnect = false;
+    std::atomic<int> disconnectCount{0};
+    std::string errorMessage;
+
+    socket.connected.connect([&]() {
+        didConnect = true;
+
+        std::vector<std::thread> workers;
+        workers.reserve(4);
+        for (int i = 0; i < 4; ++i) {
+            workers.emplace_back([&socket]() {
+                for (int j = 0; j < 8; ++j) {
+                    socket.close();
+                }
+            });
+        }
+
+        for (std::thread& worker : workers) {
+            worker.join();
+        }
+    });
+
+    socket.disconnected.connect([&]() {
+        ++disconnectCount;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    socket.errorOccurred.connect([&](const std::string& error) {
+        errorMessage = error;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 3s);
+
+    socket.connectToHost("127.0.0.1", 12345);
+    app->run();
+
+    if (! didConnect && ! errorMessage.empty()) {
+        GTEST_SKIP() << "Echo server unavailable at 127.0.0.1:12345: " << errorMessage;
+    }
+
+    EXPECT_TRUE(errorMessage.empty());
+    EXPECT_TRUE(didConnect);
+    EXPECT_EQ(disconnectCount.load(), 1);
+}
+
+TEST_F(TcpSocketFixture, writeAndCloseFromDifferentThreadsDoesNotCrash)
+{
+    TcpSocket socket(false);
+
+    bool didConnect = false;
+    bool hasReceived = false;
+    std::string errorMessage;
+
+    socket.connected.connect([&]() {
+        didConnect = true;
+
+        std::thread writer([&socket]() {
+            for (int i = 0; i < 32; ++i) {
+                socket.write("ping");
+            }
+        });
+
+        std::thread closer([&socket]() { socket.close(); });
+
+        writer.join();
+        closer.join();
+    });
+
+    socket.readyRead.connect([&]() {
+        hasReceived = true;
+        (void) socket.readAll();
+    });
+
+    socket.disconnected.connect([&]() {
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    socket.errorOccurred.connect([&](const std::string& error) {
+        errorMessage = error;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 3s);
+
+    socket.connectToHost("127.0.0.1", 12345);
+    app->run();
+
+    if (! didConnect && ! errorMessage.empty()) {
+        GTEST_SKIP() << "Echo server unavailable at 127.0.0.1:12345: " << errorMessage;
+    }
+
+    EXPECT_TRUE(errorMessage.empty());
+    EXPECT_TRUE(didConnect);
+    EXPECT_TRUE(hasReceived || socket.state() == TcpSocketState::Disconnected);
+}
+
+TEST_F(TcpSocketFixture, directConnectedSlotCanWriteAndCloseSafely)
+{
+    TcpSocket socket(false);
+
+    bool didConnect = false;
+    std::atomic<int> disconnectCount{0};
+    std::string errorMessage;
+
+    // Default Signal::connect is Direct. This validates direct-slot reentrancy safety.
+    socket.connected.connect([&]() {
+        didConnect = true;
+        (void) socket.write("from-direct-slot");
+        socket.close();
+    });
+
+    socket.disconnected.connect([&]() {
+        ++disconnectCount;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    socket.errorOccurred.connect([&](const std::string& error) {
+        errorMessage = error;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 3s);
+
+    socket.connectToHost("127.0.0.1", 12345);
+    app->run();
+
+    if (! didConnect && ! errorMessage.empty()) {
+        GTEST_SKIP() << "Echo server unavailable at 127.0.0.1:12345: " << errorMessage;
+    }
+
+    EXPECT_TRUE(errorMessage.empty());
+    EXPECT_TRUE(didConnect);
+    EXPECT_EQ(disconnectCount.load(), 1);
+    EXPECT_EQ(socket.state(), TcpSocketState::Disconnected);
 }

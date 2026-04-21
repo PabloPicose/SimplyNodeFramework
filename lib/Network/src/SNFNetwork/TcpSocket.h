@@ -50,8 +50,14 @@ private:
     void handleWritable();
     void applyConnectedState();
     void applyDisconnectedState(bool emitSignal);
+    bool transitionToDisconnected(bool emitSignal);
     void failWithErrno(const std::string& prefix, int errorCode);
     void updateInterestForState();
+    void emitConnected();
+    void emitDisconnected();
+    void emitReadyRead();
+    void emitBytesWritten(std::size_t written);
+    void emitErrorOccurred(std::string message);
 
 private:
     mutable std::mutex m_mutex;

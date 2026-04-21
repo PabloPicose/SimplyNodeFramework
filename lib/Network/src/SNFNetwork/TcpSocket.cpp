@@ -133,20 +133,12 @@ void TcpSocket::close()
         return;
     }
 
-    const bool wasConnected = state() == TcpSocketState::Connected || state() == TcpSocketState::Connecting;
-
+    const bool shouldEmit = transitionToDisconnected(true);
     stop();
     setDescriptor(-1);
 
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_state = TcpSocketState::Disconnected;
-        m_readBuffer.clear();
-        m_writeBuffer.clear();
-    }
-
-    if (wasConnected) {
-        disconnected.emit();
+    if (shouldEmit) {
+        emitDisconnected();
     }
 }
 
@@ -157,21 +149,21 @@ std::size_t TcpSocket::write(const std::vector<std::uint8_t>& data)
     }
 
     if (EventLoop* loop = ownerEventLoop(); loop && ! loop->isInThisThread()) {
-        {
+        const bool canQueue = [this]() {
             std::lock_guard<std::mutex> lock(m_mutex);
-            if (m_state != TcpSocketState::Connected && m_state != TcpSocketState::Connecting) {
-                return 0;
-            }
-            m_writeBuffer.insert(m_writeBuffer.end(), data.begin(), data.end());
+            return m_state == TcpSocketState::Connected || m_state == TcpSocketState::Connecting;
+        }();
+
+        if (! canQueue) {
+            return 0;
         }
 
-        loop->post([self = NodePtr<TcpSocket>(this)]() {
+        const std::vector<std::uint8_t> pending = data;
+        loop->post([self = NodePtr<TcpSocket>(this), pending]() {
             if (self) {
-                self->flushPendingWrites();
-                self->updateInterestForState();
+                self->write(pending);
             }
         });
-
         return data.size();
     }
 
@@ -279,7 +271,7 @@ bool TcpSocket::flushPendingWrites()
                 m_writeBuffer.erase(m_writeBuffer.begin(),
                                     m_writeBuffer.begin() + static_cast<std::ptrdiff_t>(consumed));
             }
-            bytesWritten.emit(static_cast<std::size_t>(written));
+            emitBytesWritten(static_cast<std::size_t>(written));
             continue;
         }
 
@@ -334,7 +326,7 @@ void TcpSocket::handleReadable()
     }
 
     if (appended) {
-        readyRead.emit();
+        emitReadyRead();
     }
 }
 
@@ -353,7 +345,7 @@ void TcpSocket::applyConnectedState()
 
     updateInterestForState();
     start();
-    connected.emit();
+    emitConnected();
 
     flushPendingWrites();
     updateInterestForState();
@@ -361,20 +353,26 @@ void TcpSocket::applyConnectedState()
 
 void TcpSocket::applyDisconnectedState(bool emitSignal)
 {
-    const bool shouldEmit = emitSignal && (state() == TcpSocketState::Connected || state() == TcpSocketState::Connecting);
+    const bool shouldEmit = transitionToDisconnected(emitSignal);
 
     stop();
     setDescriptor(-1);
 
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_state = TcpSocketState::Disconnected;
-        m_writeBuffer.clear();
-    }
-
     if (shouldEmit) {
-        disconnected.emit();
+        emitDisconnected();
     }
+}
+
+bool TcpSocket::transitionToDisconnected(bool emitSignal)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    const bool wasConnected = m_state == TcpSocketState::Connected || m_state == TcpSocketState::Connecting;
+    m_state = TcpSocketState::Disconnected;
+    m_readBuffer.clear();
+    m_writeBuffer.clear();
+
+    return emitSignal && wasConnected;
 }
 
 void TcpSocket::failWithErrno(const std::string& prefix, int errorCode)
@@ -384,7 +382,7 @@ void TcpSocket::failWithErrno(const std::string& prefix, int errorCode)
         m_state = TcpSocketState::Error;
     }
 
-    errorOccurred.emit(prefix + ": " + std::strerror(errorCode));
+    emitErrorOccurred(prefix + ": " + std::strerror(errorCode));
 }
 
 void TcpSocket::updateInterestForState()
@@ -405,6 +403,76 @@ void TcpSocket::updateInterestForState()
     }
 
     setInterest(flags);
+}
+
+void TcpSocket::emitConnected()
+{
+    if (EventLoop* loop = ownerEventLoop()) {
+        loop->post([self = NodePtr<TcpSocket>(this)]() {
+            if (self) {
+                self->connected.emit();
+            }
+        });
+        return;
+    }
+
+    connected.emit();
+}
+
+void TcpSocket::emitDisconnected()
+{
+    if (EventLoop* loop = ownerEventLoop()) {
+        loop->post([self = NodePtr<TcpSocket>(this)]() {
+            if (self) {
+                self->disconnected.emit();
+            }
+        });
+        return;
+    }
+
+    disconnected.emit();
+}
+
+void TcpSocket::emitReadyRead()
+{
+    if (EventLoop* loop = ownerEventLoop()) {
+        loop->post([self = NodePtr<TcpSocket>(this)]() {
+            if (self) {
+                self->readyRead.emit();
+            }
+        });
+        return;
+    }
+
+    readyRead.emit();
+}
+
+void TcpSocket::emitBytesWritten(std::size_t written)
+{
+    if (EventLoop* loop = ownerEventLoop()) {
+        loop->post([self = NodePtr<TcpSocket>(this), written]() {
+            if (self) {
+                self->bytesWritten.emit(written);
+            }
+        });
+        return;
+    }
+
+    bytesWritten.emit(written);
+}
+
+void TcpSocket::emitErrorOccurred(std::string message)
+{
+    if (EventLoop* loop = ownerEventLoop()) {
+        loop->post([self = NodePtr<TcpSocket>(this), message = std::move(message)]() {
+            if (self) {
+                self->errorOccurred.emit(message);
+            }
+        });
+        return;
+    }
+
+    errorOccurred.emit(message);
 }
 
 }  // namespace snf
