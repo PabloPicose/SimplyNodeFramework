@@ -20,3 +20,5 @@ if (ENABLE_TEST)
 endif()
 
 add_subdirectory(lib/Core)
+add_subdirectory(lib/Network)
+

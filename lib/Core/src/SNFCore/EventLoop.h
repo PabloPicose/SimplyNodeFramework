@@ -2,17 +2,19 @@
 
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace snf {
 class Node;
 class Timer;
+class EpollPoller;
 
 class EventLoop
 {
@@ -39,6 +41,11 @@ public:
     void scheduleTimer(Timer* timer, std::chrono::steady_clock::time_point deadline, std::uint64_t generation);
     void cancelTimer(Timer* timer);
 
+    void registerIO(int fd, std::uint32_t events, std::function<void(std::uint32_t)> callback);
+    void modifyIO(int fd, std::uint32_t events);
+    void unregisterIO(int fd);
+    bool hasIOWatch(int fd) const;
+
     bool isInThisThread() const noexcept;
 
     std::size_t pendingDeleteCount() const;
@@ -61,14 +68,29 @@ private:
     bool nextTimerDeadlineLocked(std::chrono::steady_clock::time_point& deadline) const;
     std::vector<TimerEntry> takeDueTimers(std::chrono::steady_clock::time_point now);
 
+    struct IOWatchEntry {
+        std::uint32_t events = 0;
+        std::function<void(std::uint32_t)> callback;
+    };
+
+    struct ReadyIOEntry {
+        std::uint32_t events = 0;
+        std::function<void(std::uint32_t)> callback;
+    };
+
+    void waitForIO(int timeoutMs);
+    std::vector<ReadyIOEntry> takeReadyIO();
+
 private:
     mutable std::mutex m_mutex;
-    std::condition_variable m_cv;
     std::queue<Task> m_tasks;
     std::vector<Node*> m_nodesToDelete;
     std::vector<Node*> m_nodes;
     std::vector<Node*> m_rootNodes;
     std::vector<TimerEntry> m_timers;
+    std::unordered_map<int, IOWatchEntry> m_ioWatches;
+    std::vector<ReadyIOEntry> m_readyIO;
+    std::unique_ptr<EpollPoller> m_ioPoller;
     std::atomic_bool m_stop{false};
     const std::thread::id m_owner;
 };

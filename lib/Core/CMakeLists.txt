@@ -14,6 +14,7 @@ target_sources(SNFCore
         "${SNFCORE_DIR}/Timer.cpp"
         "${SNFCORE_DIR}/EventLoop.cpp"
         "${SNFCORE_DIR}/Connection.cpp"
+        "${SNFCORE_DIR}/EpollPoller.cpp"
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS "${SRC_DIR}"
@@ -24,6 +25,7 @@ target_sources(SNFCore
             "${SNFCORE_DIR}/Timer.h"
             "${SNFCORE_DIR}/EventLoop.h"
             "${SNFCORE_DIR}/Connection.h"
+            "${SNFCORE_DIR}/EpollPoller.h"
 )
 
 target_include_directories(SNFCore
