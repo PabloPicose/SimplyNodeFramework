@@ -1,5 +1,6 @@
 add_executable(SNFCoreTests
     CoreTests.cpp
+    ConnectionTests.cpp
     TimerTests.cpp
 )
 
