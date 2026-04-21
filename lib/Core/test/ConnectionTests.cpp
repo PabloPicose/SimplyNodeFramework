@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #include "SNFCore/Application.h"
 #include "SNFCore/Connection.h"
@@ -60,6 +61,33 @@ protected:
 
 private:
     int* m_externalInvocations = nullptr;
+};
+
+class OrderedReceiver final : public Node
+{
+public:
+    explicit OrderedReceiver(int expectedCount, Node* parent = nullptr)
+        : Node(parent), m_expectedCount(expectedCount)
+    {
+    }
+
+    void onValue(int value)
+    {
+        receivedValues.push_back(value);
+        if (static_cast<int>(receivedValues.size()) == m_expectedCount) {
+            if (EventLoop* loop = ownerEventLoop()) {
+                loop->post([loop]() { loop->stop(); });
+            }
+        }
+    }
+
+    std::vector<int> receivedValues;
+
+protected:
+    void update() override {}
+
+private:
+    int m_expectedCount = 0;
 };
 
 }  // namespace
@@ -164,6 +192,70 @@ TEST_F(ConnectionFixture, queuedConnectionSkipsReceiverMarkedToDelete)
     EXPECT_EQ(externalInvocations, 0);
     NodePtr<ValueReceiver> receiverPtr(receiver);
     EXPECT_FALSE(receiverPtr);
+}
+
+TEST_F(ConnectionFixture, directConnectionDeliversMultipleEmitsInOrder)
+{
+    Signal<int> signal;
+    std::vector<int> received;
+
+    signal.connect([&](int value) { received.push_back(value); });
+
+    signal.emit(1);
+    signal.emit(2);
+    signal.emit(3);
+    signal.emit(4);
+    signal.emit(5);
+
+    EXPECT_EQ(received, (std::vector<int>{1, 2, 3, 4, 5}));
+}
+
+TEST_F(ConnectionFixture, queuedConnectionDeliversMultipleEmitsInOrder)
+{
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool ready = false;
+    NodePtr<OrderedReceiver> receiver(nullptr);
+
+    std::thread worker([&]() {
+        EventLoop* loop = app->getOrCreateCurrentThreadEventLoop();
+        ASSERT_NE(loop, nullptr);
+
+        auto* node = new OrderedReceiver(5);
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            receiver = NodePtr<OrderedReceiver>(node);
+            ready = true;
+        }
+        cv.notify_one();
+
+        Timer keepAlive;
+        keepAlive.setSingleShot(true);
+        keepAlive.start(2s);
+
+        loop->run();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&]() { return ready; });
+    }
+
+    ASSERT_TRUE(receiver);
+
+    Signal<int> signal;
+    signal.connect(receiver, &OrderedReceiver::onValue, ConnectionType::Queued);
+
+    signal.emit(1);
+    signal.emit(2);
+    signal.emit(3);
+    signal.emit(4);
+    signal.emit(5);
+
+    worker.join();
+
+    ASSERT_TRUE(receiver);
+    EXPECT_EQ(receiver->receivedValues, (std::vector<int>{1, 2, 3, 4, 5}));
 }
 
 TEST_F(ConnectionFixture, multipleSlotsAllowPartialDisconnect)
