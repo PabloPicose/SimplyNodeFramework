@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.26)
 
-project(SimplyNodeFramework)
+project(SimplyNodeFramework VERSION 0.1.0 LANGUAGES CXX)
 
-option(ENABLE_TEST "Enable testing" ON)
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+option(SNF_ENABLE_TESTS "Enable tests for SimplyNodeFramework" ${PROJECT_IS_TOP_LEVEL})
 
-if (ENABLE_TEST)
+if (SNF_ENABLE_TESTS)
     include(CTest)
     include(FetchContent)
 
@@ -21,4 +21,42 @@ endif()
 
 add_subdirectory(lib/Core)
 add_subdirectory(lib/Network)
+
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SNFCoreConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/SNFCoreConfig.cmake"
+    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFCore"
+)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/SNFCoreConfigVersion.cmake"
+    VERSION "${PROJECT_VERSION}"
+    COMPATIBILITY SameMajorVersion
+)
+
+install(
+    FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/SNFCoreConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/SNFCoreConfigVersion.cmake"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFCore"
+)
+
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SNFNetworkConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/SNFNetworkConfig.cmake"
+    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFNetwork"
+)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/SNFNetworkConfigVersion.cmake"
+    VERSION "${PROJECT_VERSION}"
+    COMPATIBILITY SameMajorVersion
+)
+
+install(
+    FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/SNFNetworkConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/SNFNetworkConfigVersion.cmake"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFNetwork"
+)
 

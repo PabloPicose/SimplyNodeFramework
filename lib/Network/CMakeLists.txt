@@ -1,5 +1,4 @@
 cmake_minimum_required(VERSION 3.26)
-project(SNFNetwork)
 
 set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
@@ -25,15 +24,26 @@ target_link_libraries(SNFNetwork
 target_include_directories(SNFNetwork
     PUBLIC
         $<BUILD_INTERFACE:${SRC_DIR}>
-        $<INSTALL_INTERFACE:include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
+
+target_compile_features(SNFNetwork PUBLIC cxx_std_17)
+
+add_library(SNFNetwork::SNFNetwork ALIAS SNFNetwork)
 
 install(TARGETS SNFNetwork
-    ARCHIVE DESTINATION lib
-    FILE_SET HEADERS DESTINATION include
+    EXPORT SNFNetworkTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    FILE_SET HEADERS DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
-if (ENABLE_TEST)
+install(
+    EXPORT SNFNetworkTargets
+    FILE SNFNetworkTargets.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/SNFNetwork
+)
+
+if (SNF_ENABLE_TESTS)
     add_subdirectory(test)
 endif()
 

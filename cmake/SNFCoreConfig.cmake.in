@@ -1,0 +1,9 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/SNFCoreTargets.cmake")
+
+if (TARGET SNFCore AND NOT TARGET SNFCore::SNFCore)
+    add_library(SNFCore::SNFCore ALIAS SNFCore)
+endif()
+
+check_required_components(SNFCore)

@@ -1,0 +1,12 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(SNFCore CONFIG REQUIRED)
+
+include("${CMAKE_CURRENT_LIST_DIR}/SNFNetworkTargets.cmake")
+
+if (TARGET SNFNetwork AND NOT TARGET SNFNetwork::SNFNetwork)
+    add_library(SNFNetwork::SNFNetwork ALIAS SNFNetwork)
+endif()
+
+check_required_components(SNFNetwork)

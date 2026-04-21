@@ -1,5 +1,4 @@
 cmake_minimum_required(VERSION 3.26)
-project(SNFCore)
 
 set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(SNFCORE_DIR "${SRC_DIR}/SNFCore")
@@ -31,14 +30,25 @@ target_sources(SNFCore
 target_include_directories(SNFCore
     PUBLIC
         $<BUILD_INTERFACE:${SRC_DIR}>
-        $<INSTALL_INTERFACE:include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
+
+target_compile_features(SNFCore PUBLIC cxx_std_17)
+
+add_library(SNFCore::SNFCore ALIAS SNFCore)
 
 install(TARGETS SNFCore
-    ARCHIVE DESTINATION lib
-    FILE_SET HEADERS DESTINATION include
+    EXPORT SNFCoreTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    FILE_SET HEADERS DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
-if (ENABLE_TEST)
+install(
+    EXPORT SNFCoreTargets
+    FILE SNFCoreTargets.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/SNFCore
+)
+
+if (SNF_ENABLE_TESTS)
     add_subdirectory(test)
 endif()
