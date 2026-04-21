@@ -93,6 +93,56 @@ TEST_F(TcpServerFixture, listenOnEphemeralPortAndAcceptConnection)
     EXPECT_TRUE(didAccept);
 }
 
+TEST_F(TcpServerFixture, listenAndConnectUsingLocalhostHostName)
+{
+    TcpServer server;
+    TcpSocket client(false);
+
+    ASSERT_TRUE(server.listen("localhost", 0));
+    const std::uint16_t port = server.serverPort();
+    ASSERT_GT(port, 0);
+
+    bool didAccept = false;
+    std::string clientError;
+    std::string serverError;
+
+    server.newConnection.connect([&]() {
+        TcpSocket* incoming = server.nextPendingConnection();
+        ASSERT_NE(incoming, nullptr);
+        didAccept = true;
+        incoming->close();
+        delete incoming;
+
+        if (EventLoop* loop = server.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    client.errorOccurred.connect([&](const std::string& error) {
+        clientError = error;
+        if (EventLoop* loop = client.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    server.errorOccurred.connect([&](const std::string& error) {
+        serverError = error;
+        if (EventLoop* loop = server.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 2s);
+
+    client.connectToHost("localhost", port);
+    app->run();
+
+    EXPECT_TRUE(clientError.empty());
+    EXPECT_TRUE(serverError.empty());
+    EXPECT_TRUE(didAccept);
+}
+
 TEST_F(TcpServerFixture, nextPendingConnectionReturnsQueuedSockets)
 {
     TcpServer server;

@@ -2,9 +2,10 @@
 
 #include "SNFCore/EventLoop.h"
 #include "SNFCore/NodePtr.h"
+#include "SNFNetwork/HostAddress.h"
 
-#include <arpa/inet.h>
 #include <fcntl.h>
+#include <netinet/in.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -25,6 +26,14 @@ int setBlockingMode(int fd, bool blocking)
 
     const int nextFlags = blocking ? (flags & ~O_NONBLOCK) : (flags | O_NONBLOCK);
     return ::fcntl(fd, F_SETFL, nextFlags);
+}
+
+socklen_t socketAddressLength(const sockaddr_storage& address)
+{
+    if (address.ss_family == AF_INET6) {
+        return static_cast<socklen_t>(sizeof(sockaddr_in6));
+    }
+    return static_cast<socklen_t>(sizeof(sockaddr_in));
 }
 
 }  // namespace
@@ -84,47 +93,57 @@ void TcpSocket::connectToHost(const std::string& host, std::uint16_t port)
 
     close();
 
-    const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) {
-        failWithErrno("socket() failed", errno);
-        return;
-    }
-
-    if (setBlockingMode(fd, isBlocking()) < 0) {
-        const int errorCode = errno;
-        ::close(fd);
-        failWithErrno("Failed to configure socket mode", errorCode);
-        return;
-    }
-
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_port = htons(port);
-    if (::inet_pton(AF_INET, host.c_str(), &address.sin_addr) != 1) {
-        ::close(fd);
-        failWithErrno("Invalid IPv4 address", EINVAL);
-        return;
-    }
-
-    setDescriptor(fd);
-
-    const int result = ::connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address));
-    if (result == 0) {
-        applyConnectedState();
-        return;
-    }
-
-    if (errno == EINPROGRESS && ! isBlocking()) {
+    HostAddress target(host);
+    std::vector<sockaddr_storage> candidates;
+    std::string resolveError;
+    if (!target.resolve(port, HostResolveMode::Connect, candidates, resolveError)) {
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            m_state = TcpSocketState::Connecting;
+            m_state = TcpSocketState::Error;
         }
-        updateInterestForState();
-        start();
+        emitErrorOccurred("Failed to resolve host '" + host + "': " + resolveError);
         return;
     }
 
-    failWithErrno("connect() failed", errno);
+    int lastError = EHOSTUNREACH;
+
+    for (const sockaddr_storage& candidate : candidates) {
+        const sockaddr* address = reinterpret_cast<const sockaddr*>(&candidate);
+        const int fd = ::socket(address->sa_family, SOCK_STREAM, 0);
+        if (fd < 0) {
+            lastError = errno;
+            continue;
+        }
+
+        if (setBlockingMode(fd, isBlocking()) < 0) {
+            lastError = errno;
+            ::close(fd);
+            continue;
+        }
+
+        setDescriptor(fd);
+
+        const int result = ::connect(fd, address, socketAddressLength(candidate));
+        if (result == 0) {
+            applyConnectedState();
+            return;
+        }
+
+        if (errno == EINPROGRESS && !isBlocking()) {
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                m_state = TcpSocketState::Connecting;
+            }
+            updateInterestForState();
+            start();
+            return;
+        }
+
+        lastError = errno;
+        setDescriptor(-1);
+    }
+
+    failWithErrno("connect() failed", lastError);
     close();
 }
 

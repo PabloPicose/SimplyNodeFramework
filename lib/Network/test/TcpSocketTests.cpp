@@ -139,6 +139,37 @@ TEST_F(TcpSocketFixture, connectAndEchoRoundTrip)
     EXPECT_EQ(received, payload);
 }
 
+TEST_F(TcpSocketFixture, connectToLocalhostHostName)
+{
+    TcpSocket socket(false);
+
+    bool didConnect = false;
+    std::string errorMessage;
+
+    socket.connected.connect([&]() {
+        didConnect = true;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    socket.errorOccurred.connect([&](const std::string& error) {
+        errorMessage = error;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 2s);
+
+    socket.connectToHost("localhost", echoServerPort);
+    app->run();
+
+    EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
+    EXPECT_TRUE(didConnect);
+}
+
 TEST_F(TcpSocketFixture, closeEmitsDisconnected)
 {
     TcpSocket socket(false);

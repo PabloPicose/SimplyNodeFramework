@@ -2,8 +2,8 @@
 
 #include "SNFCore/EventLoop.h"
 #include "SNFCore/NodePtr.h"
+#include "SNFNetwork/HostAddress.h"
 
-#include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/epoll.h>
@@ -26,6 +26,14 @@ int setBlockingMode(int fd, bool blocking)
 
     const int nextFlags = blocking ? (flags & ~O_NONBLOCK) : (flags | O_NONBLOCK);
     return ::fcntl(fd, F_SETFL, nextFlags);
+}
+
+socklen_t socketAddressLength(const sockaddr_storage& address)
+{
+    if (address.ss_family == AF_INET6) {
+        return static_cast<socklen_t>(sizeof(sockaddr_in6));
+    }
+    return static_cast<socklen_t>(sizeof(sockaddr_in));
 }
 
 }  // namespace
@@ -63,52 +71,60 @@ bool TcpServer::listen(const std::string& address, std::uint16_t port)
 
     close();
 
-    const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    HostAddress hostAddress(address);
+    std::vector<sockaddr_storage> candidates;
+    std::string resolveError;
+    if (!hostAddress.resolve(port, HostResolveMode::Bind, candidates, resolveError)) {
+        emitErrorOccurred("Failed to resolve listen host '" + address + "': " + resolveError);
+        return false;
+    }
+
+    int fd = -1;
+    int lastError = EADDRNOTAVAIL;
+
+    for (const sockaddr_storage& candidate : candidates) {
+        const sockaddr* bindAddress = reinterpret_cast<const sockaddr*>(&candidate);
+        const int candidateFd = ::socket(bindAddress->sa_family, SOCK_STREAM, 0);
+        if (candidateFd < 0) {
+            lastError = errno;
+            continue;
+        }
+
+        int reuseAddress = 1;
+        if (::setsockopt(candidateFd, SOL_SOCKET, SO_REUSEADDR, &reuseAddress, sizeof(reuseAddress)) < 0) {
+            lastError = errno;
+            ::close(candidateFd);
+            continue;
+        }
+
+        if (setBlockingMode(candidateFd, false) < 0) {
+            lastError = errno;
+            ::close(candidateFd);
+            continue;
+        }
+
+        if (::bind(candidateFd, reinterpret_cast<const sockaddr*>(bindAddress), socketAddressLength(candidate)) < 0) {
+            lastError = errno;
+            ::close(candidateFd);
+            continue;
+        }
+
+        if (::listen(candidateFd, static_cast<int>(m_maxPendingConnections)) < 0) {
+            lastError = errno;
+            ::close(candidateFd);
+            continue;
+        }
+
+        fd = candidateFd;
+        break;
+    }
+
     if (fd < 0) {
-        failWithErrno("socket() failed", errno);
+        failWithErrno("listen() failed", lastError);
         return false;
     }
 
-    int reuseAddress = 1;
-    if (::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuseAddress, sizeof(reuseAddress)) < 0) {
-        const int errorCode = errno;
-        ::close(fd);
-        failWithErrno("setsockopt(SO_REUSEADDR) failed", errorCode);
-        return false;
-    }
-
-    if (setBlockingMode(fd, false) < 0) {
-        const int errorCode = errno;
-        ::close(fd);
-        failWithErrno("Failed to configure listening socket mode", errorCode);
-        return false;
-    }
-
-    sockaddr_in bindAddress{};
-    bindAddress.sin_family = AF_INET;
-    bindAddress.sin_port = htons(port);
-
-    if (::inet_pton(AF_INET, address.c_str(), &bindAddress.sin_addr) != 1) {
-        ::close(fd);
-        failWithErrno("Invalid IPv4 listen address", EINVAL);
-        return false;
-    }
-
-    if (::bind(fd, reinterpret_cast<sockaddr*>(&bindAddress), sizeof(bindAddress)) < 0) {
-        const int errorCode = errno;
-        ::close(fd);
-        failWithErrno("bind() failed", errorCode);
-        return false;
-    }
-
-    if (::listen(fd, static_cast<int>(m_maxPendingConnections)) < 0) {
-        const int errorCode = errno;
-        ::close(fd);
-        failWithErrno("listen() failed", errorCode);
-        return false;
-    }
-
-    sockaddr_in actualAddress{};
+    sockaddr_storage actualAddress{};
     socklen_t actualAddressLength = sizeof(actualAddress);
     if (::getsockname(fd, reinterpret_cast<sockaddr*>(&actualAddress), &actualAddressLength) < 0) {
         const int errorCode = errno;
@@ -120,10 +136,17 @@ bool TcpServer::listen(const std::string& address, std::uint16_t port)
     setDescriptor(fd);
     start();
 
+    std::uint16_t actualPort = 0;
+    if (actualAddress.ss_family == AF_INET) {
+        actualPort = ntohs(reinterpret_cast<const sockaddr_in*>(&actualAddress)->sin_port);
+    } else if (actualAddress.ss_family == AF_INET6) {
+        actualPort = ntohs(reinterpret_cast<const sockaddr_in6*>(&actualAddress)->sin6_port);
+    }
+
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_listening = true;
-        m_serverPort = ntohs(actualAddress.sin_port);
+        m_serverPort = actualPort;
         m_serverAddress = address;
     }
 
