@@ -1,5 +1,6 @@
 #pragma once
 
+#include "SNFNetwork/HostAddress.h"
 #include "SNFNetwork/IOEvent.h"
 
 #include <cstddef>
@@ -27,6 +28,7 @@ public:
     void setBlocking(bool blocking);
     bool isBlocking() const;
 
+    void connectToHost(const HostAddress& hostAddress, std::uint16_t port);
     void connectToHost(const std::string& host, std::uint16_t port);
     void close();
 

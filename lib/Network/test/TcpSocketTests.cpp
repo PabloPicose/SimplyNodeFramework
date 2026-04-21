@@ -129,7 +129,7 @@ TEST_F(TcpSocketFixture, connectAndEchoRoundTrip)
     Timer shutdown;
     armShutdown(shutdown, 2s);
 
-    socket.connectToHost("127.0.0.1", echoServerPort);
+    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
     app->run();
 
     EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
@@ -163,7 +163,7 @@ TEST_F(TcpSocketFixture, connectToLocalhostHostName)
     Timer shutdown;
     armShutdown(shutdown, 2s);
 
-    socket.connectToHost("localhost", echoServerPort);
+    socket.connectToHost(HostAddress("localhost"), echoServerPort);
     app->run();
 
     EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
@@ -200,7 +200,7 @@ TEST_F(TcpSocketFixture, closeEmitsDisconnected)
     Timer shutdown;
     armShutdown(shutdown, 2s);
 
-    socket.connectToHost("127.0.0.1", echoServerPort);
+    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
     app->run();
 
     EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
@@ -263,7 +263,7 @@ TEST_F(TcpSocketFixture, closeFromMultipleThreadsEmitsDisconnectedOnce)
     Timer shutdown;
     armShutdown(shutdown, 3s);
 
-    socket.connectToHost("127.0.0.1", echoServerPort);
+    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
     app->run();
 
     EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
@@ -315,7 +315,7 @@ TEST_F(TcpSocketFixture, writeAndCloseFromDifferentThreadsDoesNotCrash)
     Timer shutdown;
     armShutdown(shutdown, 3s);
 
-    socket.connectToHost("127.0.0.1", echoServerPort);
+    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
     app->run();
 
     EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
@@ -354,7 +354,7 @@ TEST_F(TcpSocketFixture, directConnectedSlotCanWriteAndCloseSafely)
     Timer shutdown;
     armShutdown(shutdown, 3s);
 
-    socket.connectToHost("127.0.0.1", echoServerPort);
+    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
     app->run();
 
     EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
@@ -384,7 +384,7 @@ TEST_F(TcpSocketFixture, connectionToInvalidHostEmitsError)
     Timer shutdown;
     armShutdown(shutdown, 2s);
     
-    socket.connectToHost("invalid-hostname-xyz-nonexistent.local", 80);
+    socket.connectToHost(HostAddress("invalid-hostname-xyz-nonexistent.local"), 80);
     app->run();
     
     EXPECT_FALSE(didConnect);
@@ -413,7 +413,7 @@ TEST_F(TcpSocketFixture, writeToClosedSocketHandledSafely)
     Timer shutdown;
     armShutdown(shutdown, 2s);
     
-    socket.connectToHost("127.0.0.1", echoServerPort);
+    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
     app->run();
     
     const std::size_t written = socket.write("test-data");
@@ -445,7 +445,7 @@ TEST_F(TcpSocketFixture, closeDuringConnectingState)
     Timer shutdown;
     armShutdown(shutdown, 1s);
     
-    socket.connectToHost("127.0.0.1", echoServerPort);
+    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
     socket.close();
     
     app->run();
@@ -479,7 +479,7 @@ TEST_F(TcpSocketFixture, reconnectAfterDisconnect)
         if (disconnectCount == 1) {
             if (EventLoop* loop = socket.ownerEventLoop()) {
                 loop->post([&socket, port]() {
-                    socket.connectToHost("127.0.0.1", port);
+                    socket.connectToHost(HostAddress("127.0.0.1"), port);
                 });
             }
         }
@@ -490,7 +490,7 @@ TEST_F(TcpSocketFixture, reconnectAfterDisconnect)
     Timer shutdown;
     armShutdown(shutdown, 3s);
     
-    socket.connectToHost("127.0.0.1", echoServerPort);
+    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
     app->run();
     
     EXPECT_TRUE(errorMessage.empty());
@@ -535,7 +535,7 @@ TEST_F(TcpSocketFixture, largeDataTransferStreaming)
     Timer shutdown;
     armShutdown(shutdown, 10s);
     
-    socket.connectToHost("127.0.0.1", echoServerPort);
+    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
     app->run();
     
     EXPECT_TRUE(errorMessage.empty());
@@ -570,7 +570,7 @@ TEST_F(TcpSocketFixture, socketStateConsistency)
     Timer shutdown;
     armShutdown(shutdown, 2s);
     
-    socket.connectToHost("127.0.0.1", echoServerPort);
+    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
     app->run();
     
     EXPECT_TRUE(didConnect);

@@ -80,12 +80,12 @@ bool TcpSocket::isBlocking() const
     return m_blocking;
 }
 
-void TcpSocket::connectToHost(const std::string& host, std::uint16_t port)
+void TcpSocket::connectToHost(const HostAddress& hostAddress, std::uint16_t port)
 {
     if (EventLoop* loop = ownerEventLoop(); loop && ! loop->isInThisThread()) {
-        loop->post([self = NodePtr<TcpSocket>(this), host, port]() {
+        loop->post([self = NodePtr<TcpSocket>(this), hostAddress, port]() {
             if (self) {
-                self->connectToHost(host, port);
+                self->connectToHost(hostAddress, port);
             }
         });
         return;
@@ -93,15 +93,14 @@ void TcpSocket::connectToHost(const std::string& host, std::uint16_t port)
 
     close();
 
-    HostAddress target(host);
     std::vector<sockaddr_storage> candidates;
     std::string resolveError;
-    if (!target.resolve(port, HostResolveMode::Connect, candidates, resolveError)) {
+    if (!hostAddress.resolve(port, HostResolveMode::Connect, candidates, resolveError)) {
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_state = TcpSocketState::Error;
         }
-        emitErrorOccurred("Failed to resolve host '" + host + "': " + resolveError);
+        emitErrorOccurred("Failed to resolve host '" + hostAddress.host() + "': " + resolveError);
         return;
     }
 
@@ -145,6 +144,11 @@ void TcpSocket::connectToHost(const std::string& host, std::uint16_t port)
 
     failWithErrno("connect() failed", lastError);
     close();
+}
+
+void TcpSocket::connectToHost(const std::string& host, std::uint16_t port)
+{
+    connectToHost(HostAddress(host), port);
 }
 
 void TcpSocket::close()

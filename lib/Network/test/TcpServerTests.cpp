@@ -85,7 +85,7 @@ TEST_F(TcpServerFixture, listenOnEphemeralPortAndAcceptConnection)
     Timer shutdown;
     armShutdown(shutdown, 2s);
 
-    client.connectToHost("127.0.0.1", port);
+    client.connectToHost(HostAddress("127.0.0.1"), port);
     app->run();
 
     EXPECT_TRUE(clientError.empty());
@@ -135,7 +135,7 @@ TEST_F(TcpServerFixture, listenAndConnectUsingLocalhostHostName)
     Timer shutdown;
     armShutdown(shutdown, 2s);
 
-    client.connectToHost("localhost", port);
+    client.connectToHost(HostAddress("localhost"), port);
     app->run();
 
     EXPECT_TRUE(clientError.empty());
@@ -175,8 +175,8 @@ TEST_F(TcpServerFixture, nextPendingConnectionReturnsQueuedSockets)
     Timer shutdown;
     armShutdown(shutdown, 3s);
 
-    clientA.connectToHost("127.0.0.1", port);
-    clientB.connectToHost("127.0.0.1", port);
+    clientA.connectToHost(HostAddress("127.0.0.1"), port);
+    clientB.connectToHost(HostAddress("127.0.0.1"), port);
 
     app->run();
 
@@ -255,7 +255,7 @@ TEST_F(TcpServerFixture, acceptedSocketCanEchoToClient)
     Timer shutdown;
     armShutdown(shutdown, 3s);
 
-    client.connectToHost("127.0.0.1", port);
+    client.connectToHost(HostAddress("127.0.0.1"), port);
     app->run();
 
     EXPECT_TRUE(clientError.empty());
@@ -299,7 +299,7 @@ TEST_F(TcpServerFixture, queueOverflowBehavior)
     for (int i = 0; i < 5; ++i) {
         auto client = new TcpSocket(false);
         clients.push_back(client);
-        client->connectToHost("127.0.0.1", port);
+        client->connectToHost(HostAddress("127.0.0.1"), port);
     }
 
     app->run();
@@ -355,7 +355,7 @@ TEST_F(TcpServerFixture, serverCloseWithPendingSockets)
     for (int i = 0; i < 5; ++i) {
         auto client = new TcpSocket(false);
         clients.push_back(client);
-        client->connectToHost("127.0.0.1", port);
+        client->connectToHost(HostAddress("127.0.0.1"), port);
     }
 
     app->run();
@@ -522,7 +522,7 @@ TEST_F(TcpServerFixture, largeDataTransferIntegrity)
     Timer shutdown;
     armShutdown(shutdown, 5s);
 
-    client.connectToHost("127.0.0.1", port);
+    client.connectToHost(HostAddress("127.0.0.1"), port);
     app->run();
 
     EXPECT_TRUE(clientError.empty()) << "Client error: " << clientError;
@@ -567,7 +567,7 @@ TEST_F(TcpServerFixture, closeDuringAcceptStorm)
     for (int i = 0; i < 20; ++i) {
         auto client = new TcpSocket(false);
         clients.push_back(client);
-        client->connectToHost("127.0.0.1", port);
+        client->connectToHost(HostAddress("127.0.0.1"), port);
     }
 
     // Schedule server close after 100ms
