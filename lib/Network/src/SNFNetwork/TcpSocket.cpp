@@ -34,6 +34,12 @@ TcpSocket::TcpSocket(bool blocking, Node* parent) : IOEvent(parent), m_blocking(
     setInterest(IOEventFlags::Read | IOEventFlags::Error | IOEventFlags::HangUp);
 }
 
+TcpSocket::TcpSocket(int adoptedFd, bool blocking, Node* parent) : IOEvent(parent), m_blocking(blocking)
+{
+    setInterest(IOEventFlags::Read | IOEventFlags::Error | IOEventFlags::HangUp);
+    adoptConnectedDescriptor(adoptedFd);
+}
+
 TcpSocket::~TcpSocket() { close(); }
 
 void TcpSocket::setBlocking(bool blocking)
@@ -473,6 +479,31 @@ void TcpSocket::emitErrorOccurred(std::string message)
     }
 
     errorOccurred.emit(message);
+}
+
+void TcpSocket::adoptConnectedDescriptor(int fd)
+{
+    if (fd < 0) {
+        failWithErrno("Invalid adopted descriptor", EINVAL);
+        return;
+    }
+
+    if (setBlockingMode(fd, isBlocking()) < 0) {
+        const int errorCode = errno;
+        ::close(fd);
+        failWithErrno("Failed to configure adopted socket mode", errorCode);
+        return;
+    }
+
+    setDescriptor(fd);
+
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_state = TcpSocketState::Connected;
+    }
+
+    updateInterestForState();
+    start();
 }
 
 }  // namespace snf

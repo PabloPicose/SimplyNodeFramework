@@ -21,6 +21,7 @@ class TcpSocket final : public IOEvent
 {
 public:
     explicit TcpSocket(bool blocking = false, Node* parent = nullptr);
+    explicit TcpSocket(int adoptedFd, bool blocking = false, Node* parent = nullptr);
     ~TcpSocket() override;
 
     void setBlocking(bool blocking);
@@ -58,6 +59,7 @@ private:
     void emitReadyRead();
     void emitBytesWritten(std::size_t written);
     void emitErrorOccurred(std::string message);
+    void adoptConnectedDescriptor(int fd);
 
 private:
     mutable std::mutex m_mutex;
