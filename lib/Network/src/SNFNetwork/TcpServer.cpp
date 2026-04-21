@@ -58,7 +58,7 @@ TcpServer::~TcpServer()
     }
 }
 
-bool TcpServer::listen(const std::string& address, std::uint16_t port)
+bool TcpServer::listen(const HostAddress& address, std::uint16_t port)
 {
     if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
         loop->post([self = NodePtr<TcpServer>(this), address, port]() {
@@ -71,11 +71,10 @@ bool TcpServer::listen(const std::string& address, std::uint16_t port)
 
     close();
 
-    HostAddress hostAddress(address);
     std::vector<sockaddr_storage> candidates;
     std::string resolveError;
-    if (!hostAddress.resolve(port, HostResolveMode::Bind, candidates, resolveError)) {
-        emitErrorOccurred("Failed to resolve listen host '" + address + "': " + resolveError);
+    if (!address.resolve(port, HostResolveMode::Bind, candidates, resolveError)) {
+        emitErrorOccurred("Failed to resolve listen host '" + address.host() + "': " + resolveError);
         return false;
     }
 
@@ -147,10 +146,15 @@ bool TcpServer::listen(const std::string& address, std::uint16_t port)
         std::lock_guard<std::mutex> lock(m_mutex);
         m_listening = true;
         m_serverPort = actualPort;
-        m_serverAddress = address;
+        m_serverAddress = address.host();
     }
 
     return true;
+}
+
+bool TcpServer::listen(const std::string& address, std::uint16_t port)
+{
+    return listen(HostAddress(address), port);
 }
 
 void TcpServer::close()

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "SNFNetwork/HostAddress.h"
 #include "SNFNetwork/IOEvent.h"
 #include "SNFNetwork/TcpSocket.h"
 
@@ -16,6 +17,7 @@ public:
     explicit TcpServer(Node* parent = nullptr);
     ~TcpServer() override;
 
+    bool listen(const HostAddress& address, std::uint16_t port);
     bool listen(const std::string& address, std::uint16_t port);
     void close();
 

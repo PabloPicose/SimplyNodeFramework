@@ -26,7 +26,7 @@ public:
         
         // Create embedded echo server on ephemeral port
         echoServer = new TcpServer();
-        if (!echoServer->listen("127.0.0.1", 0)) {
+        if (!echoServer->listen(HostAddress::LocalHost, 0)) {
             FAIL() << "Failed to start echo server";
             return;
         }
@@ -129,7 +129,7 @@ TEST_F(TcpSocketFixture, connectAndEchoRoundTrip)
     Timer shutdown;
     armShutdown(shutdown, 2s);
 
-    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
+    socket.connectToHost(HostAddress::LocalHost, echoServerPort);
     app->run();
 
     EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
@@ -200,7 +200,7 @@ TEST_F(TcpSocketFixture, closeEmitsDisconnected)
     Timer shutdown;
     armShutdown(shutdown, 2s);
 
-    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
+    socket.connectToHost(HostAddress::LocalHost, echoServerPort);
     app->run();
 
     EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
@@ -263,7 +263,7 @@ TEST_F(TcpSocketFixture, closeFromMultipleThreadsEmitsDisconnectedOnce)
     Timer shutdown;
     armShutdown(shutdown, 3s);
 
-    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
+    socket.connectToHost(HostAddress::LocalHost, echoServerPort);
     app->run();
 
     EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
@@ -315,7 +315,7 @@ TEST_F(TcpSocketFixture, writeAndCloseFromDifferentThreadsDoesNotCrash)
     Timer shutdown;
     armShutdown(shutdown, 3s);
 
-    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
+    socket.connectToHost(HostAddress::LocalHost, echoServerPort);
     app->run();
 
     EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
@@ -354,7 +354,7 @@ TEST_F(TcpSocketFixture, directConnectedSlotCanWriteAndCloseSafely)
     Timer shutdown;
     armShutdown(shutdown, 3s);
 
-    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
+    socket.connectToHost(HostAddress::LocalHost, echoServerPort);
     app->run();
 
     EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
@@ -413,7 +413,7 @@ TEST_F(TcpSocketFixture, writeToClosedSocketHandledSafely)
     Timer shutdown;
     armShutdown(shutdown, 2s);
     
-    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
+    socket.connectToHost(HostAddress::LocalHost, echoServerPort);
     app->run();
     
     const std::size_t written = socket.write("test-data");
@@ -445,7 +445,7 @@ TEST_F(TcpSocketFixture, closeDuringConnectingState)
     Timer shutdown;
     armShutdown(shutdown, 1s);
     
-    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
+    socket.connectToHost(HostAddress::LocalHost, echoServerPort);
     socket.close();
     
     app->run();
@@ -479,7 +479,7 @@ TEST_F(TcpSocketFixture, reconnectAfterDisconnect)
         if (disconnectCount == 1) {
             if (EventLoop* loop = socket.ownerEventLoop()) {
                 loop->post([&socket, port]() {
-                    socket.connectToHost(HostAddress("127.0.0.1"), port);
+                    socket.connectToHost(HostAddress::LocalHost, port);
                 });
             }
         }
@@ -490,7 +490,7 @@ TEST_F(TcpSocketFixture, reconnectAfterDisconnect)
     Timer shutdown;
     armShutdown(shutdown, 3s);
     
-    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
+    socket.connectToHost(HostAddress::LocalHost, echoServerPort);
     app->run();
     
     EXPECT_TRUE(errorMessage.empty());
@@ -535,7 +535,7 @@ TEST_F(TcpSocketFixture, largeDataTransferStreaming)
     Timer shutdown;
     armShutdown(shutdown, 10s);
     
-    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
+    socket.connectToHost(HostAddress::LocalHost, echoServerPort);
     app->run();
     
     EXPECT_TRUE(errorMessage.empty());
@@ -570,7 +570,7 @@ TEST_F(TcpSocketFixture, socketStateConsistency)
     Timer shutdown;
     armShutdown(shutdown, 2s);
     
-    socket.connectToHost(HostAddress("127.0.0.1"), echoServerPort);
+    socket.connectToHost(HostAddress::LocalHost, echoServerPort);
     app->run();
     
     EXPECT_TRUE(didConnect);

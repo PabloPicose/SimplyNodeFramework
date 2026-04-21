@@ -18,6 +18,11 @@ class HostAddress final
 public:
     explicit HostAddress(std::string host = {});
 
+    static const HostAddress LocalHost;
+    static const HostAddress LocalHostIPv6;
+    static const HostAddress AnyIPv4;
+    static const HostAddress AnyIPv6;
+
     const std::string& host() const;
     bool isEmpty() const;
 

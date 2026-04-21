@@ -7,6 +7,11 @@
 
 namespace snf {
 
+const HostAddress HostAddress::LocalHost{"127.0.0.1"};
+const HostAddress HostAddress::LocalHostIPv6{"::1"};
+const HostAddress HostAddress::AnyIPv4{"0.0.0.0"};
+const HostAddress HostAddress::AnyIPv6{"::"};
+
 HostAddress::HostAddress(std::string host) : m_host(std::move(host)) {}
 
 const std::string& HostAddress::host() const { return m_host; }

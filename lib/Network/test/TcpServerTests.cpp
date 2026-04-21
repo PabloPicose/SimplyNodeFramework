@@ -48,7 +48,7 @@ TEST_F(TcpServerFixture, listenOnEphemeralPortAndAcceptConnection)
     TcpServer server;
     TcpSocket client(false);
 
-    ASSERT_TRUE(server.listen("127.0.0.1", 0));
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
     const std::uint16_t port = server.serverPort();
     ASSERT_GT(port, 0);
 
@@ -85,7 +85,7 @@ TEST_F(TcpServerFixture, listenOnEphemeralPortAndAcceptConnection)
     Timer shutdown;
     armShutdown(shutdown, 2s);
 
-    client.connectToHost(HostAddress("127.0.0.1"), port);
+    client.connectToHost(HostAddress::LocalHost, port);
     app->run();
 
     EXPECT_TRUE(clientError.empty());
@@ -98,7 +98,7 @@ TEST_F(TcpServerFixture, listenAndConnectUsingLocalhostHostName)
     TcpServer server;
     TcpSocket client(false);
 
-    ASSERT_TRUE(server.listen("localhost", 0));
+    ASSERT_TRUE(server.listen(HostAddress("localhost"), 0));
     const std::uint16_t port = server.serverPort();
     ASSERT_GT(port, 0);
 
@@ -149,7 +149,7 @@ TEST_F(TcpServerFixture, nextPendingConnectionReturnsQueuedSockets)
     TcpSocket clientA(false);
     TcpSocket clientB(false);
 
-    ASSERT_TRUE(server.listen("127.0.0.1", 0));
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
     const std::uint16_t port = server.serverPort();
     ASSERT_GT(port, 0);
 
@@ -175,8 +175,8 @@ TEST_F(TcpServerFixture, nextPendingConnectionReturnsQueuedSockets)
     Timer shutdown;
     armShutdown(shutdown, 3s);
 
-    clientA.connectToHost(HostAddress("127.0.0.1"), port);
-    clientB.connectToHost(HostAddress("127.0.0.1"), port);
+    clientA.connectToHost(HostAddress::LocalHost, port);
+    clientB.connectToHost(HostAddress::LocalHost, port);
 
     app->run();
 
@@ -206,7 +206,7 @@ TEST_F(TcpServerFixture, acceptedSocketCanEchoToClient)
     TcpServer server;
     TcpSocket client(false);
 
-    ASSERT_TRUE(server.listen("127.0.0.1", 0));
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
     const std::uint16_t port = server.serverPort();
     ASSERT_GT(port, 0);
 
@@ -255,7 +255,7 @@ TEST_F(TcpServerFixture, acceptedSocketCanEchoToClient)
     Timer shutdown;
     armShutdown(shutdown, 3s);
 
-    client.connectToHost(HostAddress("127.0.0.1"), port);
+    client.connectToHost(HostAddress::LocalHost, port);
     app->run();
 
     EXPECT_TRUE(clientError.empty());
@@ -273,7 +273,7 @@ TEST_F(TcpServerFixture, queueOverflowBehavior)
     TcpServer server;
     server.setMaxPendingConnections(2);
     
-    ASSERT_TRUE(server.listen("127.0.0.1", 0));
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
     const std::uint16_t port = server.serverPort();
     ASSERT_GT(port, 0);
 
@@ -299,7 +299,7 @@ TEST_F(TcpServerFixture, queueOverflowBehavior)
     for (int i = 0; i < 5; ++i) {
         auto client = new TcpSocket(false);
         clients.push_back(client);
-        client->connectToHost(HostAddress("127.0.0.1"), port);
+        client->connectToHost(HostAddress::LocalHost, port);
     }
 
     app->run();
@@ -328,7 +328,7 @@ TEST_F(TcpServerFixture, queueOverflowBehavior)
 TEST_F(TcpServerFixture, serverCloseWithPendingSockets)
 {
     TcpServer server;
-    ASSERT_TRUE(server.listen("127.0.0.1", 0));
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
     const std::uint16_t port = server.serverPort();
     ASSERT_GT(port, 0);
 
@@ -355,7 +355,7 @@ TEST_F(TcpServerFixture, serverCloseWithPendingSockets)
     for (int i = 0; i < 5; ++i) {
         auto client = new TcpSocket(false);
         clients.push_back(client);
-        client->connectToHost(HostAddress("127.0.0.1"), port);
+        client->connectToHost(HostAddress::LocalHost, port);
     }
 
     app->run();
@@ -387,7 +387,7 @@ TEST_F(TcpServerFixture, listenOnBusyPort)
     TcpServer server1;
     TcpServer server2;
 
-    ASSERT_TRUE(server1.listen("127.0.0.1", 0));
+    ASSERT_TRUE(server1.listen(HostAddress::LocalHost, 0));
     const std::uint16_t port = server1.serverPort();
     ASSERT_GT(port, 0);
 
@@ -403,7 +403,7 @@ TEST_F(TcpServerFixture, listenOnBusyPort)
     });
 
     // Try to bind second server to same port (should fail)
-    const bool listenResult = server2.listen("127.0.0.1", port);
+    const bool listenResult = server2.listen(HostAddress::LocalHost, port);
 
     // Even if listen() fails, give event loop a cycle to emit error signal
     if (!listenResult && !server2ErrorEmitted) {
@@ -447,7 +447,7 @@ TEST_F(TcpServerFixture, invalidIPv4Address)
     EXPECT_FALSE(errorMessage.empty());
 
     // Verify can retry with valid address
-    const bool retryResult = server.listen("127.0.0.1", 0);
+    const bool retryResult = server.listen(HostAddress::LocalHost, 0);
     EXPECT_TRUE(retryResult);
     EXPECT_TRUE(server.isListening());
 }
@@ -457,7 +457,7 @@ TEST_F(TcpServerFixture, largeDataTransferIntegrity)
     TcpServer server;
     TcpSocket client(false);
 
-    ASSERT_TRUE(server.listen("127.0.0.1", 0));
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
     const std::uint16_t port = server.serverPort();
     ASSERT_GT(port, 0);
 
@@ -522,7 +522,7 @@ TEST_F(TcpServerFixture, largeDataTransferIntegrity)
     Timer shutdown;
     armShutdown(shutdown, 5s);
 
-    client.connectToHost(HostAddress("127.0.0.1"), port);
+    client.connectToHost(HostAddress::LocalHost, port);
     app->run();
 
     EXPECT_TRUE(clientError.empty()) << "Client error: " << clientError;
@@ -539,7 +539,7 @@ TEST_F(TcpServerFixture, largeDataTransferIntegrity)
 TEST_F(TcpServerFixture, closeDuringAcceptStorm)
 {
     TcpServer server;
-    ASSERT_TRUE(server.listen("127.0.0.1", 0));
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
     const std::uint16_t port = server.serverPort();
     ASSERT_GT(port, 0);
 
@@ -567,7 +567,7 @@ TEST_F(TcpServerFixture, closeDuringAcceptStorm)
     for (int i = 0; i < 20; ++i) {
         auto client = new TcpSocket(false);
         clients.push_back(client);
-        client->connectToHost(HostAddress("127.0.0.1"), port);
+        client->connectToHost(HostAddress::LocalHost, port);
     }
 
     // Schedule server close after 100ms
