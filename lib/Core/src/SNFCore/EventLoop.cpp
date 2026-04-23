@@ -39,7 +39,9 @@ EventLoop::~EventLoop()
         return m_rootNodes;
     }();
     for (Node* node : roots) {
-        delete node;
+        if (snf::NodePtr nodePtr(node); nodePtr) {
+            delete node;
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <csignal>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -15,6 +16,36 @@ using namespace snf;
 using namespace std::chrono_literals;
 
 namespace {
+
+Application* gSigintTargetApp = nullptr;
+
+void testSigintHandler(int)
+{
+    if (gSigintTargetApp != nullptr) {
+        gSigintTargetApp->quit();
+    }
+}
+
+class ScopedSigintHandler
+{
+public:
+    explicit ScopedSigintHandler(Application* app)
+        : m_previousHandler(std::signal(SIGINT, testSigintHandler)), m_previousApp(gSigintTargetApp)
+    {
+        gSigintTargetApp = app;
+    }
+
+    ~ScopedSigintHandler()
+    {
+        gSigintTargetApp = m_previousApp;
+        std::signal(SIGINT, m_previousHandler);
+    }
+
+private:
+    using SignalHandler = void (*)(int);
+    SignalHandler m_previousHandler = nullptr;
+    Application* m_previousApp = nullptr;
+};
 
 class TcpServerFixture : public ::testing::Test
 {
@@ -585,4 +616,63 @@ TEST_F(TcpServerFixture, closeDuringAcceptStorm)
         client->close();
         delete client;
     }
+}
+
+TEST_F(TcpServerFixture, quitApplicationWithSigintAfterClientConnect)
+{
+    TcpServer server;
+    TcpSocket client(false);
+
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+    const std::uint16_t port = server.serverPort();
+    ASSERT_GT(port, 0);
+
+    bool didAccept = false;
+    bool didTriggerSigint = false;
+    std::string clientError;
+    std::string serverError;
+
+    TcpSocket* accepted = nullptr;
+    ScopedSigintHandler sigintGuard(app);
+
+    server.newConnection.connect([&]() {
+        accepted = server.nextPendingConnection();
+        ASSERT_NE(accepted, nullptr);
+        didAccept = true;
+
+        didTriggerSigint = true;
+        std::raise(SIGINT);
+    });
+
+    client.errorOccurred.connect([&](const std::string& error) {
+        clientError = error;
+        if (EventLoop* loop = client.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    server.errorOccurred.connect([&](const std::string& error) {
+        serverError = error;
+        if (EventLoop* loop = server.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 2s);
+
+    client.connectToHost(HostAddress::LocalHost, port);
+    app->run();
+
+    EXPECT_TRUE(didAccept);
+    EXPECT_TRUE(didTriggerSigint);
+    EXPECT_TRUE(clientError.empty());
+    EXPECT_TRUE(serverError.empty());
+
+    if (accepted) {
+        accepted->close();
+        delete accepted;
+    }
+    client.close();
+    server.close();
 }
