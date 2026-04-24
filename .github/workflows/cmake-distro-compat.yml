@@ -1,0 +1,55 @@
+name: CMake distro compatibility
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  BUILD_TYPE: Debug
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-and-test:
+    name: Build and test (${{ matrix.distro_name }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro_name: Rocky Linux 8
+            image: rockylinux:8
+            setup: |
+              dnf -y install gcc gcc-c++ make git python3 python3-pip which findutils
+              python3 -m pip install --upgrade pip
+              python3 -m pip install cmake ninja
+          - distro_name: Debian 12
+            image: debian:12
+            setup: |
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                build-essential git python3 python3-pip ca-certificates
+              python3 -m pip install --upgrade pip
+              python3 -m pip install --break-system-packages cmake ninja
+
+    container:
+      image: ${{ matrix.image }}
+
+    steps:
+      - name: Install toolchain
+        run: ${{ matrix.setup }}
+
+      - uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: cmake -B ${{ github.workspace }}/build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DSNF_ENABLE_TESTS=ON
+
+      - name: Build
+        run: cmake --build ${{ github.workspace }}/build --config ${{ env.BUILD_TYPE }}
+
+      - name: Test
+        working-directory: ${{ github.workspace }}/build
+        run: ctest -C ${{ env.BUILD_TYPE }} --output-on-failure --timeout 180

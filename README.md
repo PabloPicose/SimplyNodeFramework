@@ -1,5 +1,8 @@
 # SimplyNodeFramework
 
+[![CMake single platform](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-single-platform.yml/badge.svg)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-single-platform.yml)
+[![Distro compatibility (Rocky 8 / Debian 12)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-distro-compat.yml/badge.svg)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-distro-compat.yml)
+
 A modular C++ library providing an event-driven, node-based runtime for Linux.
 It consists of two independent CMake packages:
 
