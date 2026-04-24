@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #include "SNFCore/Application.h"
 #include "SNFCore/EventLoop.h"
@@ -644,6 +645,74 @@ TEST_F(CoreFixture, quitStopsAllEventLoops)
 
     EXPECT_TRUE(runReturned);
     EXPECT_LT(runDuration, std::chrono::seconds(1));
+}
+
+TEST_F(CoreFixture, quitStopsMultipleWorkerEventLoopsWithPendingTimers)
+{
+    using namespace std::chrono_literals;
+
+    constexpr std::size_t kWorkerCount = 4;
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::size_t readyCount = 0;
+
+    std::vector<std::thread> workers;
+    workers.reserve(kWorkerCount);
+
+    std::vector<std::thread::id> workerThreadIds(kWorkerCount);
+    std::vector<bool> runReturned(kWorkerCount, false);
+    std::vector<std::chrono::steady_clock::duration> runDurations(kWorkerCount);
+
+    for (std::size_t i = 0; i < kWorkerCount; ++i) {
+        workers.emplace_back([&, i]() {
+            workerThreadIds[i] = std::this_thread::get_id();
+
+            EventLoop* loop = Application::instance()->getOrCreateCurrentThreadEventLoop();
+            ASSERT_NE(loop, nullptr);
+
+            // Keep the loop waiting on a future deadline so quit() must wake it.
+            Timer timer;
+            timer.setSingleShot(true);
+            timer.start(5s);
+
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                ++readyCount;
+            }
+            cv.notify_one();
+
+            const auto startedAt = std::chrono::steady_clock::now();
+            loop->run();
+            runDurations[i] = std::chrono::steady_clock::now() - startedAt;
+            runReturned[i] = true;
+        });
+    }
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&]() { return readyCount == kWorkerCount; });
+    }
+
+    // Ensure all worker loops are registered before quit().
+    for (const std::thread::id workerThreadId : workerThreadIds) {
+        while (Application::instance()->getEventLoopByThreadId(workerThreadId) == nullptr) {
+            std::this_thread::yield();
+        }
+    }
+
+    EXPECT_FALSE(Application::instance()->allEventLoopsIdle());
+
+    Application::instance()->quit();
+
+    for (std::thread& worker : workers) {
+        worker.join();
+    }
+
+    for (std::size_t i = 0; i < kWorkerCount; ++i) {
+        EXPECT_TRUE(runReturned[i]);
+        EXPECT_LT(runDurations[i], 1s);
+    }
 }
 
 // ---- Generation ID tests ----
