@@ -1,0 +1,42 @@
+name: CMake Debian 12
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  BUILD_TYPE: Debug
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-and-test:
+    name: Build and test (Debian 12)
+    runs-on: ubuntu-latest
+
+    container:
+      image: debian:12
+
+    steps:
+      - name: Install toolchain
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential git python3 python3-pip python3-venv ca-certificates
+          python3 -m venv /opt/ci-venv
+          /opt/ci-venv/bin/pip install --upgrade pip
+          /opt/ci-venv/bin/pip install cmake ninja
+          echo "/opt/ci-venv/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: cmake -B ${{ github.workspace }}/build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DSNF_ENABLE_TESTS=ON
+
+      - name: Build
+        run: cmake --build ${{ github.workspace }}/build --config ${{ env.BUILD_TYPE }}
+
+      - name: Test
+        run: ctest --test-dir ${{ github.workspace }}/build -C ${{ env.BUILD_TYPE }} --output-on-failure --timeout 180
