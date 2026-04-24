@@ -132,6 +132,7 @@ void Node::setParent(Node* parent)
         m_ownerEventLoop->removeRootNode(this);
     }
     if (! parent) {
+        m_parent = nullptr;
         m_isRoot = true;
         if (m_ownerEventLoop) {
             m_ownerEventLoop->addRootNode(this);
