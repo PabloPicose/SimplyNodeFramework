@@ -47,6 +47,8 @@ EventLoop::~EventLoop()
 
 bool EventLoop::isInThisThread() const noexcept { return std::this_thread::get_id() == m_owner; }
 
+std::thread::id EventLoop::ownerThreadId() const noexcept { return m_owner; }
+
 void EventLoop::enqueueDelete(Node* node)
 {
     {

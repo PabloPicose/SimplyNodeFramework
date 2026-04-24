@@ -498,6 +498,220 @@ TEST_F(TcpSocketFixture, reconnectAfterDisconnect)
     EXPECT_EQ(disconnectCount, 1);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// moveToThread tests for TcpSocket
+// ─────────────────────────────────────────────────────────────────────────────
+
+TEST_F(TcpSocketFixture, moveToThreadBeforeConnectChangesAffinity)
+{
+    // Create a worker loop and move an idle socket to it.
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool workerReady   = false;
+    bool migrationDone = false;
+    std::thread::id workerThreadId;
+
+    std::thread worker([&]() {
+        EventLoop* workerLoop = Application::instance()->getOrCreateCurrentThreadEventLoop();
+        ASSERT_NE(workerLoop, nullptr);
+        workerThreadId = std::this_thread::get_id();
+
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            workerReady = true;
+        }
+        cv.notify_one();
+
+        Timer keepAlive;
+        keepAlive.setSingleShot(true);
+        keepAlive.start(3s);
+
+        workerLoop->run();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&] { return workerReady; });
+    }
+
+    TcpSocket* socket = new TcpSocket(false);
+    EXPECT_EQ(socket->ownerThreadId(), std::this_thread::get_id());
+
+    // Migrate on the owner thread → synchronous path.
+    EXPECT_TRUE(socket->moveToThread(workerThreadId));
+
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerThreadId);
+    ASSERT_NE(workerLoop, nullptr);
+
+    workerLoop->post([&]() {
+        std::lock_guard<std::mutex> lock(mutex);
+        migrationDone = true;
+        cv.notify_one();
+        workerLoop->stop();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&] { return migrationDone; });
+    }
+
+    worker.join();
+
+    EXPECT_EQ(socket->ownerThreadId(), workerThreadId);
+    EXPECT_EQ(socket->ownerEventLoop(), workerLoop);
+
+    delete socket;
+}
+
+TEST_F(TcpSocketFixture, connectedSocketCanBeMigratedAndContinuesIO)
+{
+    // Establish a connection, migrate the socket to a worker thread and verify
+    // that we can still read from it after migration.
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool workerReady   = false;
+    bool migrationDone = false;
+    bool dataReceived  = false;
+    std::thread::id workerThreadId;
+    std::thread::id readCallbackThread;
+
+    std::thread worker([&]() {
+        EventLoop* workerLoop = Application::instance()->getOrCreateCurrentThreadEventLoop();
+        ASSERT_NE(workerLoop, nullptr);
+        workerThreadId = std::this_thread::get_id();
+
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            workerReady = true;
+        }
+        cv.notify_one();
+
+        Timer keepAlive;
+        keepAlive.setSingleShot(true);
+        keepAlive.start(5s);
+
+        workerLoop->run();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&] { return workerReady; });
+    }
+
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerThreadId);
+    ASSERT_NE(workerLoop, nullptr);
+
+    TcpSocket* socket = new TcpSocket(false);
+    const std::string payload = "migrate-io";
+
+    socket->connected.connect([&]() {
+        // On the main thread: migrate the connected socket to the worker.
+        EXPECT_TRUE(socket->moveToThread(workerThreadId));
+        // Notify the worker that it may now write (after migration lands).
+        workerLoop->post([socket, payload]() {
+            socket->write(payload);
+        });
+    });
+
+    socket->readyRead.connect([&]() {
+        readCallbackThread = std::this_thread::get_id();
+        dataReceived       = true;
+        (void) socket->readAll();
+
+        if (EventLoop* loop = socket->ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    socket->errorOccurred.connect([&](const std::string& error) {
+        ADD_FAILURE() << "Socket error: " << error;
+        if (EventLoop* loop = socket->ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 4s);
+
+    socket->connectToHost(HostAddress::LocalHost, echoServerPort);
+    app->run();
+
+    // Signal the worker to stop (it may have already stopped from readyRead).
+    workerLoop->post([workerLoop]() { workerLoop->stop(); });
+    worker.join();
+
+    EXPECT_TRUE(dataReceived);
+    // The readyRead callback must have fired on the worker thread.
+    EXPECT_EQ(readCallbackThread, workerThreadId);
+
+    delete socket;
+}
+
+TEST_F(TcpSocketFixture, migratedSocketCanBeClosedFromNewThread)
+{
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool workerReady  = false;
+    bool closedOnNew  = false;
+    std::thread::id workerThreadId;
+
+    std::thread worker([&]() {
+        EventLoop* workerLoop = Application::instance()->getOrCreateCurrentThreadEventLoop();
+        ASSERT_NE(workerLoop, nullptr);
+        workerThreadId = std::this_thread::get_id();
+
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            workerReady = true;
+        }
+        cv.notify_one();
+
+        Timer keepAlive;
+        keepAlive.setSingleShot(true);
+        keepAlive.start(4s);
+
+        workerLoop->run();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&] { return workerReady; });
+    }
+
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerThreadId);
+    ASSERT_NE(workerLoop, nullptr);
+
+    TcpSocket* socket = new TcpSocket(false);
+
+    socket->connected.connect([&]() {
+        EXPECT_TRUE(socket->moveToThread(workerThreadId));
+        // Post close on the worker after migration.
+        workerLoop->post([&]() {
+            socket->close();
+            closedOnNew = true;
+            workerLoop->stop();
+        });
+    });
+
+    socket->errorOccurred.connect([&](const std::string& error) {
+        ADD_FAILURE() << "Socket error: " << error;
+        workerLoop->post([workerLoop]() { workerLoop->stop(); });
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 3s);
+
+    socket->connectToHost(HostAddress::LocalHost, echoServerPort);
+    app->run();
+
+    worker.join();
+
+    EXPECT_TRUE(closedOnNew);
+    EXPECT_EQ(socket->state(), TcpSocketState::Disconnected);
+
+    delete socket;
+}
+
 TEST_F(TcpSocketFixture, largeDataTransferStreaming)
 {
     TcpSocket socket(false);

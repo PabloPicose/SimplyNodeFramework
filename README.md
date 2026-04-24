@@ -8,6 +8,68 @@ It consists of two independent CMake packages:
 
 Both packages require **C++17** and target **Linux** (epoll-based I/O).
 
+## Current Scope (What Is Included)
+
+This section defines the current scope of SimplyNodeFramework so project status
+and expectations are explicit.
+
+### SNFCore
+
+- Application singleton and per-thread EventLoop lifecycle
+- Node ownership tree (parent/child), root-node management, and deferred deletion
+- NodePtr generation-based safe references (use-after-free protection)
+- Signal/Connection system with Direct and Queued delivery
+- Timer scheduling (single-shot and repeating) integrated with EventLoop
+- Cross-thread marshaling patterns through EventLoop task posting
+
+### SNFNetwork
+
+- TcpSocket: non-blocking client socket, async read/write, and lifecycle signals
+- TcpServer: listen/accept flow, pending connection queue, and server-side socket handoff
+- LocalSocket: Unix domain socket client behavior with async integration
+- LocalServer: Unix domain socket server with pending connection queue
+- IOEvent epoll integration used by TCP and Local socket/server classes
+
+### Current Platform and Design Boundaries
+
+- Platform target is Linux only (epoll-based implementation)
+- Public API is C++17
+- Event-driven, non-blocking design is the primary execution model
+- Core and Network are distributed as independent CMake packages (SNFCore and SNFNetwork)
+
+### Current Test Coverage
+
+Coverage snapshot (April 25, 2026), measured with a dedicated coverage build
+(`--coverage`) and `gcovr`.
+
+Source-only scope used for percentages below:
+- Included: `lib/Core/src/**`, `lib/Network/src/**`
+- Excluded: `lib/**/test/**`, `build/_deps/**`, CMake-generated files
+
+| Module | Tested LOC | Untested LOC | Total LOC | Coverage |
+|---|---:|---:|---:|---:|
+| SNFCore (`lib/Core/src`) | 860 | 187 | 1047 | 82.14% |
+| SNFNetwork (`lib/Network/src`) | 889 | 285 | 1174 | 75.72% |
+| **Total source (`lib/*/src`)** | **1749** | **472** | **2221** | **78.75%** |
+
+Reproducible commands used:
+
+```bash
+cmake -S . -B build-coverage -G Ninja \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DSNF_ENABLE_TESTS=ON \
+    -DCMAKE_C_FLAGS='--coverage' \
+    -DCMAKE_CXX_FLAGS='--coverage' \
+    -DCMAKE_EXE_LINKER_FLAGS='--coverage' \
+    -DCMAKE_SHARED_LINKER_FLAGS='--coverage'
+cmake --build build-coverage
+ctest --test-dir build-coverage --output-on-failure
+gcovr -r . build-coverage \
+    --filter 'lib/.*/src/' \
+    --exclude 'lib/.*/test/' \
+    --exclude 'build-coverage/_deps/' --txt
+```
+
 ---
 
 ## Installation

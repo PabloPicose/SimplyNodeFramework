@@ -741,6 +741,422 @@ TEST_F(CoreFixture, nodePtrIsAliveReflectsMarkedToDeleteState)
     EXPECT_FALSE(ptr);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// moveToThread tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+TEST_F(CoreFixture, moveToThreadSameThreadIsNoOp)
+{
+    // Moving to the same thread must succeed and leave affinity unchanged.
+    TestNode* node = new TestNode();
+    const std::thread::id originalThread = node->ownerThreadId();
+    EventLoop* originalLoop              = node->ownerEventLoop();
+
+    EXPECT_TRUE(node->moveToThread(originalThread));
+    EXPECT_EQ(node->ownerThreadId(), originalThread);
+    EXPECT_EQ(node->ownerEventLoop(), originalLoop);
+
+    node->deleteLater();
+    Application::instance()->run();
+}
+
+TEST_F(CoreFixture, moveToThreadToUnknownThreadReturnsFalse)
+{
+    // A thread that never called getOrCreateCurrentThreadEventLoop has no loop.
+    std::thread::id unknownId;
+    {
+        std::thread t([&]() { unknownId = std::this_thread::get_id(); });
+        t.join();
+    }
+
+    TestNode* node = new TestNode();
+    EXPECT_FALSE(node->moveToThread(unknownId));
+
+    node->deleteLater();
+    Application::instance()->run();
+}
+
+TEST_F(CoreFixture, moveToThreadChangesOwnerThreadId)
+{
+    using namespace std::chrono_literals;
+
+    // Synchronisation primitives.
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool workerReady = false;
+    bool migrationDone = false;
+    std::thread::id workerThreadId;
+
+    // Step 1: spin up a worker that creates an EventLoop and waits.
+    std::thread worker([&]() {
+        EventLoop* workerLoop = Application::instance()->getOrCreateCurrentThreadEventLoop();
+        ASSERT_NE(workerLoop, nullptr);
+        workerThreadId = std::this_thread::get_id();
+
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            workerReady = true;
+        }
+        cv.notify_one();
+
+        // Keep the loop alive until the test posts a stop.
+        Timer keepAlive;
+        keepAlive.setSingleShot(true);
+        keepAlive.start(3s);
+
+        workerLoop->run();
+    });
+
+    // Wait until worker loop is up.
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&] { return workerReady; });
+    }
+
+    // Step 2: create a root node on the main thread.
+    TestNode* node = new TestNode();
+    const std::thread::id mainThread = node->ownerThreadId();
+    EXPECT_EQ(mainThread, std::this_thread::get_id());
+
+    // Step 3: move the node to the worker thread.
+    EXPECT_TRUE(node->moveToThread(workerThreadId));
+
+    // Give the posted migration task a chance to run.
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerThreadId);
+    ASSERT_NE(workerLoop, nullptr);
+
+    // Drain the worker's task queue by posting a sentinel that stops the loop
+    // and signals the main thread.
+    workerLoop->post([&]() {
+        std::lock_guard<std::mutex> lock(mutex);
+        migrationDone = true;
+        cv.notify_one();
+        workerLoop->stop();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&] { return migrationDone; });
+    }
+
+    worker.join();
+
+    // After migration the node must report the worker thread.
+    EXPECT_EQ(node->ownerThreadId(), workerThreadId);
+    EXPECT_EQ(node->ownerEventLoop(), workerLoop);
+
+    // Cleanup: delete the node (it now lives on the worker thread loop, but
+    // the worker exited, so we just delete synchronously).
+    delete node;
+}
+
+TEST_F(CoreFixture, moveToThreadSubtreeMigratesAllDescendants)
+{
+    using namespace std::chrono_literals;
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool workerReady   = false;
+    bool migrationDone = false;
+    std::thread::id workerThreadId;
+
+    std::thread worker([&]() {
+        EventLoop* workerLoop = Application::instance()->getOrCreateCurrentThreadEventLoop();
+        ASSERT_NE(workerLoop, nullptr);
+        workerThreadId = std::this_thread::get_id();
+
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            workerReady = true;
+        }
+        cv.notify_one();
+
+        Timer keepAlive;
+        keepAlive.setSingleShot(true);
+        keepAlive.start(3s);
+
+        workerLoop->run();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&] { return workerReady; });
+    }
+
+    // Build a small subtree: root → child → grandchild.
+    TestNode* root       = new TestNode();
+    TestNode* child      = new TestNode(root);
+    TestNode* grandchild = new TestNode(child);
+
+    EXPECT_TRUE(root->moveToThread(workerThreadId));
+
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerThreadId);
+    ASSERT_NE(workerLoop, nullptr);
+
+    workerLoop->post([&]() {
+        std::lock_guard<std::mutex> lock(mutex);
+        migrationDone = true;
+        cv.notify_one();
+        workerLoop->stop();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&] { return migrationDone; });
+    }
+
+    worker.join();
+
+    // All three nodes must share the worker thread's affinity.
+    EXPECT_EQ(root->ownerThreadId(), workerThreadId);
+    EXPECT_EQ(child->ownerThreadId(), workerThreadId);
+    EXPECT_EQ(grandchild->ownerThreadId(), workerThreadId);
+    EXPECT_EQ(root->ownerEventLoop(), workerLoop);
+    EXPECT_EQ(child->ownerEventLoop(), workerLoop);
+    EXPECT_EQ(grandchild->ownerEventLoop(), workerLoop);
+
+    delete root;
+}
+
+TEST_F(CoreFixture, moveToThreadRootNodeAppearsInTargetLoopRootList)
+{
+    using namespace std::chrono_literals;
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool workerReady   = false;
+    bool migrationDone = false;
+    std::thread::id workerThreadId;
+
+    std::thread worker([&]() {
+        EventLoop* workerLoop = Application::instance()->getOrCreateCurrentThreadEventLoop();
+        ASSERT_NE(workerLoop, nullptr);
+        workerThreadId = std::this_thread::get_id();
+
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            workerReady = true;
+        }
+        cv.notify_one();
+
+        Timer keepAlive;
+        keepAlive.setSingleShot(true);
+        keepAlive.start(3s);
+
+        workerLoop->run();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&] { return workerReady; });
+    }
+
+    TestNode* node = new TestNode();
+    EXPECT_TRUE(node->isRoot());
+
+    EventLoop* mainLoop   = node->ownerEventLoop();
+    std::size_t rootsBefore = mainLoop->getRootNodesCount();
+
+    EXPECT_TRUE(node->moveToThread(workerThreadId));
+
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerThreadId);
+    ASSERT_NE(workerLoop, nullptr);
+
+    workerLoop->post([&]() {
+        std::lock_guard<std::mutex> lock(mutex);
+        migrationDone = true;
+        cv.notify_one();
+        workerLoop->stop();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&] { return migrationDone; });
+    }
+
+    worker.join();
+
+    // The root node must be in the worker loop's root list and removed from main.
+    EXPECT_EQ(mainLoop->getRootNodesCount(), rootsBefore - 1);
+    EXPECT_GE(workerLoop->getRootNodesCount(), std::size_t{1});
+
+    delete node;
+}
+
+TEST_F(CoreFixture, moveToThreadRejectsNodeWhoseParentIsOnDifferentThread)
+{
+    using namespace std::chrono_literals;
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool workerReady = false;
+    std::thread::id workerThreadId;
+
+    std::thread worker([&]() {
+        Application::instance()->getOrCreateCurrentThreadEventLoop();
+        workerThreadId = std::this_thread::get_id();
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            workerReady = true;
+        }
+        cv.notify_one();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&] { return workerReady; });
+    }
+    worker.join();
+
+    // Create a parent/child pair on main thread.
+    TestNode* parent = new TestNode();
+    TestNode* child  = new TestNode(parent);
+
+    // Trying to migrate only the child while the parent stays on main must fail.
+    EXPECT_FALSE(child->moveToThread(workerThreadId));
+
+    parent->deleteLater();
+    Application::instance()->run();
+}
+
+TEST_F(CoreFixture, moveToThreadFromOtherThreadIsAsynchronous)
+{
+    using namespace std::chrono_literals;
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool workerReady   = false;
+    bool migrationDone = false;
+    std::thread::id workerThreadId;
+
+    std::thread worker([&]() {
+        EventLoop* workerLoop = Application::instance()->getOrCreateCurrentThreadEventLoop();
+        ASSERT_NE(workerLoop, nullptr);
+        workerThreadId = std::this_thread::get_id();
+
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            workerReady = true;
+        }
+        cv.notify_one();
+
+        Timer keepAlive;
+        keepAlive.setSingleShot(true);
+        keepAlive.start(3s);
+
+        workerLoop->run();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&] { return workerReady; });
+    }
+
+    // Create a node on the main thread.
+    TestNode* node = new TestNode();
+    EventLoop* mainLoop   = node->ownerEventLoop();
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerThreadId);
+    ASSERT_NE(workerLoop, nullptr);
+
+    // Call moveToThread from a third thread (not the node owner) targeting workerLoop.
+    std::thread caller([&]() {
+        // This posts to the main loop.
+        EXPECT_TRUE(node->moveToThread(workerThreadId));
+    });
+    caller.join();
+
+    // The migration is now enqueued on the main loop. Run the main loop to apply it.
+    mainLoop->run();
+
+    // Check the node is now on the worker thread.
+    EXPECT_EQ(node->ownerThreadId(), workerThreadId);
+    EXPECT_EQ(node->ownerEventLoop(), workerLoop);
+
+    // Stop worker and clean up.
+    workerLoop->post([workerLoop]() { workerLoop->stop(); });
+    worker.join();
+
+    delete node;
+}
+
+TEST_F(CoreFixture, queuedConnectionStillDeliversOnNewThreadAfterMigration)
+{
+    using namespace std::chrono_literals;
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool workerReady   = false;
+    bool receiverReady = false;
+    bool received      = false;
+    std::thread::id workerThreadId;
+    std::thread::id callbackThreadId;
+
+    // Worker thread hosts the receiver after migration.
+    std::thread worker([&]() {
+        EventLoop* workerLoop = Application::instance()->getOrCreateCurrentThreadEventLoop();
+        ASSERT_NE(workerLoop, nullptr);
+        workerThreadId = std::this_thread::get_id();
+
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            workerReady = true;
+        }
+        cv.notify_one();
+
+        Timer keepAlive;
+        keepAlive.setSingleShot(true);
+        keepAlive.start(3s);
+
+        workerLoop->run();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&] { return workerReady; });
+    }
+
+    // Create a simple receiver node on the main thread.
+    struct Receiver final : Node {
+        std::thread::id* cbThread;
+        bool* receivedFlag;
+        std::condition_variable* cv;
+        std::mutex* mx;
+        bool* readyFlag;
+        explicit Receiver(std::thread::id* t, bool* r, std::condition_variable* c, std::mutex* m, bool* ready)
+            : Node(), cbThread(t), receivedFlag(r), cv(c), mx(m), readyFlag(ready) {}
+        void onValue() {
+            *cbThread     = std::this_thread::get_id();
+            *receivedFlag = true;
+            if (EventLoop* loop = ownerEventLoop()) {
+                loop->post([loop]() { loop->stop(); });
+            }
+        }
+        void update() override {}
+    };
+
+    Signal<> sig;
+    Receiver* receiver = new Receiver(
+        &callbackThreadId, &received, &cv, &mutex, &receiverReady);
+
+    // Connect with Queued delivery.
+    sig.connect(NodePtr<Receiver>(receiver), &Receiver::onValue, ConnectionType::Queued);
+
+    // Migrate receiver to worker thread (synchronous — we're on owner thread).
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerThreadId);
+    ASSERT_NE(workerLoop, nullptr);
+    EXPECT_TRUE(receiver->moveToThread(workerThreadId));
+
+    // Emit the signal; the queued delivery must land on the worker thread.
+    sig.emit();
+
+    worker.join();
+
+    EXPECT_TRUE(received);
+    EXPECT_EQ(callbackThreadId, workerThreadId);
+
+    delete receiver;
+}
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);

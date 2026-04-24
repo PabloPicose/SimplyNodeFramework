@@ -148,7 +148,7 @@ TEST_F(LocalSocketPlainFixture, connectToTooLongPathEmitsError)
 }
 
 // ============================================================================
-// LocalSocket — against /tmp/test.sock (external server, skipped if absent)
+// LocalSocket — against an embedded LocalServer (no external dependency)
 // ============================================================================
 
 class LocalSocketExternalFixture : public ::testing::Test
@@ -158,34 +158,42 @@ public:
     {
         app = new Application(0, nullptr);
 
-        // Quick probe: can we connect? If not, skip all external tests.
-        LocalSocket probe;
-        bool connected = false;
-        bool errorSeen = false;
-        probe.connected.connect([&] { connected = true; });
-        probe.errorOccurred.connect([&](const std::string&) { errorSeen = true; });
-        probe.connectToPath("/tmp/test.sock");
+        m_serverPath = makeTempPath("external");
+        server = new LocalServer();
+        ASSERT_TRUE(server->listen(m_serverPath)) << "Failed to start embedded LocalServer";
 
-        if (!connected && !errorSeen) {
-            Timer t;
-            armShutdown(t, 500ms);
-            app->run();
-        }
-
-        if (!connected) {
-            GTEST_SKIP() << "/tmp/test.sock not reachable — skipping external tests";
-        }
-
-        probe.close();
+        // Accept incoming connections and keep them alive for the duration of
+        // the test so the client stays in Connected state after connectToPath().
+        server->newConnection.connect([this]() {
+            LocalSocket* peer = server->nextPendingConnection();
+            if (peer) {
+                acceptedSockets.push_back(peer);
+            }
+        });
     }
 
     void TearDown() override
     {
+        for (LocalSocket* s : acceptedSockets) {
+            s->close();
+            delete s;
+        }
+        acceptedSockets.clear();
+
+        if (server) {
+            server->close();
+            delete server;
+            server = nullptr;
+        }
+
         delete app;
         app = nullptr;
     }
 
     Application* app = nullptr;
+    LocalServer* server = nullptr;
+    std::string m_serverPath;
+    std::vector<LocalSocket*> acceptedSockets;
 };
 
 TEST_F(LocalSocketExternalFixture, connectToPathSucceeds)
@@ -195,14 +203,9 @@ TEST_F(LocalSocketExternalFixture, connectToPathSucceeds)
     bool connectedSignal = false;
     socket.connected.connect([&] { connectedSignal = true; });
 
-    socket.connectToPath("/tmp/test.sock");
+    socket.connectToPath(m_serverPath);
 
-    if (!connectedSignal) {
-        Timer t;
-        armShutdown(t, 2s);
-        app->run();
-    }
-
+    // UNIX domain sockets connect synchronously.
     EXPECT_TRUE(connectedSignal);
     EXPECT_EQ(socket.state(), LocalSocketState::Connected);
 }
@@ -213,13 +216,7 @@ TEST_F(LocalSocketExternalFixture, closeTransitionsToDisconnected)
 
     bool connectedSignal = false;
     socket.connected.connect([&] { connectedSignal = true; });
-    socket.connectToPath("/tmp/test.sock");
-
-    if (!connectedSignal) {
-        Timer t;
-        armShutdown(t, 2s);
-        app->run();
-    }
+    socket.connectToPath(m_serverPath);
 
     ASSERT_TRUE(connectedSignal);
 
@@ -239,13 +236,7 @@ TEST_F(LocalSocketExternalFixture, disconnectedSignalEmittedOnClose)
 
     bool connectedSignal = false;
     socket.connected.connect([&] { connectedSignal = true; });
-    socket.connectToPath("/tmp/test.sock");
-
-    if (!connectedSignal) {
-        Timer t;
-        armShutdown(t, 2s);
-        app->run();
-    }
+    socket.connectToPath(m_serverPath);
 
     ASSERT_TRUE(connectedSignal);
     socket.close();

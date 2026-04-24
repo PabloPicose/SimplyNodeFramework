@@ -129,6 +129,9 @@ public:
     /** @brief Returns `true` if the calling thread is the owner thread of this EventLoop. */
     bool isInThisThread() const noexcept;
 
+    /** @brief Returns the ID of the thread that owns this EventLoop. */
+    std::thread::id ownerThreadId() const noexcept;
+
     /** @brief Returns the number of nodes pending deferred deletion. */
     std::size_t pendingDeleteCount() const;
 

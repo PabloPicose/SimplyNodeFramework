@@ -194,4 +194,88 @@ void Node::pushDeleteChild(Node* child)
         }
     }
 }
+
+// ── Default (no-op) hooks ───────────────────────────────────────────────────
+
+void Node::onAboutToMoveToThread(EventLoop* /*newLoop*/) {}
+
+void Node::onMovedToThread(EventLoop* /*oldLoop*/) {}
+
+// ── Thread migration ────────────────────────────────────────────────────────
+
+bool Node::moveToThread(std::thread::id targetThreadId)
+{
+    const auto app = Application::instance();
+    if (! app) {
+        return false;
+    }
+
+    EventLoop* targetLoop = app->getEventLoopByThreadId(targetThreadId);
+    if (! targetLoop) {
+        // Target thread has no EventLoop registered yet.
+        return false;
+    }
+
+    EventLoop* currentLoop = m_ownerEventLoop;
+    if (! currentLoop) {
+        return false;
+    }
+
+    // If the parent belongs to a different thread than the target we would
+    // break the parent/child affinity invariant.
+    if (m_parent && m_parent->ownerThreadId() != targetThreadId) {
+        return false;
+    }
+
+    if (currentLoop->isInThisThread()) {
+        // Synchronous path: execute migration immediately.
+        applyMoveToThread(targetLoop);
+        return true;
+    }
+
+    // Asynchronous path: post to the current owner thread.
+    currentLoop->post([self = NodePtr<Node>(this), targetLoop]() {
+        if (self) {
+            self->applyMoveToThread(targetLoop);
+        }
+    });
+    return true;
+}
+
+void Node::applyMoveToThread(EventLoop* targetLoop)
+{
+    EventLoop* oldLoop = m_ownerEventLoop;
+    if (oldLoop == targetLoop) {
+        // Already on that loop — nothing to do.
+        return;
+    }
+
+    // 1. Let the subclass release resources on the old loop.
+    onAboutToMoveToThread(targetLoop);
+
+    // 2. Update EventLoop node registrations.
+    if (oldLoop) {
+        oldLoop->removeNode(this);
+        if (m_isRoot) {
+            oldLoop->removeRootNode(this);
+        }
+    }
+
+    m_ownerEventLoop = targetLoop;
+    m_ownerThreadId  = targetLoop->ownerThreadId();
+
+    targetLoop->addNode(this);
+    if (m_isRoot) {
+        targetLoop->addRootNode(this);
+    }
+
+    // 3. Let the subclass acquire resources on the new loop.
+    onMovedToThread(oldLoop);
+
+    // 4. Recurse into children.
+    for (Node* child : m_children) {
+        child->applyMoveToThread(targetLoop);
+    }
+}
+
 }  // namespace snf

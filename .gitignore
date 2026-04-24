@@ -4,3 +4,4 @@ CMakeUserPresets.json
 .idea/
 .vscode
 docs/html/
+.venv

@@ -119,6 +119,27 @@ public:
     EventLoop* ownerEventLoop() const;
 
     /**
+     * @brief Migrates this node and all its descendants to @p targetThreadId.
+     *
+     * If called from the owner thread the migration is applied immediately.
+     * If called from any other thread the migration is posted to the owner
+     * EventLoop and executed asynchronously; the method returns `true` to
+     * indicate that the request was accepted.
+     *
+     * Preconditions (checked at call time; return `false` on failure):
+     * - The current node must not have a parent whose ownerThreadId differs
+     *   from the target (i.e. only whole subtrees or root nodes may migrate).
+     * - The target thread must already have an EventLoop registered with the
+     *   Application (call `Application::getOrCreateCurrentThreadEventLoop()`
+     *   from that thread before migrating to it).
+     *
+     * @param targetThreadId Thread ID to migrate to.
+     * @return `true` if the migration was applied or successfully enqueued;
+     *         `false` if the preconditions were not met.
+     */
+    bool moveToThread(std::thread::id targetThreadId);
+
+    /**
      * @brief Returns the generation counter used by `NodePtr<T>` to detect
      *        stale references.
      *
@@ -145,8 +166,34 @@ protected:
      */
     virtual void update() = 0;
 
+    /**
+     * @brief Called on the owner thread just before the node is migrated to
+     *        a new EventLoop.
+     *
+     * Override in subclasses that hold EventLoop resources (e.g. IOEvent)
+     * to release those resources from the current loop before the affinity
+     * fields are updated. The default implementation is a no-op.
+     *
+     * @param newLoop The EventLoop the node is about to be moved to.
+     */
+    virtual void onAboutToMoveToThread(EventLoop* newLoop);
+
+    /**
+     * @brief Called on the owner thread immediately after the node's affinity
+     *        fields have been updated to the new EventLoop.
+     *
+     * Override in subclasses to re-acquire EventLoop resources on the new
+     * loop. The default implementation is a no-op.
+     *
+     * @param oldLoop The EventLoop the node was migrated away from.
+     */
+    virtual void onMovedToThread(EventLoop* oldLoop);
+
 private:
     void pushDeleteChild(Node* child);
+
+    // Performs the actual recursive migration; must be called on owner thread.
+    void applyMoveToThread(EventLoop* targetLoop);
 
 private:
     Node* m_parent = nullptr;

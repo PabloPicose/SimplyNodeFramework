@@ -119,6 +119,12 @@ protected:
      *  @param nativeEvents Raw epoll event mask. Override in subclasses to handle I/O.
      */
     virtual void handleEvents(std::uint32_t nativeEvents);
+
+    /** @brief Unregisters the fd from the old EventLoop before migration. */
+    void onAboutToMoveToThread(EventLoop* newLoop) override;
+
+    /** @brief Re-registers the fd with the new EventLoop after migration. */
+    void onMovedToThread(EventLoop* oldLoop) override;
     /** @endcond */
 
 private:

@@ -173,6 +173,50 @@ bool IOEvent::isActive() const
 
 void IOEvent::update() {}
 
+void IOEvent::onAboutToMoveToThread(EventLoop* /*newLoop*/)
+{
+    // Unregister the fd from the current (old) EventLoop so epoll stops
+    // delivering callbacks on the old thread before the affinity changes.
+    int fd = -1;
+    bool wasActive = false;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        fd = m_fd;
+        wasActive = m_active;
+    }
+
+    if (wasActive && fd >= 0) {
+        if (EventLoop* loop = ownerEventLoop()) {
+            loop->unregisterIO(fd);
+        }
+    }
+}
+
+void IOEvent::onMovedToThread(EventLoop* /*oldLoop*/)
+{
+    // Re-register the fd with the new EventLoop (ownerEventLoop() already
+    // points to the new loop at this point because Node::applyMoveToThread
+    // updates the affinity fields before calling this hook).
+    int fd = -1;
+    bool active = false;
+    IOEventFlags interestFlags = IOEventFlags::None;
+    std::uint64_t generation = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        fd = m_fd;
+        active = m_active;
+        interestFlags = m_interest;
+        ++m_registrationGeneration;
+        generation = m_registrationGeneration;
+    }
+
+    if (active && fd >= 0) {
+        if (EventLoop* loop = ownerEventLoop()) {
+            loop->registerIO(fd, interestToNative(interestFlags), makeDispatchCallback(fd, generation));
+        }
+    }
+}
+
 void IOEvent::handleEvents(std::uint32_t nativeEvents)
 {
     const IOEventFlags flags = nativeToInterest(nativeEvents);
