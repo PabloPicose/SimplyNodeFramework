@@ -141,16 +141,31 @@ TEST_F(TcpSocketFixture, connectAndEchoRoundTrip)
 
 TEST_F(TcpSocketFixture, connectToLocalhostHostName)
 {
+    TcpServer server;
+    ASSERT_TRUE(server.listen(HostAddress("localhost"), 0));
+    const std::uint16_t port = server.serverPort();
+    ASSERT_GT(port, 0);
+
     TcpSocket socket(false);
+    TcpSocket* accepted = nullptr;
 
     bool didConnect = false;
     std::string errorMessage;
 
-    socket.connected.connect([&]() {
-        didConnect = true;
-        if (EventLoop* loop = socket.ownerEventLoop()) {
+    server.newConnection.connect([&]() {
+        accepted = server.nextPendingConnection();
+        if (! accepted) {
+            return;
+        }
+
+        // Once accept happened, we're done validating hostname connectivity.
+        if (EventLoop* loop = server.ownerEventLoop()) {
             loop->post([loop]() { loop->stop(); });
         }
+    });
+
+    socket.connected.connect([&]() {
+        didConnect = true;
     });
 
     socket.errorOccurred.connect([&](const std::string& error) {
@@ -164,11 +179,16 @@ TEST_F(TcpSocketFixture, connectToLocalhostHostName)
     // CI runners can be temporarily slow resolving localhost.
     armShutdown(shutdown, 5s);
 
-    socket.connectToHost(HostAddress("localhost"), echoServerPort);
+    socket.connectToHost(HostAddress("localhost"), port);
     app->run();
 
     EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
     EXPECT_TRUE(didConnect);
+
+    if (accepted) {
+        accepted->close();
+        delete accepted;
+    }
 }
 
 TEST_F(TcpSocketFixture, closeEmitsDisconnected)
