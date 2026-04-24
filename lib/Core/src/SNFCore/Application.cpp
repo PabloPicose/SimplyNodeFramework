@@ -86,23 +86,27 @@ Node* Application::getRootNode(const std::size_t index) const
     return nullptr;
 }
 
-bool Application::isNodeAlive(Node* node) const
+bool Application::isNodeAlive(Node* node, std::uint64_t generation) const
 {
     std::lock_guard<std::mutex> lock(m_aliveNodesMutex);
-    if (m_aliveNodes.find(node) != m_aliveNodes.cend()) {
-        return true;
+    auto it = m_aliveNodes.find(node);
+    if (it == m_aliveNodes.cend()) {
+        return false;
     }
-    return false;
+    return it->second.generation == generation;
 }
 
-bool Application::isNodeMarkedToDelete(Node* node) const
+bool Application::isNodeMarkedToDelete(Node* node, std::uint64_t generation) const
 {
     std::lock_guard<std::mutex> lock(m_aliveNodesMutex);
     auto it = m_aliveNodes.find(node);
     if (it == m_aliveNodes.cend()) {
         return true;
     }
-    return ! it->second;
+    if (it->second.generation != generation) {
+        return true;
+    }
+    return it->second.markedForDelete;
 }
 
 size_t Application::getRootNodesToDeleteCount() const
@@ -123,8 +127,8 @@ size_t Application::getAliveNodesToDeleteCount() const
 {
     std::lock_guard<std::mutex> lock(m_aliveNodesMutex);
     size_t count = 0;
-    for (const auto& [node, alive] : m_aliveNodes) {
-        if (! alive) {
+    for (const auto& [node, entry] : m_aliveNodes) {
+        if (entry.markedForDelete) {
             count++;
         }
     }
@@ -195,16 +199,17 @@ void Application::pushRootNodeDeleteLater(Node* node)
 void Application::registerAliveNode(Node* node)
 {
     std::lock_guard<std::mutex> lock(m_aliveNodesMutex);
-    m_aliveNodes[node] = true;
+    m_aliveNodes[node] = NodeEntry{node->generation(), false};
 }
 
 void Application::markToDelete(Node* node)
 {
     std::lock_guard<std::mutex> lock(m_aliveNodesMutex);
-    if (m_aliveNodes.find(node) == m_aliveNodes.cend()) {
+    auto it = m_aliveNodes.find(node);
+    if (it == m_aliveNodes.cend()) {
         throw std::runtime_error("Node not found in the alive nodes");
     }
-    m_aliveNodes[node] = false;
+    it->second.markedForDelete = true;
 }
 
 void Application::unregisterAliveNode(Node* node)

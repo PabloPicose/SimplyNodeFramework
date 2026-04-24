@@ -1,6 +1,7 @@
 #include "Node.h"
 
 #include <algorithm>
+#include <atomic>
 #include <iostream>
 
 #include "SNFCore/Application.h"
@@ -153,8 +154,13 @@ std::thread::id Node::ownerThreadId() const { return m_ownerThreadId; }
 
 EventLoop* Node::ownerEventLoop() const { return m_ownerEventLoop; }
 
+std::uint64_t Node::generation() const { return m_generation; }
+
 Node::Node(Node* parent) : m_parent(parent)
 {
+    static std::atomic<std::uint64_t> s_nextGeneration{1};
+    m_generation = s_nextGeneration.fetch_add(1, std::memory_order_relaxed);
+
     const auto app = Application::instance();
     if (! app) {
         throw std::runtime_error("Application instance not created");

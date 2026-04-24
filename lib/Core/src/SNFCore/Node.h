@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <thread>
 #include <vector>
@@ -55,6 +56,8 @@ public:
 
     EventLoop* ownerEventLoop() const;
 
+    std::uint64_t generation() const;
+
 protected:
     explicit Node(Node* parent = nullptr);
 
@@ -71,6 +74,7 @@ private:
     std::string m_name;
     std::thread::id m_ownerThreadId;
     EventLoop* m_ownerEventLoop = nullptr;
+    std::uint64_t m_generation = 0;
 };
 
 }  // namespace snf

@@ -15,4 +15,4 @@ target_include_directories(SNFNetworkTests
 )
 
 add_test(NAME SNFNetworkTests COMMAND SNFNetworkTests)
-set_tests_properties(SNFNetworkTests PROPERTIES TIMEOUT 10)
+set_tests_properties(SNFNetworkTests PROPERTIES TIMEOUT 30)

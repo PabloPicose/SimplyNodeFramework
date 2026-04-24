@@ -646,6 +646,101 @@ TEST_F(CoreFixture, quitStopsAllEventLoops)
     EXPECT_LT(runDuration, std::chrono::seconds(1));
 }
 
+// ---- Generation ID tests ----
+
+TEST_F(CoreFixture, nodeHasNonZeroGeneration)
+{
+    TestNode* node = new TestNode();
+    EXPECT_GT(node->generation(), 0u);
+
+    node->deleteLater();
+    Application::instance()->run();
+}
+
+TEST_F(CoreFixture, differentNodesHaveDistinctGenerations)
+{
+    TestNode* a = new TestNode();
+    TestNode* b = new TestNode();
+
+    EXPECT_NE(a->generation(), b->generation());
+
+    a->deleteLater();
+    b->deleteLater();
+    Application::instance()->run();
+}
+
+TEST_F(CoreFixture, nodePtrCapturesGenerationAtCreation)
+{
+    TestNode* node = new TestNode();
+    const std::uint64_t capturedGen = node->generation();
+
+    NodePtr<TestNode> ptr(node);
+
+    EXPECT_TRUE(ptr);
+    EXPECT_EQ(capturedGen, node->generation());
+
+    node->deleteLater();
+    Application::instance()->run();
+
+    // After deletion the ptr must be dead even though we still hold the raw pointer.
+    EXPECT_FALSE(ptr);
+    EXPECT_FALSE(ptr.isAlive());
+}
+
+// ABA protection: a NodePtr created for node A must remain dead after A is deleted,
+// even if a brand-new node happens to be allocated at the exact same address.
+// We verify the mechanism by asserting the new node has a strictly greater generation,
+// which is the invariant that prevents the address-reuse false-positive.
+TEST_F(CoreFixture, nodePtrDeadAfterABAAddressReuse)
+{
+    TestNode* nodeA = new TestNode();
+    const std::uint64_t genA = nodeA->generation();
+    NodePtr<TestNode> ptrA(nodeA);
+
+    EXPECT_TRUE(ptrA);
+
+    nodeA->deleteLater();
+    Application::instance()->run();
+
+    EXPECT_FALSE(ptrA);
+
+    // Allocate a new node — generation must be strictly greater than genA,
+    // so a NodePtr to genA will correctly return false even at the same address.
+    TestNode* nodeB = new TestNode();
+    EXPECT_GT(nodeB->generation(), genA);
+
+    // ptrA still dead — generation mismatch protects against ABA.
+    EXPECT_FALSE(ptrA);
+
+    nodeB->deleteLater();
+    Application::instance()->run();
+}
+
+TEST_F(CoreFixture, nodePtrIsAliveReflectsMarkedToDeleteState)
+{
+    TestNode* node = new TestNode();
+    NodePtr<TestNode> ptr(node);
+
+    // Before deleteLater: alive, not marked.
+    EXPECT_TRUE(ptr.isAlive());
+    EXPECT_FALSE(ptr.isMarkedToDelete());
+    EXPECT_TRUE(ptr);
+
+    node->deleteLater();
+
+    // After deleteLater but before run: still alive (memory valid), but marked.
+    EXPECT_TRUE(ptr.isAlive());
+    EXPECT_TRUE(ptr.isMarkedToDelete());
+    EXPECT_TRUE(ptr);
+
+    Application::instance()->run();
+
+    // After run: dead.
+    EXPECT_FALSE(ptr.isAlive());
+    EXPECT_TRUE(ptr.isMarkedToDelete());
+    EXPECT_FALSE(ptr);
+}
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);

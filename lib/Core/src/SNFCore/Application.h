@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -42,7 +43,7 @@ public:
      * @param node The node pointer to check
      * @return True if the node memory is accessible, false otherwise
      */
-    bool isNodeAlive(Node* node) const;
+    bool isNodeAlive(Node* node, std::uint64_t generation) const;
 
     /**
      * @brief Gets if the node pointer is marked to be deleted. If the node is
@@ -51,10 +52,11 @@ public:
      * @details It is important to check if the node is alive (memory accesible)
      * before calling this function.
      * @param node The node pointer to check
+     * @param generation The generation of the node at the time NodePtr was created
      * @return True if the node is marked to be deleted OR the node is not memory
      * accessible, false otherwise.
      */
-    bool isNodeMarkedToDelete(Node* node) const;
+    bool isNodeMarkedToDelete(Node* node, std::uint64_t generation) const;
 
     size_t getRootNodesToDeleteCount() const;
 
@@ -100,9 +102,14 @@ private:
 
     std::thread::id m_threadId;
 
-    //! This map is used to keep the nodes alive. The boolean value is used to
-    //! know if the node is marked to be deleted.
-    std::unordered_map<Node*, bool> m_aliveNodes;
+    struct NodeEntry {
+        std::uint64_t generation = 0;
+        bool markedForDelete = false;
+    };
+
+    //! This map is used to keep the nodes alive. The NodeEntry stores the
+    //! generation ID and whether the node is marked for deletion.
+    std::unordered_map<Node*, NodeEntry> m_aliveNodes;
     mutable std::mutex m_aliveNodesMutex;
 
     std::unordered_map<std::thread::id, std::unique_ptr<EventLoop>> m_eventLoops;

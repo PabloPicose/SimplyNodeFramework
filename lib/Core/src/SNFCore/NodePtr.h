@@ -14,9 +14,10 @@ class NodePtr
     static_assert(std::is_base_of_v<Node, T>, "T must be a subclass of Node");
 
     T* m_node = nullptr;
+    std::uint64_t m_generation = 0;
 
 public:
-    explicit NodePtr(T* node) : m_node(node) {}
+    explicit NodePtr(T* node) : m_node(node), m_generation(node ? node->generation() : 0) {}
 
     ~NodePtr() = default;
 
@@ -29,7 +30,7 @@ public:
      * is about to delete.
      * @returnTrue if the node memory is accessible, false otherwise
      */
-    bool isAlive() const { return Application::instance()->isNodeAlive(m_node); }
+    bool isAlive() const { return Application::instance()->isNodeAlive(m_node, m_generation); }
 
     /**
      * Gets if the node pointer is marked to be deleted. If the node is marked to
@@ -38,7 +39,7 @@ public:
      * @return True if the node is marked to be deleted OR the node is not memory
      * accessible, false otherwise.
      */
-    bool isMarkedToDelete() const { return Application::instance()->isNodeMarkedToDelete(m_node); }
+    bool isMarkedToDelete() const { return Application::instance()->isNodeMarkedToDelete(m_node, m_generation); }
 
     T* operator->() const
     {
