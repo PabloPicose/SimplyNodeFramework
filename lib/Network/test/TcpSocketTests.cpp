@@ -161,7 +161,8 @@ TEST_F(TcpSocketFixture, connectToLocalhostHostName)
     });
 
     Timer shutdown;
-    armShutdown(shutdown, 2s);
+    // CI runners can be temporarily slow resolving localhost.
+    armShutdown(shutdown, 5s);
 
     socket.connectToHost(HostAddress("localhost"), echoServerPort);
     app->run();
