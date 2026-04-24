@@ -1,0 +1,80 @@
+/**
+ * @defgroup SNFCore SNFCore
+ * @brief Event loop, node ownership model, timers, and signals.
+ *
+ * SNFCore is the foundational package of SimplyNodeFramework. It provides:
+ * - A hierarchical **Node** tree with deterministic ownership and deletion.
+ * - A per-thread **EventLoop** for scheduling tasks, timers, and I/O.
+ * - A type-safe **Signal/Connection** system with Direct and Queued delivery.
+ * - **Timer** for repeating and one-shot callbacks on the owner thread.
+ * - **NodePtr\<T\>** for safe, generation-tracked node references.
+ *
+ * @note All classes target Linux and require C++17 or later.
+ */
+
+/**
+ * @defgroup SNFCore_Application Application
+ * @ingroup SNFCore
+ * @brief Application singleton: lifecycle, root-node registry, and
+ *        per-thread EventLoop management.
+ */
+
+/**
+ * @defgroup SNFCore_Nodes Node System
+ * @ingroup SNFCore
+ * @brief Hierarchical node ownership, parent-child trees, and safe
+ *        node references via NodePtr.
+ */
+
+/**
+ * @defgroup SNFCore_Signals Signals & Connections
+ * @ingroup SNFCore
+ * @brief Type-safe signal/slot system with Direct (synchronous) and
+ *        Queued (cross-thread) delivery.
+ */
+
+/**
+ * @defgroup SNFCore_Timers Timers
+ * @ingroup SNFCore
+ * @brief Repeating and single-shot timers, scheduled by the EventLoop.
+ */
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * @defgroup SNFNetwork SNFNetwork
+ * @brief Non-blocking TCP and Unix domain socket networking, built on SNFCore.
+ *
+ * SNFNetwork provides event-driven TCP and Unix domain socket support.
+ * All I/O is registered with the owner thread's EventLoop via epoll.
+ * Incoming connections and data are delivered through signals.
+ *
+ * @note SNFNetwork depends on SNFCore. Linking against SNFNetwork
+ *       automatically pulls in SNFCore.
+ */
+
+/**
+ * @defgroup SNFNetwork_IO I/O Events
+ * @ingroup SNFNetwork
+ * @brief File-descriptor watcher base class (IOEvent) and associated flags.
+ */
+
+/**
+ * @defgroup SNFNetwork_TCP TCP Networking
+ * @ingroup SNFNetwork
+ * @brief Non-blocking TCP server (TcpServer) and client/accepted socket
+ *        (TcpSocket).
+ */
+
+/**
+ * @defgroup SNFNetwork_Unix Unix Domain Sockets
+ * @ingroup SNFNetwork
+ * @brief Non-blocking Unix domain socket server (LocalServer) and
+ *        client/accepted socket (LocalSocket).
+ */
+
+/**
+ * @defgroup SNFNetwork_Util Utilities
+ * @ingroup SNFNetwork
+ * @brief Host address resolution and helper types (HostAddress).
+ */

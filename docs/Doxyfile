@@ -1,0 +1,55 @@
+# Doxygen configuration for SimplyNodeFramework
+# Run:  doxygen docs/Doxyfile
+# Output: docs/html/index.html
+
+PROJECT_NAME           = "SimplyNodeFramework"
+PROJECT_NUMBER         = 0.1.0
+PROJECT_BRIEF          = "Event-driven, node-based C++ framework for Linux"
+
+OUTPUT_DIRECTORY       = docs
+
+INPUT                  = README.md \
+                         lib/Core/src \
+                         lib/Network/src \
+                         docs/groups.dox
+
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h *.dox
+
+# Use README.md as the Doxygen main page
+USE_MDFILE_AS_MAINPAGE = README.md
+
+# ── Output formats ──────────────────────────────────────────────────────────
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+GENERATE_LATEX         = NO
+
+# ── Extraction options ───────────────────────────────────────────────────────
+# EXTRACT_ALL = NO so that undocumented symbols trigger warnings
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+
+# ── Warning settings (quality gate: zero warnings on public headers) ─────────
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+# WARN_NO_PARAMDOC: disable because brief descriptions cover return semantics inline.
+WARN_NO_PARAMDOC       = NO
+WARN_AS_ERROR          = NO
+
+# ── Exclude internal implementation symbols ───────────────────────────────────
+# These are not part of the public API.
+EXCLUDE_SYMBOLS        = snf::detail snf::detail::* snf::EpollPoller
+
+# ── C++ settings ─────────────────────────────────────────────────────────────
+BUILTIN_STL_SUPPORT    = YES
+JAVADOC_AUTOBRIEF      = YES
+
+# ── Navigation and appearance ────────────────────────────────────────────────
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+SORT_MEMBER_DOCS       = YES
+
+# ── Miscellaneous ─────────────────────────────────────────────────────────────
+HAVE_DOT               = NO
+QUIET                  = NO

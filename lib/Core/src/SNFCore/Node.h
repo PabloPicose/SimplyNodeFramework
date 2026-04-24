@@ -1,5 +1,11 @@
 #pragma once
 
+/**
+ * @file Node.h
+ * @brief Base class for all objects in the node ownership tree.
+ * @ingroup SNFCore_Nodes
+ */
+
 #include <cstdint>
 #include <string>
 #include <thread>
@@ -9,13 +15,34 @@ namespace snf {
 
 class EventLoop;
 
+/**
+ * @class Node
+ * @ingroup SNFCore_Nodes
+ * @brief Abstract base class for all framework-managed objects.
+ *
+ * Every `Node` participates in a parent-child ownership tree. When a parent
+ * is destroyed it recursively destroys its children. A node without a parent
+ * is called a *root node* and is tracked by the `Application`.
+ *
+ * Nodes must always be heap-allocated (via `new`). Stack allocation is
+ * supported only for leaf nodes that are never passed to `addChild()` and
+ * never call `deleteLater()`.
+ *
+ * Each node is bound to the thread on which it was constructed. Use
+ * `ownerEventLoop()` to post work back to that thread.
+ *
+ * Subclasses must implement `update()`, which is called once per event-loop
+ * iteration by `run()`.
+ */
 class Node
 {
 public:
     virtual ~Node();
 
+    /** @brief Sets a human-readable name for debugging purposes. */
     void setName(const std::string& name);
 
+    /** @brief Returns the node's name, or an empty string if none was set. */
     std::string getName() const;
 
     /**
@@ -30,37 +57,92 @@ public:
      */
     void addChild(Node* child);
 
+    /**
+     * @brief Returns the child at the given zero-based index.
+     * @param index Must be less than `childrenCount()`.
+     */
     Node* getChild(std::size_t index) const;
 
+    /** @brief Returns `true` if @p child is a direct child of this node. */
     bool isChild(Node* child) const;
 
+    /**
+     * @brief Schedules this node for deletion on the next event-loop
+     *        iteration.
+     *
+     * Safe to call from within `update()`, signal handlers, or any context
+     * where immediate `delete` would be unsafe. The node's `NodePtr<T>`
+     * references become expired immediately after this call.
+     *
+     * @note Do not call `deleteLater()` on stack-allocated nodes.
+     */
     void deleteLater();
 
     /**
-     * This function is called from the Application. Can be called to instantly
-     * update the node. There is not a loop inside.
+     * @brief Calls `update()` once.
+     *
+     * Normally called by the `Application` each event-loop iteration.
+     * Can also be called manually to trigger an immediate update outside
+     * the loop.
      */
     void run();
 
+    /**
+     * @brief Reparents this node to @p parent.
+     *
+     * If the node was previously a root node it is removed from the
+     * `Application`'s root list. The new parent takes ownership.
+     */
     void setParent(Node* parent);
 
+    /** @brief Returns the parent node, or `nullptr` if this is a root node. */
     Node* parent() const;
 
+    /** @brief Returns the number of direct children. */
     std::size_t childrenCount() const;
 
+    /** @brief Returns `true` if this node has no parent. */
     bool isRoot() const;
 
+    /** @brief Returns the number of children currently pending deferred deletion. */
     size_t childrenToDeleteCount() const;
 
+    /** @brief Returns the thread ID of the thread that constructed this node. */
     std::thread::id ownerThreadId() const;
 
+    /**
+     * @brief Returns the EventLoop of the owner thread.
+     *
+     * Returns `nullptr` if the owner thread has not yet called
+     * `Application::getOrCreateCurrentThreadEventLoop()`.
+     */
     EventLoop* ownerEventLoop() const;
 
+    /**
+     * @brief Returns the generation counter used by `NodePtr<T>` to detect
+     *        stale references.
+     *
+     * The counter is unique per node allocation and is incremented when the
+     * node is registered with the `Application`.
+     */
     std::uint64_t generation() const;
 
 protected:
+    /**
+     * @brief Constructs a Node, optionally attaching it to @p parent.
+     * @param parent If non-null, the new node becomes a child of @p parent.
+     *               If null, the node is registered as a root node with the
+     *               Application.
+     */
     explicit Node(Node* parent = nullptr);
 
+    /**
+     * @brief Called once per event-loop iteration by `run()`.
+     *
+     * Override to implement per-frame logic. The implementation must not
+     * block; long-running work should be posted to the event loop or run on
+     * a separate thread.
+     */
     virtual void update() = 0;
 
 private:

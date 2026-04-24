@@ -1,5 +1,11 @@
 #pragma once
 
+/**
+ * @file NodePtr.h
+ * @brief Generation-tracked safe pointer for Node subclasses.
+ * @ingroup SNFCore_Nodes
+ */
+
 #include <SNFCore/Application.h>
 #include <SNFCore/Node.h>
 
@@ -8,6 +14,28 @@
 
 namespace snf {
 
+/**
+ * @class NodePtr
+ * @ingroup SNFCore_Nodes
+ * @brief A non-owning, generation-tracked pointer to a `Node` subclass.
+ *
+ * `NodePtr<T>` stores a raw pointer and the *generation counter* that was
+ * assigned to the node at construction time. Before every dereference it
+ * asks the `Application` whether the node is still alive and matches the
+ * expected generation, preventing use-after-free bugs.
+ *
+ * A `NodePtr<T>` evaluates to `false` (expired) once the target node has
+ * been deleted or its generation has changed.
+ *
+ * @tparam T A class that derives from `Node`.
+ *
+ * @code
+ * NodePtr<MyNode> ptr(node);
+ * if (ptr) {
+ *     ptr->doWork(); // safe
+ * }
+ * @endcode
+ */
 template <typename T>
 class NodePtr
 {
@@ -17,30 +45,39 @@ class NodePtr
     std::uint64_t m_generation = 0;
 
 public:
+    /** @brief Constructs a NodePtr wrapping @p node, capturing its current generation. */
     explicit NodePtr(T* node) : m_node(node), m_generation(node ? node->generation() : 0) {}
 
     ~NodePtr() = default;
 
+    /** @brief Returns the underlying raw pointer without performing a liveness check. */
     T* data() const { return m_node; }
 
+    /** @brief Returns the underlying raw pointer without performing a liveness check. */
     T* get() const { return m_node; }
 
     /**
-     * @brief Gets if the node pointer is still valid. This not checks if the node
-     * is about to delete.
-     * @returnTrue if the node memory is accessible, false otherwise
+     * @brief Returns `true` if the node memory is accessible.
+     *
+     * Does **not** check whether the node is marked for deferred deletion.
+     * Use `isMarkedToDelete()` for that check.
      */
     bool isAlive() const { return Application::instance()->isNodeAlive(m_node, m_generation); }
 
     /**
-     * Gets if the node pointer is marked to be deleted. If the node is marked to
-     * be deleted OR the node is not memory accessible, this function returns
-     * true.
-     * @return True if the node is marked to be deleted OR the node is not memory
-     * accessible, false otherwise.
+     * @brief Returns `true` if the node is marked for deferred deletion or
+     *        is no longer memory-accessible.
+     *
+     * A `NodePtr` for which `isMarkedToDelete()` returns `true` should be
+     * treated as expired and must not be dereferenced.
      */
     bool isMarkedToDelete() const { return Application::instance()->isNodeMarkedToDelete(m_node, m_generation); }
 
+    /**
+     * @brief Dereferences the pointer.
+     * @return A raw pointer to the node, or `nullptr` if the node is no
+     *         longer alive.
+     */
     T* operator->() const
     {
         if (m_node && isAlive()) {
@@ -49,6 +86,11 @@ public:
         return nullptr;
     }
 
+    /**
+     * @brief Dereferences the pointer.
+     * @return A reference to the node.
+     * @throws std::runtime_error if the node is no longer alive.
+     */
     T& operator*() const
     {
         if (m_node && isAlive()) {
@@ -57,15 +99,24 @@ public:
         throw std::runtime_error("Node is not alive");
     }
 
+    /** @brief Returns `true` if the node is alive (not deleted and generation matches). */
     explicit operator bool() const { return m_node && isAlive(); }
 
+    /** @brief Returns `true` if both pointers refer to the same node instance. */
     bool operator==(const NodePtr<T>& other) const { return m_node == other.m_node; }
 
+    /** @brief Returns `true` if this pointer refers to @p other. */
     bool operator==(const Node* other) const { return m_node == other; }
 
+    /** @brief Resets the pointer to @p pObj (or null). Captures the new node's generation. */
     void reset(T* pObj = nullptr) { m_node = pObj; }
 
-    //! Dynamic cast to another type
+    /**
+     * @brief Performs a `dynamic_cast` to `NodePtr<U>`.
+     * @tparam U Target node type.
+     * @return A `NodePtr<U>` wrapping the cast result; evaluates to `false`
+     *         if the cast fails or the node is not alive.
+     */
     template <typename U>
     NodePtr<U> dynamicCast() const
     {

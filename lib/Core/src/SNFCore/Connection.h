@@ -1,5 +1,11 @@
 #pragma once
 
+/**
+ * @file Connection.h
+ * @brief Type-safe signal/slot system with Direct and Queued delivery.
+ * @ingroup SNFCore_Signals
+ */
+
 #include <SNFCore/EventLoop.h>
 #include <SNFCore/NodePtr.h>
 
@@ -15,6 +21,16 @@
 
 namespace snf {
 
+/**
+ * @enum ConnectionType
+ * @ingroup SNFCore_Signals
+ * @brief Controls how a signal is delivered to a connected slot.
+ *
+ * | Value    | Delivery | Typical use |
+ * |----------|----------|-------------|
+ * | `Direct` | Synchronous, on the emitter's thread | Same-thread connections |
+ * | `Queued` | Posted to the receiver's EventLoop   | Cross-thread connections |
+ */
 enum class ConnectionType {
     Direct,
     Queued,
@@ -34,23 +50,84 @@ bool canInvokeReceiver(const NodePtr<Receiver>& receiver)
 
 }  // namespace detail
 
+/**
+ * @class Connection
+ * @ingroup SNFCore_Signals
+ * @brief Handle representing a single signal-to-slot connection.
+ *
+ * A `Connection` is returned by `Signal::connect()`. Call `disconnect()` to
+ * permanently sever the link; after that the slot will never be invoked
+ * again even if the signal is emitted.
+ *
+ * Connections to a `NodePtr<Receiver>` are also invalidated automatically
+ * when the receiver is deleted.
+ */
 class Connection
 {
 public:
+    /** @brief Constructs an empty (disconnected) Connection. */
     Connection() = default;
+    /** @brief Internal constructor used by Signal::connect(). */
     explicit Connection(std::shared_ptr<detail::ConnectionState> state);
 
+    /**
+     * @brief Permanently disconnects the slot.
+     *
+     * After this call `connected()` returns `false` and the associated
+     * slot will never be invoked.
+     */
     void disconnect();
+
+    /** @brief Returns `true` if the connection is still active. */
     bool connected() const noexcept;
 
 private:
     std::shared_ptr<detail::ConnectionState> m_state;
 };
 
+/**
+ * @class Signal
+ * @ingroup SNFCore_Signals
+ * @brief Type-safe, multi-slot signal.
+ *
+ * A `Signal<Args...>` can be connected to any number of slots. When
+ * `emit()` (or `operator()`) is called, all active slots receive the
+ * arguments.
+ *
+ * **Connecting a free function or lambda:**
+ * @code
+ * snf::Signal<int> sig;
+ * snf::Connection c = sig.connect([](int v) { // handle v });
+ * sig.emit(42);
+ * c.disconnect();
+ * @endcode
+ *
+ * **Connecting a member function with lifetime tracking:**
+ * @code
+ * sig.connect(snf::NodePtr<MyNode>(node), &MyNode::onValue);
+ * // or with explicit connection type:
+ * sig.connect(snf::NodePtr<MyNode>(node), &MyNode::onValue,
+ *             snf::ConnectionType::Queued);
+ * @endcode
+ *
+ * @tparam Args Signal argument types.
+ *
+ * @note `Signal` is thread-safe: `connect()` and `emit()` may be called
+ *       from different threads simultaneously.
+ */
 template <typename... Args>
 class Signal
 {
 public:
+    /**
+     * @brief Connects a free function or lambda slot.
+     *
+     * The slot is always invoked directly (synchronously) on the emitter's
+     * thread.
+     *
+     * @param slot Callable matching `void(Args...)`.
+     * @return A `Connection` handle that can be used to disconnect later.
+     */
     Connection connect(std::function<void(Args...)> slot)
     {
         auto state = std::make_shared<detail::ConnectionState>();
@@ -63,6 +140,16 @@ public:
         return Connection(std::move(state));
     }
 
+    /**
+     * @brief Connects a member function slot with automatic lifetime tracking.
+     *
+     * The connection is automatically invalidated when @p receiver is
+     * deleted. Use `ConnectionType::Queued` for cross-thread delivery.
+     *
+     * @param receiver Safe reference to the receiver node.
+     * @param method   Member function pointer matching `void (Receiver::*)(Args...)`.
+     * @param type     `Direct` (default) or `Queued`.
+     */
     template <typename Receiver>
     Connection connect(NodePtr<Receiver> receiver,
                        void (Receiver::*method)(Args...),
@@ -74,6 +161,13 @@ public:
             type);
     }
 
+    /**
+     * @brief Connects a generic callable with automatic receiver lifetime tracking.
+     *
+     * @param receiver Safe reference to the receiver node.
+     * @param func     Callable matching `void(Receiver&, Args...)`.
+     * @param type     `Direct` (default) or `Queued`.
+     */
     template <typename Receiver, typename Func>
     Connection connect(NodePtr<Receiver> receiver, Func&& func, ConnectionType type = ConnectionType::Direct)
     {
@@ -129,6 +223,14 @@ public:
         return Connection(std::move(state));
     }
 
+    /**
+     * @brief Emits the signal, invoking all active connected slots.
+     *
+     * `Direct` slots are called synchronously in the order they were
+     * connected. `Queued` slots are posted to the receiver's EventLoop.
+     *
+     * Disconnected or receiver-expired slots are pruned lazily.
+     */
     void emit(Args... args)
     {
         std::vector<std::shared_ptr<SlotEntry>> slots;

@@ -1,5 +1,11 @@
 #pragma once
 
+/**
+ * @file Application.h
+ * @brief Application singleton: event loop lifecycle and node registry.
+ * @ingroup SNFCore_Application
+ */
+
 #include <cstdint>
 #include <list>
 #include <memory>
@@ -14,33 +20,88 @@ namespace snf {
 class Node;
 class EventLoop;
 
+/**
+ * @class Application
+ * @ingroup SNFCore_Application
+ * @brief Singleton that owns the main thread's EventLoop, tracks all live
+ *        nodes, and drives the application run loop.
+ *
+ * Exactly one `Application` instance must exist for the lifetime of the
+ * program. It registers every `Node` that is created and provides the
+ * mechanism to check whether a raw `Node*` is still valid (used internally
+ * by `NodePtr<T>`).
+ *
+ * Typical usage:
+ * @code
+ * int main(int argc, char** argv)
+ * {
+ *     snf::Application app(argc, argv);
+ *     // ... create nodes, connect signals ...
+ *     return app.run(); // blocks until quit()
+ * }
+ * @endcode
+ */
 class Application
 {
 public:
+    /**
+     * @brief Constructs the Application singleton.
+     * @param argc Argument count from `main()`.
+     * @param argv Argument values from `main()`.
+     */
     Application(int argc, char** argv);
 
     ~Application();
 
+    /** @brief Returns the absolute path of the running executable. */
     std::string getFullExecutablePath() const;
 
+    /**
+     * @brief Returns the global Application singleton.
+     * @return Pointer to the single Application instance, or `nullptr` if none
+     *         has been constructed yet.
+     */
     static Application* instance();
 
+    /** @brief Returns the thread ID of the main thread (where Application was constructed). */
     static std::thread::id threadId();
 
+    /**
+     * @brief Runs one iteration of the main event loop without blocking.
+     *
+     * Processes all pending tasks, due timers, and I/O events once, then
+     * returns. Useful for integrating the event loop into an external loop.
+     */
     void loopOnce();
 
+    /**
+     * @brief Starts the main event loop and blocks until `quit()` is called
+     *        or the last EventLoop stops.
+     * @return Exit code (always 0 in the current implementation).
+     */
     int run();
 
+    /**
+     * @brief Requests all EventLoops to stop and unblocks `run()`.
+     *
+     * Safe to call from any thread or from within a signal handler.
+     */
     void quit();
 
+    /** @brief Returns the number of current root nodes. */
     std::size_t getRootNodesCount() const;
 
+    /**
+     * @brief Returns the root node at the given index.
+     * @param index Zero-based index; must be less than `getRootNodesCount()`.
+     */
     Node* getRootNode(std::size_t index) const;
 
     /**
      * @brief Gets if the node pointer is still valid. This not checks if the node
      * is about to delete.
-     * @param node The node pointer to check
+     * @param node The node pointer to check.
+     * @param generation The expected generation of the node.
      * @return True if the node memory is accessible, false otherwise
      */
     bool isNodeAlive(Node* node, std::uint64_t generation) const;
@@ -58,20 +119,37 @@ public:
      */
     bool isNodeMarkedToDelete(Node* node, std::uint64_t generation) const;
 
+    /** @brief Returns the number of root nodes pending deferred deletion. */
     size_t getRootNodesToDeleteCount() const;
 
+    /** @brief Returns the total number of nodes currently registered (alive). */
     size_t getAliveNodesCount() const;
 
+    /** @brief Returns the number of alive nodes that are marked for deletion. */
     size_t getAliveNodesToDeleteCount() const;
 
+    /** @brief Sets a human-readable version string for the application. */
     void setApplicationVersion(const std::string& version);
 
+    /** @brief Returns the command-line arguments passed to the constructor. */
     std::list<std::string> getArguments() const;
 
+    /**
+     * @brief Returns the EventLoop for the calling thread, creating one if
+     *        it does not exist yet.
+     *
+     * The returned EventLoop is owned by the Application and lives until the
+     * Application is destroyed.
+     */
     EventLoop* getOrCreateCurrentThreadEventLoop();
 
+    /**
+     * @brief Returns the EventLoop associated with the given thread ID, or
+     *        `nullptr` if no EventLoop has been created for that thread.
+     */
     EventLoop* getEventLoopByThreadId(std::thread::id threadId) const;
 
+    /** @brief Returns the total number of EventLoops currently managed. */
     size_t getEventLoopCount() const;
 
     /**
