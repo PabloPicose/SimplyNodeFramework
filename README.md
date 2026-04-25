@@ -84,24 +84,31 @@ gcovr -r . build-coverage \
 ```cmake
 include(FetchContent)
 
-FetchContent_Declare(
-    SimplyNodeFramework
-    GIT_REPOSITORY https://github.com/<owner>/SimplyNodeFramework.git
-    GIT_TAG main
-)
+if(NOT TARGET SNFCore::SNFCore OR NOT TARGET SNFNetwork::SNFNetwork)
+    # Disable tests when consumed as a dependency.
+    set(SNF_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 
-# Disable tests when consumed as a dependency
-set(SNF_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        SimplyNodeFramework
+        GIT_REPOSITORY https://github.com/PabloPicose/SimplyNodeFramework.git
+        GIT_TAG main
+    )
 
-FetchContent_MakeAvailable(SimplyNodeFramework)
+    FetchContent_MakeAvailable(SimplyNodeFramework)
+endif()
 
 add_executable(app main.cpp)
-target_link_libraries(app PRIVATE SNFCore)
+target_link_libraries(app PRIVATE SNFCore::SNFCore)
 # For networking support use SNFNetwork (automatically pulls in SNFCore):
-# target_link_libraries(app PRIVATE SNFNetwork)
+# target_link_libraries(app PRIVATE SNFNetwork::SNFNetwork)
 ```
 
 `SNF_ENABLE_TESTS` defaults to `ON` only when the project is the top-level CMake project.
+
+The `if(NOT TARGET ...)` guard is useful when your project can be configured in environments where `SNFCore::SNFCore` or `SNFNetwork::SNFNetwork` may already exist.
+
+The exported namespaced targets are `SNFCore::SNFCore` and `SNFNetwork::SNFNetwork`. Those are the recommended target names to use both in `if(NOT TARGET ...)` guards and in `target_link_libraries(...)`.
+
 
 ### find\_package after installation
 
@@ -120,7 +127,7 @@ find_package(SNFCore CONFIG REQUIRED)
 find_package(SNFNetwork CONFIG REQUIRED)   # also pulls in SNFCore
 
 add_executable(app main.cpp)
-target_link_libraries(app PRIVATE SNFNetwork)
+target_link_libraries(app PRIVATE SNFNetwork::SNFNetwork)
 ```
 
 Available targets: `SNFCore`, `SNFCore::SNFCore`, `SNFNetwork`, `SNFNetwork::SNFNetwork`.
