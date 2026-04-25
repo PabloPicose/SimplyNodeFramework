@@ -1,6 +1,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -661,8 +662,12 @@ TEST_F(CoreFixture, quitStopsMultipleWorkerEventLoopsWithPendingTimers)
     workers.reserve(kWorkerCount);
 
     std::vector<std::thread::id> workerThreadIds(kWorkerCount);
-    std::vector<bool> runReturned(kWorkerCount, false);
+    std::vector<std::atomic_bool> runReturned(kWorkerCount);
     std::vector<std::chrono::steady_clock::duration> runDurations(kWorkerCount);
+
+    for (std::size_t i = 0; i < kWorkerCount; ++i) {
+        runReturned[i].store(false, std::memory_order_relaxed);
+    }
 
     for (std::size_t i = 0; i < kWorkerCount; ++i) {
         workers.emplace_back([&, i]() {
@@ -685,7 +690,7 @@ TEST_F(CoreFixture, quitStopsMultipleWorkerEventLoopsWithPendingTimers)
             const auto startedAt = std::chrono::steady_clock::now();
             loop->run();
             runDurations[i] = std::chrono::steady_clock::now() - startedAt;
-            runReturned[i] = true;
+            runReturned[i].store(true, std::memory_order_release);
         });
     }
 
@@ -710,7 +715,7 @@ TEST_F(CoreFixture, quitStopsMultipleWorkerEventLoopsWithPendingTimers)
     }
 
     for (std::size_t i = 0; i < kWorkerCount; ++i) {
-        EXPECT_TRUE(runReturned[i]);
+        EXPECT_TRUE(runReturned[i].load(std::memory_order_acquire));
         EXPECT_LT(runDurations[i], 1s);
     }
 }
