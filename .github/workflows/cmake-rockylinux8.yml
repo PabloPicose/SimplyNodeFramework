@@ -1,4 +1,4 @@
-name: CMake Rocky Linux 8
+name: Rocky Linux 8
 
 on:
   push:

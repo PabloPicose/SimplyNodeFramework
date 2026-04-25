@@ -1,4 +1,4 @@
-name: CMake Debian 12
+name: Debian 12
 
 on:
   push:
