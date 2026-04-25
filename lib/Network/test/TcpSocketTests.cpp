@@ -241,6 +241,178 @@ TEST_F(TcpSocketFixture, defaultIsNonBlockingAndCanChangeMode)
     EXPECT_FALSE(socket.isBlocking());
 }
 
+TEST_F(TcpSocketFixture, blockingSocketConnectAndCloseSafely)
+{
+    TcpSocket socket(true);
+
+    bool didConnect = false;
+    bool didDisconnect = false;
+    std::string errorMessage;
+
+    socket.connected.connect([&]() {
+        didConnect = true;
+        socket.close();
+    });
+
+    socket.disconnected.connect([&]() {
+        didDisconnect = true;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    socket.errorOccurred.connect([&](const std::string& error) {
+        errorMessage = error;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 3s);
+
+    socket.connectToHost(HostAddress::LocalHost, echoServerPort);
+    app->run();
+
+    EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
+    EXPECT_TRUE(socket.isBlocking());
+    EXPECT_TRUE(didConnect);
+    EXPECT_TRUE(didDisconnect);
+    EXPECT_EQ(socket.state(), TcpSocketState::Disconnected);
+}
+
+TEST_F(TcpSocketFixture, blockingConnectToHostFromOtherThreadIsMarshaled)
+{
+    TcpSocket socket(true);
+
+    bool didConnect = false;
+    std::string errorMessage;
+
+    socket.connected.connect([&]() {
+        didConnect = true;
+        socket.close();
+    });
+
+    socket.disconnected.connect([&]() {
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    socket.errorOccurred.connect([&](const std::string& error) {
+        errorMessage = error;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    std::thread connector([&]() {
+        socket.connectToHost(HostAddress::LocalHost, echoServerPort);
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 3s);
+    app->run();
+
+    connector.join();
+
+    EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
+    EXPECT_TRUE(didConnect);
+    EXPECT_EQ(socket.state(), TcpSocketState::Disconnected);
+}
+
+TEST_F(TcpSocketFixture, blockingConnectToHostStringFromOtherThreadIsMarshaled)
+{
+    TcpSocket socket(true);
+
+    bool didConnect = false;
+    std::string errorMessage;
+
+    socket.connected.connect([&]() {
+        didConnect = true;
+        socket.close();
+    });
+
+    socket.disconnected.connect([&]() {
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    socket.errorOccurred.connect([&](const std::string& error) {
+        errorMessage = error;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    std::thread connector([&]() {
+        socket.connectToHost("localhost", echoServerPort);
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 3s);
+    app->run();
+
+    connector.join();
+
+    EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
+    EXPECT_TRUE(didConnect);
+    EXPECT_EQ(socket.state(), TcpSocketState::Disconnected);
+}
+
+TEST_F(TcpSocketFixture, blockingSetBlockingFromOtherThreadIsApplied)
+{
+    TcpSocket socket(true);
+
+    bool didConnect = false;
+    std::string errorMessage;
+
+    socket.connected.connect([&]() {
+        didConnect = true;
+
+        std::thread worker([&]() { socket.setBlocking(false); });
+        worker.join();
+
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    socket.errorOccurred.connect([&](const std::string& error) {
+        errorMessage = error;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 3s);
+
+    socket.connectToHost("localhost", echoServerPort);
+    app->run();
+
+    EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
+    EXPECT_TRUE(didConnect);
+    EXPECT_FALSE(socket.isBlocking());
+}
+
+TEST_F(TcpSocketFixture, adoptedInvalidDescriptorEmitsErrorAndErrorState)
+{
+    TcpSocket socket(-1, false);
+
+    std::string errorMessage;
+    socket.errorOccurred.connect([&](const std::string& error) { errorMessage = error; });
+
+    // Trigger dispatch of the asynchronously emitted constructor error signal.
+    Timer shutdown;
+    armShutdown(shutdown, 100ms);
+    app->run();
+
+    EXPECT_FALSE(errorMessage.empty());
+    EXPECT_EQ(socket.state(), TcpSocketState::Error);
+}
+
 TEST_F(TcpSocketFixture, closeFromMultipleThreadsEmitsDisconnectedOnce)
 {
     TcpSocket socket(false);

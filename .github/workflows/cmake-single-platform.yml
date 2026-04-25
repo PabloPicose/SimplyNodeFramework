@@ -34,14 +34,14 @@ jobs:
 
     - name: Test Core
       working-directory: ${{github.workspace}}/build
-      run: ctest -C ${{env.BUILD_TYPE}} -R SNFCoreTests --output-on-failure --timeout 180
+      run: timeout 15m ctest -C ${{env.BUILD_TYPE}} -R SNFCoreTests --output-on-failure --timeout 180
 
     - name: Test Network
       working-directory: ${{github.workspace}}/build
       run: |
-        ctest -C ${{env.BUILD_TYPE}} -R SNFNetworkTests --output-on-failure --timeout 180 || {
+        timeout 15m ctest -C ${{env.BUILD_TYPE}} -R SNFNetworkTests --output-on-failure --timeout 180 || {
           echo "SNFNetworkTests failed. Re-running with verbose output..."
-          ctest -C ${{env.BUILD_TYPE}} -R SNFNetworkTests -VV --output-on-failure --timeout 180
+          timeout 15m ctest -C ${{env.BUILD_TYPE}} -R SNFNetworkTests -VV --output-on-failure --timeout 180
           exit 1
         }
 
@@ -70,7 +70,7 @@ jobs:
     - name: Test (coverage build)
       run: |
         mkdir -p ${{github.workspace}}/coverage
-        ctest --test-dir ${{github.workspace}}/build-coverage --output-on-failure --timeout 180 \
+        timeout 15m ctest --test-dir ${{github.workspace}}/build-coverage --output-on-failure --timeout 180 \
           --output-junit ${{github.workspace}}/coverage/junit.xml
 
     - name: Install gcovr
