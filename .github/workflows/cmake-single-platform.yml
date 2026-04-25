@@ -109,7 +109,7 @@ jobs:
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
-        files: coverage/coverage.xml,coverage/junit.xml
+        files: coverage/coverage.xml
         flags: ubuntu
         name: ubuntu-gcovr
         fail_ci_if_error: true
