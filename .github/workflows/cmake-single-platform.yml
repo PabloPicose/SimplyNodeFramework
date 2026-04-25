@@ -6,7 +6,6 @@ on:
   push:
     branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
 
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
@@ -98,6 +97,13 @@ jobs:
           --exclude 'lib/.*/test/' \
           --exclude 'build-coverage/_deps/' \
           --txt > coverage/coverage.txt
+
+    - name: Upload test results to Codecov
+      if: ${{ !cancelled() }}
+      uses: codecov/test-results-action@v1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: coverage/junit.xml
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5
