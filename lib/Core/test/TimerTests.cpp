@@ -264,3 +264,68 @@ TEST_F(TimerFixture, restartSuppressesStaleScheduledTimeout)
     EXPECT_EQ(timeoutCount, 0);
     EXPECT_FALSE(timer.isActive());
 }
+
+TEST_F(TimerFixture, startWithoutArgumentsUsesConfiguredInterval)
+{
+    Timer timer;
+
+    EXPECT_FALSE(timer.isSingleShot());
+
+    timer.setInterval(15ms);
+    EXPECT_EQ(timer.interval(), 15ms);
+
+    timer.setSingleShot(true);
+    EXPECT_TRUE(timer.isSingleShot());
+
+    int timeoutCount = 0;
+    std::thread::id callbackThread;
+
+    timer.timeout.connect([&]() {
+        ++timeoutCount;
+        callbackThread = std::this_thread::get_id();
+    });
+
+    timer.start();
+    app->run();
+
+    EXPECT_EQ(timeoutCount, 1);
+    EXPECT_EQ(callbackThread, timer.ownerThreadId());
+    EXPECT_FALSE(timer.isActive());
+}
+
+TEST_F(TimerFixture, startWithoutArgumentsFromForeignThreadUsesConfiguredInterval)
+{
+    Timer timer;
+
+    timer.setInterval(20ms);
+    EXPECT_EQ(timer.interval(), 20ms);
+
+    timer.setSingleShot(true);
+    EXPECT_TRUE(timer.isSingleShot());
+
+    int timeoutCount = 0;
+    std::thread::id callbackThread;
+
+    timer.timeout.connect([&]() {
+        ++timeoutCount;
+        callbackThread = std::this_thread::get_id();
+    });
+
+    Timer shutdownTimer;
+    shutdownTimer.setSingleShot(true);
+    shutdownTimer.timeout.connect([&]() {
+        if (EventLoop* loop = shutdownTimer.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+    shutdownTimer.start(100ms);
+
+    std::thread worker([&]() { timer.start(); });
+    worker.join();
+
+    app->run();
+
+    EXPECT_EQ(timeoutCount, 1);
+    EXPECT_EQ(callbackThread, timer.ownerThreadId());
+    EXPECT_FALSE(timer.isActive());
+}
