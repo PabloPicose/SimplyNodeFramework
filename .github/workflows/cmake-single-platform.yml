@@ -51,7 +51,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
 
     steps:
     - uses: actions/checkout@v4
@@ -100,7 +99,7 @@ jobs:
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5
       with:
-        use_oidc: true
+        token: ${{ secrets.CODECOV_TOKEN }}
         files: coverage/coverage.xml
         flags: ubuntu
         name: ubuntu-gcovr
