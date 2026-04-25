@@ -1,6 +1,6 @@
 # This starter workflow is for a CMake project running on a single platform. There is a different starter workflow if you need cross-platform coverage.
 # See: https://github.com/actions/starter-workflows/blob/main/ci/cmake-multi-platform.yml
-name: CMake on a single platform
+name: CMake Ubuntu (build and test)
 
 on:
   push:
@@ -45,4 +45,88 @@ jobs:
           ctest -C ${{env.BUILD_TYPE}} -R SNFNetworkTests -VV --output-on-failure --timeout 180
           exit 1
         }
+
+  coverage:
+    name: Ubuntu coverage (gcovr)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure CMake (coverage)
+      run: >
+        cmake -B ${{github.workspace}}/build-coverage
+        -DCMAKE_BUILD_TYPE=Debug
+        -DSNF_ENABLE_TESTS=ON
+        -DCMAKE_C_FLAGS='--coverage'
+        -DCMAKE_CXX_FLAGS='--coverage'
+        -DCMAKE_EXE_LINKER_FLAGS='--coverage'
+        -DCMAKE_SHARED_LINKER_FLAGS='--coverage'
+
+    - name: Build (coverage)
+      run: cmake --build ${{github.workspace}}/build-coverage --config Debug
+
+    - name: Test (coverage build)
+      run: ctest --test-dir ${{github.workspace}}/build-coverage --output-on-failure --timeout 180
+
+    - name: Install gcovr
+      run: python3 -m pip install --upgrade gcovr
+
+    - name: Generate coverage reports
+      working-directory: ${{github.workspace}}
+      run: |
+        mkdir -p coverage
+        gcovr -r . build-coverage \
+          --filter 'lib/.*/src/' \
+          --exclude 'lib/.*/test/' \
+          --exclude 'build-coverage/_deps/' \
+          --xml-pretty -o coverage/coverage.xml
+
+        gcovr -r . build-coverage \
+          --filter 'lib/.*/src/' \
+          --exclude 'lib/.*/test/' \
+          --exclude 'build-coverage/_deps/' \
+          --json-pretty -o coverage/coverage.json
+
+        gcovr -r . build-coverage \
+          --filter 'lib/.*/src/' \
+          --exclude 'lib/.*/test/' \
+          --exclude 'build-coverage/_deps/' \
+          --txt > coverage/coverage.txt
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        use_oidc: true
+        files: coverage/coverage.xml
+        flags: ubuntu
+        name: ubuntu-gcovr
+        fail_ci_if_error: true
+        verbose: true
+
+    - name: Coverage summary
+      working-directory: ${{github.workspace}}
+      run: |
+        total_line=$(grep '^TOTAL' coverage/coverage.txt)
+        core_line=$(grep 'lib/Core/src' coverage/coverage.txt | awk '{lines+=$2; exec+=$3} END {if (lines>0) printf "SNFCore %d %d %.2f%%", lines, exec, (100*exec/lines); else print "SNFCore 0 0 0.00%"}')
+        net_line=$(grep 'lib/Network/src' coverage/coverage.txt | awk '{lines+=$2; exec+=$3} END {if (lines>0) printf "SNFNetwork %d %d %.2f%%", lines, exec, (100*exec/lines); else print "SNFNetwork 0 0 0.00%"}')
+
+        echo "## Coverage (gcovr)" >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "\`$total_line\`" >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "- $core_line" >> "$GITHUB_STEP_SUMMARY"
+        echo "- $net_line" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload coverage artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-ubuntu-gcovr
+        path: |
+          coverage/coverage.xml
+          coverage/coverage.json
+          coverage/coverage.txt
 
