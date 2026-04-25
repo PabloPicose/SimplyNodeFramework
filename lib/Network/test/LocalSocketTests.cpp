@@ -147,6 +147,22 @@ TEST_F(LocalSocketPlainFixture, connectToTooLongPathEmitsError)
     EXPECT_EQ(socket.state(), LocalSocketState::Error);
 }
 
+TEST_F(LocalSocketPlainFixture, writeEmptyPayloadReturnsZero)
+{
+    LocalSocket socket;
+
+    EXPECT_EQ(socket.write(std::string()), 0u);
+    EXPECT_EQ(socket.write(std::vector<std::uint8_t>{}), 0u);
+}
+
+TEST_F(LocalSocketPlainFixture, adoptedInvalidFdStaysDisconnected)
+{
+    // Invalid adopted fd must be ignored safely.
+    LocalSocket socket(-1, false);
+
+    EXPECT_EQ(socket.state(), LocalSocketState::Disconnected);
+}
+
 // ============================================================================
 // LocalSocket — against an embedded LocalServer (no external dependency)
 // ============================================================================
@@ -241,6 +257,83 @@ TEST_F(LocalSocketExternalFixture, disconnectedSignalEmittedOnClose)
     ASSERT_TRUE(connectedSignal);
     socket.close();
     EXPECT_TRUE(disconnected);
+}
+
+TEST_F(LocalSocketExternalFixture, setBlockingFromOtherThreadIsApplied)
+{
+    LocalSocket socket(false);
+
+    bool connectedSignal = false;
+    std::string errorMessage;
+
+    socket.connected.connect([&]() {
+        connectedSignal = true;
+
+        std::thread worker([&]() { socket.setBlocking(true); });
+        worker.join();
+
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    socket.errorOccurred.connect([&](const std::string& err) {
+        errorMessage = err;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    socket.connectToPath(m_serverPath);
+
+    Timer t;
+    armShutdown(t, 2s);
+    app->run();
+
+    EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
+    EXPECT_TRUE(connectedSignal);
+    EXPECT_TRUE(socket.isBlocking());
+}
+
+TEST_F(LocalSocketExternalFixture, closeFromOtherThreadEmitsDisconnected)
+{
+    LocalSocket socket(false);
+
+    bool connectedSignal = false;
+    bool disconnectedSignal = false;
+    std::string errorMessage;
+
+    socket.connected.connect([&]() {
+        connectedSignal = true;
+
+        std::thread worker([&]() { socket.close(); });
+        worker.join();
+    });
+
+    socket.disconnected.connect([&]() {
+        disconnectedSignal = true;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    socket.errorOccurred.connect([&](const std::string& err) {
+        errorMessage = err;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    socket.connectToPath(m_serverPath);
+
+    Timer t;
+    armShutdown(t, 2s);
+    app->run();
+
+    EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
+    EXPECT_TRUE(connectedSignal);
+    EXPECT_TRUE(disconnectedSignal);
+    EXPECT_EQ(socket.state(), LocalSocketState::Disconnected);
 }
 
 // ============================================================================
@@ -360,6 +453,51 @@ TEST_F(LocalSocketFixture, multipleClientsConnectSequentially)
     }
 
     EXPECT_EQ(echoesReceived.load(), kCount);
+}
+
+TEST_F(LocalSocketFixture, writeFromOtherThreadIsMarshaled)
+{
+    LocalSocket client;
+    const std::string payload = "threaded-ping";
+
+    bool connectedSignal = false;
+    std::string errorMessage;
+    std::vector<std::uint8_t> received;
+
+    client.connected.connect([&]() {
+        connectedSignal = true;
+
+        std::thread writer([&]() { client.write(payload); });
+        writer.join();
+    });
+
+    client.readyRead.connect([&]() {
+        const auto chunk = client.readAll();
+        received.insert(received.end(), chunk.begin(), chunk.end());
+        if (received.size() >= payload.size()) {
+            if (EventLoop* loop = client.ownerEventLoop()) {
+                loop->stop();
+            }
+        }
+    });
+
+    client.errorOccurred.connect([&](const std::string& err) {
+        errorMessage = err;
+        if (EventLoop* loop = client.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    client.connectToPath(m_serverPath);
+
+    Timer t;
+    armShutdown(t, 2s);
+    app->run();
+
+    EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
+    EXPECT_TRUE(connectedSignal);
+    ASSERT_EQ(received.size(), payload.size());
+    EXPECT_EQ(std::string(received.begin(), received.end()), payload);
 }
 
 // ============================================================================

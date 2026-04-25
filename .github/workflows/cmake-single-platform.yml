@@ -69,7 +69,10 @@ jobs:
       run: cmake --build ${{github.workspace}}/build-coverage --config Debug
 
     - name: Test (coverage build)
-      run: ctest --test-dir ${{github.workspace}}/build-coverage --output-on-failure --timeout 180
+      run: |
+        mkdir -p ${{github.workspace}}/coverage
+        ctest --test-dir ${{github.workspace}}/build-coverage --output-on-failure --timeout 180 \
+          --output-junit ${{github.workspace}}/coverage/junit.xml
 
     - name: Install gcovr
       run: python3 -m pip install --upgrade gcovr
@@ -100,7 +103,7 @@ jobs:
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
-        files: coverage/coverage.xml
+        files: coverage/coverage.xml,coverage/junit.xml
         flags: ubuntu
         name: ubuntu-gcovr
         fail_ci_if_error: true
@@ -128,4 +131,5 @@ jobs:
           coverage/coverage.xml
           coverage/coverage.json
           coverage/coverage.txt
+          coverage/junit.xml
 
