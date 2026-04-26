@@ -42,39 +42,6 @@ and expectations are explicit.
 - Event-driven, non-blocking design is the primary execution model
 - Core and Network are distributed as independent CMake packages (SNFCore and SNFNetwork)
 
-### Current Test Coverage
-
-Coverage snapshot (April 25, 2026), measured with a dedicated coverage build
-(`--coverage`) and `gcovr`.
-
-Source-only scope used for percentages below:
-- Included: `lib/Core/src/**`, `lib/Network/src/**`
-- Excluded: `lib/**/test/**`, `build/_deps/**`, CMake-generated files
-
-| Module | Tested LOC | Untested LOC | Total LOC | Coverage |
-|---|---:|---:|---:|---:|
-| SNFCore (`lib/Core/src`) | 860 | 187 | 1047 | 82.14% |
-| SNFNetwork (`lib/Network/src`) | 889 | 285 | 1174 | 75.72% |
-| **Total source (`lib/*/src`)** | **1749** | **472** | **2221** | **78.75%** |
-
-Reproducible commands used:
-
-```bash
-cmake -S . -B build-coverage -G Ninja \
-    -DCMAKE_BUILD_TYPE=Debug \
-    -DSNF_ENABLE_TESTS=ON \
-    -DCMAKE_C_FLAGS='--coverage' \
-    -DCMAKE_CXX_FLAGS='--coverage' \
-    -DCMAKE_EXE_LINKER_FLAGS='--coverage' \
-    -DCMAKE_SHARED_LINKER_FLAGS='--coverage'
-cmake --build build-coverage
-ctest --test-dir build-coverage --output-on-failure
-gcovr -r . build-coverage \
-    --filter 'lib/.*/src/' \
-    --exclude 'lib/.*/test/' \
-    --exclude 'build-coverage/_deps/' --txt
-```
-
 ---
 
 ## Installation
@@ -373,3 +340,20 @@ doxygen docs/Doxyfile
 ```
 
 Open `docs/html/index.html` in a browser.
+
+## TODO list
+
+- [ ] Ini parser
+- [ ] Json parser
+- [ ] Serial Port class
+- [ ] TLV Packet (Type-Length-Value), helper class to send packets through TCP/Unix socket
+
+### TLV
+This is how I see the spec of the posible TLV packet:
+`[magic:4][flags:1][type:2][payload_len:4][payload:N]`
+Where: 
+- `magic` = 4 Bytes "SNF1" means SimplyNodeFramework1
+- `flags` = 1 Byte, bitfield for future use (e.g. compression, encryption, etc.)
+- `type` = 2 Bytes, user-defined packet type identifier, first byte could be my system PING, the rest are user defined.
+- `payload_len` = 4 Bytes, length of the payload in bytes (N)
+- `payload` = N Bytes, the actual data of the packet
