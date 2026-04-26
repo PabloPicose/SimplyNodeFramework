@@ -2,6 +2,7 @@ add_executable(SNFCoreTests
     CoreTests.cpp
     ConnectionTests.cpp
     TimerTests.cpp
+    CommandLineParserTests.cpp
 )
 
 target_link_libraries(SNFCoreTests

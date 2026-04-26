@@ -14,6 +14,8 @@ target_sources(SNFCore
         "${SNFCORE_DIR}/EventLoop.cpp"
         "${SNFCORE_DIR}/Connection.cpp"
         "${SNFCORE_DIR}/EpollPoller.cpp"
+        "${SNFCORE_DIR}/CommandLineOption.cpp"
+        "${SNFCORE_DIR}/CommandLineParser.cpp"
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS "${SRC_DIR}"
@@ -25,6 +27,8 @@ target_sources(SNFCore
             "${SNFCORE_DIR}/EventLoop.h"
             "${SNFCORE_DIR}/Connection.h"
             "${SNFCORE_DIR}/EpollPoller.h"
+            "${SNFCORE_DIR}/CommandLineOption.h"
+            "${SNFCORE_DIR}/CommandLineParser.h"
 )
 
 target_include_directories(SNFCore

@@ -5,3 +5,4 @@ CMakeUserPresets.json
 .vscode
 docs/html/
 .venv
+compile_commands.json

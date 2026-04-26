@@ -19,6 +19,7 @@ namespace snf {
 
 class Node;
 class EventLoop;
+class CommandLineParser;
 
 /**
  * @class Application
@@ -131,6 +132,18 @@ public:
     /** @brief Sets a human-readable version string for the application. */
     void setApplicationVersion(const std::string& version);
 
+    /**
+     * @brief Returns a CommandLineParser for this Application.
+     *
+     * The returned parser is owned by the Application and lives until the
+     * Application is destroyed. The parser can be used to register and parse
+     * command-line options. This method returns the same parser instance on
+     * each call (lazy-created on first invocation).
+     *
+     * @return Reference to the CommandLineParser instance.
+     */
+    CommandLineParser& getCommandLineParser();
+
     /** @brief Returns the command-line arguments passed to the constructor. */
     std::list<std::string> getArguments() const;
 
@@ -196,6 +209,8 @@ private:
     bool m_quit = false;
 
     std::string m_version;
+
+    std::unique_ptr<CommandLineParser> m_commandLineParser;
 
     int m_argc = 0;
 

@@ -6,6 +6,7 @@
 #include <iostream>
 #include <stdexcept>
 
+#include "CommandLineParser.h"
 #include "EventLoop.h"
 #include "Node.h"
 #include "NodePtr.h"
@@ -136,6 +137,14 @@ size_t Application::getAliveNodesToDeleteCount() const
 }
 
 void Application::setApplicationVersion(const std::string& version) { m_version = version; }
+
+CommandLineParser& Application::getCommandLineParser()
+{
+    if (!m_commandLineParser) {
+        m_commandLineParser = std::make_unique<CommandLineParser>();
+    }
+    return *m_commandLineParser;
+}
 
 std::list<std::string> Application::getArguments() const
 {
