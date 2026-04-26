@@ -378,6 +378,99 @@ TEST_F(UdpSocketFixture, setBlockingFromDifferentThread)
     EXPECT_TRUE(success);
 }
 
+TEST_F(UdpSocketFixture, bindFromDifferentThreadExecutesInOwnerLoop)
+{
+    UdpSocket socket;
+
+    std::atomic<bool> workerDone{false};
+    std::atomic<bool> bindOk{false};
+
+    std::thread worker([&]() {
+        bindOk = socket.bind(HostAddress::LocalHost, 0);
+        workerDone = true;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 2s);
+    app->run();
+
+    worker.join();
+
+    EXPECT_TRUE(workerDone.load());
+    EXPECT_TRUE(bindOk.load());
+    EXPECT_EQ(socket.state(), UdpSocketState::Bound);
+    EXPECT_GT(socket.boundPort(), 0);
+}
+
+TEST_F(UdpSocketFixture, setBlockingFromDifferentThreadAppliesChange)
+{
+    UdpSocket socket(false);
+    ASSERT_TRUE(socket.bind(HostAddress::LocalHost, 0));
+
+    std::atomic<bool> workerDone{false};
+
+    std::thread worker([&]() {
+        socket.setBlocking(true);
+        workerDone = true;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 2s);
+    app->run();
+
+    worker.join();
+
+    EXPECT_TRUE(workerDone.load());
+    EXPECT_TRUE(socket.isBlocking());
+}
+
+TEST_F(UdpSocketFixture, sendDatagramFromDifferentThreadDeliversData)
+{
+    UdpSocket sender;
+    UdpSocket receiver;
+
+    ASSERT_TRUE(receiver.bind(HostAddress::LocalHost, 0));
+    ASSERT_TRUE(sender.bind(HostAddress::LocalHost, 0));
+
+    const std::uint16_t receiverPort = receiver.boundPort();
+    const std::string payload = "cross-thread-send";
+    std::string received;
+    std::atomic<bool> workerQueued{false};
+
+    receiver.readyRead.connect([&]() {
+        while (receiver.hasPendingDatagram()) {
+            NetworkDatagram dgram = receiver.pendingDatagram();
+            received.append(dgram.data().begin(), dgram.data().end());
+        }
+
+        if (received.size() >= payload.size()) {
+            if (EventLoop* loop = receiver.ownerEventLoop()) {
+                loop->post([loop]() { loop->stop(); });
+            }
+        }
+    });
+
+    std::thread worker([&]() {
+        const std::size_t accepted = sender.sendDatagram(payload, HostAddress::LocalHost, receiverPort);
+        workerQueued = (accepted == payload.size());
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 2s);
+    app->run();
+
+    worker.join();
+
+    EXPECT_TRUE(workerQueued.load());
+    EXPECT_EQ(received, payload);
+}
+
 // ============================================================================
 // UdpSocket — blocking mode behavior
 // ============================================================================
@@ -398,4 +491,41 @@ TEST_F(UdpSocketFixture, constructorWithBlockingTrue)
 {
     UdpSocket socket(true);  // blocking
     EXPECT_TRUE(socket.isBlocking());
+}
+
+TEST_F(UdpSocketFixture, bindInvalidHostEmitsErrorAndSetsErrorState)
+{
+    UdpSocket socket;
+
+    std::string errorText;
+    socket.errorOccurred.connect([&](const std::string& error) { errorText = error; });
+
+    const bool ok = socket.bind(HostAddress("%%%invalid-host%%%"), 12345);
+
+    Timer shutdown;
+    armShutdown(shutdown, 50ms);
+    app->run();
+
+    EXPECT_FALSE(ok);
+    EXPECT_EQ(socket.state(), UdpSocketState::Error);
+    EXPECT_FALSE(errorText.empty());
+}
+
+TEST_F(UdpSocketFixture, bindToUnavailableLocalAddressFails)
+{
+    UdpSocket socket;
+
+    std::string errorText;
+    socket.errorOccurred.connect([&](const std::string& error) { errorText = error; });
+
+    // TEST-NET-3 address: expected to be non-local on development machines.
+    const bool ok = socket.bind(HostAddress("203.0.113.123"), 34567);
+
+    Timer shutdown;
+    armShutdown(shutdown, 50ms);
+    app->run();
+
+    EXPECT_FALSE(ok);
+    EXPECT_EQ(socket.state(), UdpSocketState::Error);
+    EXPECT_FALSE(errorText.empty());
 }

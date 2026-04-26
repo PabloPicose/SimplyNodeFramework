@@ -347,6 +347,9 @@ Open `docs/html/index.html` in a browser.
 - [ ] Json parser
 - [ ] Serial Port class
 - [ ] TLV Packet (Type-Length-Value), helper class to send packets through TCP/Unix socket
+- [ ] WebSocket support
+- [ ] HTTP client/server
+- [ ] ALSA audio support
 
 ### TLV
 This is how I see the spec of the posible TLV packet:

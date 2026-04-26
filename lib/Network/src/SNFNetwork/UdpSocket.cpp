@@ -12,6 +12,8 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <chrono>
+#include <condition_variable>
 #include <cstring>
 
 namespace snf {
@@ -72,6 +74,32 @@ std::uint16_t addressToPort(const sockaddr_storage& addr)
     return 0;
 }
 
+template <typename Fn>
+bool invokeOnOwnerThreadAndWait(EventLoop* loop, Fn&& fn, bool fallback = false)
+{
+    if (! loop) {
+        return fallback;
+    }
+
+    std::mutex m;
+    std::condition_variable cv;
+    bool done = false;
+    bool result = fallback;
+
+    loop->post([&]() {
+        result = fn();
+        {
+            std::lock_guard<std::mutex> lock(m);
+            done = true;
+        }
+        cv.notify_one();
+    });
+
+    std::unique_lock<std::mutex> lock(m);
+    const bool completed = cv.wait_for(lock, std::chrono::seconds(2), [&]() { return done; });
+    return completed ? result : fallback;
+}
+
 }  // namespace
 
 UdpSocket::UdpSocket(bool blocking, Node* parent) : IOEvent(parent), m_blocking(blocking)
@@ -113,13 +141,12 @@ bool UdpSocket::isBlocking() const
 bool UdpSocket::bind(const HostAddress& hostAddress, std::uint16_t port)
 {
     if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
-        bool result = false;
-        loop->post([self = NodePtr<UdpSocket>(this), hostAddress, port, &result]() {
-            if (self) {
-                result = self->bind(hostAddress, port);
-            }
-        });
-        return result;
+        return invokeOnOwnerThreadAndWait(
+            loop,
+            [self = NodePtr<UdpSocket>(this), hostAddress, port]() {
+                return self ? self->bind(hostAddress, port) : false;
+            },
+            false);
     }
 
     transitionToUnbound();
@@ -265,13 +292,12 @@ NetworkDatagram UdpSocket::pendingDatagram()
 bool UdpSocket::joinMulticastGroup(const HostAddress& groupAddress, const HostAddress& interfaceAddress)
 {
     if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
-        bool result = false;
-        loop->post([self = NodePtr<UdpSocket>(this), groupAddress, interfaceAddress, &result]() {
-            if (self) {
-                result = self->joinMulticastGroup(groupAddress, interfaceAddress);
-            }
-        });
-        return result;
+        return invokeOnOwnerThreadAndWait(
+            loop,
+            [self = NodePtr<UdpSocket>(this), groupAddress, interfaceAddress]() {
+                return self ? self->joinMulticastGroup(groupAddress, interfaceAddress) : false;
+            },
+            false);
     }
 
     const int fd = descriptor();
@@ -332,13 +358,12 @@ bool UdpSocket::joinMulticastGroup(const HostAddress& groupAddress, const HostAd
 bool UdpSocket::leaveMulticastGroup(const HostAddress& groupAddress, const HostAddress& interfaceAddress)
 {
     if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
-        bool result = false;
-        loop->post([self = NodePtr<UdpSocket>(this), groupAddress, interfaceAddress, &result]() {
-            if (self) {
-                result = self->leaveMulticastGroup(groupAddress, interfaceAddress);
-            }
-        });
-        return result;
+        return invokeOnOwnerThreadAndWait(
+            loop,
+            [self = NodePtr<UdpSocket>(this), groupAddress, interfaceAddress]() {
+                return self ? self->leaveMulticastGroup(groupAddress, interfaceAddress) : false;
+            },
+            false);
     }
 
     const int fd = descriptor();
