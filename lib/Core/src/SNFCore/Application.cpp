@@ -1,6 +1,8 @@
 #include "SNFCore/Application.h"
 
+#if !defined(SNF_PLATFORM_WEB)
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <iostream>
@@ -36,11 +38,16 @@ Application::~Application()
 
 std::string Application::getFullExecutablePath() const
 {
+#if defined(SNF_PLATFORM_WEB)
+    // No /proc filesystem in WebAssembly.
+    return {};
+#else
     constexpr size_t PATH_MAX = 4096;
     // linux
     char result[PATH_MAX];
     ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
     return (count != -1) ? std::string(result, count) : std::string();
+#endif
 }
 
 Application* Application::instance() { return m_instance; }

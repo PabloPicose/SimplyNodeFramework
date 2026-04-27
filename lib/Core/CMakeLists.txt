@@ -5,6 +5,16 @@ set(SNFCORE_DIR "${SRC_DIR}/SNFCore")
 
 add_library(SNFCore STATIC)
 
+# ── Platform-specific I/O poller implementation ───────────────────────────────
+# On Linux the real epoll/eventfd backend is used.
+# On WebAssembly the stub is compiled instead: same EpollPoller contract,
+# no Linux syscalls, wait() returns immediately.
+if(SNF_WEB_ASSEMBLY)
+    set(SNFCORE_POLLER_SRC "${SNFCORE_DIR}/EpollPollerStub.cpp")
+else()
+    set(SNFCORE_POLLER_SRC "${SNFCORE_DIR}/EpollPoller.cpp")
+endif()
+
 target_sources(SNFCore
     PRIVATE
         "${SNFCORE_DIR}/Application.cpp"
@@ -13,7 +23,7 @@ target_sources(SNFCore
         "${SNFCORE_DIR}/Timer.cpp"
         "${SNFCORE_DIR}/EventLoop.cpp"
         "${SNFCORE_DIR}/Connection.cpp"
-        "${SNFCORE_DIR}/EpollPoller.cpp"
+        ${SNFCORE_POLLER_SRC}
         "${SNFCORE_DIR}/CommandLineOption.cpp"
         "${SNFCORE_DIR}/CommandLineParser.cpp"
         "${SNFCORE_DIR}/IniParser.cpp"
@@ -32,6 +42,13 @@ target_sources(SNFCore
             "${SNFCORE_DIR}/CommandLineParser.h"
             "${SNFCORE_DIR}/IniParser.h"
 )
+
+# Expose the web-platform flag only to SNFCore's own translation units.
+# Downstream consumers (e.g. SNFWidgets) should use the standard __EMSCRIPTEN__
+# macro provided by the toolchain if they need platform-specific branches.
+if(SNF_WEB_ASSEMBLY)
+    target_compile_definitions(SNFCore PRIVATE SNF_PLATFORM_WEB)
+endif()
 
 target_include_directories(SNFCore
     PUBLIC

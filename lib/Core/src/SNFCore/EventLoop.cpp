@@ -169,6 +169,48 @@ void EventLoop::stop()
     m_ioPoller->wakeUp();
 }
 
+void EventLoop::runPendingWork()
+{
+    // Drain task queue.
+    Task task;
+    while (popNextTask(task)) {
+        task();
+    }
+
+    // Drain deferred deletes.
+    for (Node* node : takePendingDeletes()) {
+        NodePtr nodePtr(node);
+        if (nodePtr) {
+            delete node;
+        }
+    }
+
+    // Fire any timers whose deadline has passed.
+    for (TimerEntry& timerEntry : takeDueTimers(std::chrono::steady_clock::now())) {
+        if (timerEntry.timer) {
+            timerEntry.timer->dispatchTimeout(timerEntry.generation);
+        }
+    }
+
+    // Deliver any I/O callbacks that were already made ready by a previous
+    // wait() call.  No new wait() is issued; control returns to the caller.
+    for (ReadyIOEntry& readyIO : takeReadyIO()) {
+        if (readyIO.callback) {
+            readyIO.callback(readyIO.events);
+        }
+    }
+
+    // Tick all root nodes.
+    std::vector<Node*> roots;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        roots = m_rootNodes;
+    }
+    for (Node* node : roots) {
+        node->run();
+    }
+}
+
 void EventLoop::post(EventLoop::Task t)
 {
     {
