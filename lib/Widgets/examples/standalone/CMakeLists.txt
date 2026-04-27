@@ -33,6 +33,24 @@ FetchContent_Declare(
 set(SNF_WEB_ASSEMBLY ON  CACHE BOOL "" FORCE)
 set(SNF_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(SimplyNodeFramework)
+FetchContent_GetProperties(SimplyNodeFramework SOURCE_DIR SNF_STANDALONE_SNF_SOURCE_DIR)
+
+if(NOT SNF_STANDALONE_SNF_SOURCE_DIR)
+    message(FATAL_ERROR
+        "SNF standalone: could not resolve SimplyNodeFramework source directory from FetchContent."
+    )
+endif()
+
+set(SNF_STANDALONE_EMSCRIPTEN_SHELL_FILE
+    "${SNF_STANDALONE_SNF_SOURCE_DIR}/lib/Widgets/shell.html"
+)
+
+if(NOT EXISTS "${SNF_STANDALONE_EMSCRIPTEN_SHELL_FILE}")
+    message(FATAL_ERROR
+        "SNF standalone: shell template not found at ${SNF_STANDALONE_EMSCRIPTEN_SHELL_FILE}. "
+        "Add it to the SNF repo under lib/Widgets/shell.html."
+    )
+endif()
 
 # ── Application executable ────────────────────────────────────────────────────
 add_executable(snf_standalone_app main.cpp)
@@ -46,7 +64,7 @@ elseif(TARGET SNFWidgets)
 else()
     message(FATAL_ERROR
         "SNF standalone: target SNFWidgets was not found in the resolved SimplyNodeFramework source. "
-        "Vendor a revision that contains lib/Widgets under third_party/SimplyNodeFramework."
+        "Use a branch/tag/commit that contains lib/Widgets."
     )
 endif()
 
@@ -56,7 +74,7 @@ if(EMSCRIPTEN)
     target_link_options(snf_standalone_app PRIVATE
         -sNO_FILESYSTEM=1
         -sDISABLE_EXCEPTION_CATCHING=1
-        --shell-file=${CMAKE_CURRENT_SOURCE_DIR}/shell.html
+        --shell-file=${SNF_STANDALONE_EMSCRIPTEN_SHELL_FILE}
     )
 
     set_target_properties(snf_standalone_app PROPERTIES

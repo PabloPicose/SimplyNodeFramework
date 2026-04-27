@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.26)
 
 include(FetchContent)
 
+# Reusable Emscripten shell template path for consumers built from source.
+set(SNFWIDGETS_EMSCRIPTEN_SHELL_FILE
+    "${CMAKE_CURRENT_SOURCE_DIR}/shell.html"
+    CACHE INTERNAL "Path to SNFWidgets Emscripten shell.html template"
+)
+
 # ── Dear ImGui (internal, not exposed to consumers) ──────────────────────────
 #
 # ImGui is fetched and compiled as a PRIVATE dependency of SNFWidgets.
