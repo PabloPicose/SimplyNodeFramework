@@ -91,6 +91,23 @@ public:
     void run();
 
     /**
+     * @brief Performs a single non-blocking pass of the event loop.
+     *
+     * Drains the task queue, fires any due timers, processes any already-
+     * ready I/O callbacks, and ticks all root nodes — then returns
+     * immediately without waiting for future work.
+     *
+     * This is the intended integration point for WebAssembly builds, where
+     * the browser controls the event loop and supplies a per-frame callback
+     * (see `SNFWidgets::WebApplicationNode`).  Calling `run()` in that
+     * context would spin-poll because the Emscripten I/O stub returns
+     * immediately from every `wait()` call.
+     *
+     * Safe to call from the owner thread only.
+     */
+    void runPendingWork();
+
+    /**
      * @brief Requests the event loop to exit after the current iteration.
      *
      * Thread-safe. The loop will finish processing the current set of

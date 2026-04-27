@@ -1,0 +1,120 @@
+cmake_minimum_required(VERSION 3.26)
+
+include(FetchContent)
+
+# ── Dear ImGui (internal, not exposed to consumers) ──────────────────────────
+#
+# ImGui is fetched and compiled as a PRIVATE dependency of SNFWidgets.
+# Its headers are NOT added to SNFWidgets' public include path, so consumers
+# do not need (and should not) include imgui.h.  The content name
+# `snf_imgui` is intentionally different from the common `imgui` to avoid
+# conflicts when a parent project also declares its own ImGui via FetchContent.
+FetchContent_Declare(
+    snf_imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG        v1.92.7
+    GIT_SHALLOW    TRUE
+)
+FetchContent_GetProperties(snf_imgui)
+if(NOT snf_imgui_POPULATED)
+    FetchContent_Populate(snf_imgui)
+endif()
+# snf_imgui_SOURCE_DIR is now set.
+
+# Internal ImGui static library.  Not installed, not exported.
+add_library(SNFWidgets_imgui STATIC
+    ${snf_imgui_SOURCE_DIR}/imgui.cpp
+    ${snf_imgui_SOURCE_DIR}/imgui_demo.cpp
+    ${snf_imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${snf_imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${snf_imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${snf_imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    ${snf_imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+)
+
+# PUBLIC so that SNFWidgets' own .cpp files can #include "imgui.h" etc.
+target_include_directories(SNFWidgets_imgui PUBLIC
+    ${snf_imgui_SOURCE_DIR}
+    ${snf_imgui_SOURCE_DIR}/backends
+)
+
+target_compile_features(SNFWidgets_imgui PUBLIC cxx_std_17)
+
+# Disable file I/O helpers that are incompatible with -sNO_FILESYSTEM=1.
+target_compile_definitions(SNFWidgets_imgui PUBLIC IMGUI_DISABLE_FILE_FUNCTIONS)
+
+if(EMSCRIPTEN)
+    # The contrib.glfw3 Emscripten port provides <GLFW/glfw3.h> at compile
+    # time; imgui_impl_glfw.cpp needs it.
+    target_compile_options(SNFWidgets_imgui PRIVATE --use-port=contrib.glfw3)
+endif()
+
+# ── SNFWidgets library ────────────────────────────────────────────────────────
+set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
+set(SNFWIDGETS_DIR "${SRC_DIR}/SNFWidgets")
+
+add_library(SNFWidgets STATIC)
+
+target_sources(SNFWidgets
+    PRIVATE
+        "${SNFWIDGETS_DIR}/WebApplicationNode.cpp"
+        "${SNFWIDGETS_DIR}/Widget.cpp"
+        "${SNFWIDGETS_DIR}/Window.cpp"
+        "${SNFWIDGETS_DIR}/PushButton.cpp"
+        "${SNFWIDGETS_DIR}/ImGuiDemoWindow.cpp"
+    PUBLIC
+        FILE_SET HEADERS
+        BASE_DIRS "${SRC_DIR}"
+        FILES
+            "${SNFWIDGETS_DIR}/WebApplicationNode.h"
+            "${SNFWIDGETS_DIR}/Widget.h"
+            "${SNFWIDGETS_DIR}/Window.h"
+            "${SNFWIDGETS_DIR}/PushButton.h"
+            "${SNFWIDGETS_DIR}/ImGuiDemoWindow.h"
+)
+
+target_include_directories(SNFWidgets
+    PUBLIC
+        $<BUILD_INTERFACE:${SRC_DIR}>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+
+target_link_libraries(SNFWidgets
+    PUBLIC  SNFCore
+    PRIVATE SNFWidgets_imgui   # imgui is implementation-private
+)
+
+target_compile_features(SNFWidgets PUBLIC cxx_std_17)
+
+# Emscripten GLFW3 port integration.
+#
+# --use-port=contrib.glfw3 must appear in both compile and link flags:
+#   PRIVATE compile: SNFWidgets' own .cpp files (#include <GLFW/glfw3.h>)
+#   INTERFACE compile + link: propagated to any executable that links SNFWidgets
+if(EMSCRIPTEN)
+    target_compile_options(SNFWidgets
+        PRIVATE    --use-port=contrib.glfw3
+        INTERFACE  --use-port=contrib.glfw3
+    )
+    target_link_options(SNFWidgets INTERFACE
+        --use-port=contrib.glfw3
+        -sWASM=1
+        -sALLOW_MEMORY_GROWTH=1
+        -sMIN_WEBGL_VERSION=2
+        -sMAX_WEBGL_VERSION=2
+    )
+endif()
+
+add_library(SNFWidgets::SNFWidgets ALIAS SNFWidgets)
+
+# ── Examples ─────────────────────────────────────────────────────────────────
+# Examples are only built when SimplyNodeFramework is the top-level project.
+# When this file is consumed as a subdirectory (e.g. from standalone/ or via
+# FetchContent) PROJECT_IS_TOP_LEVEL is FALSE and the examples are skipped,
+# so that external consumers do not get unwanted build targets.
+#
+# Note: lib/Widgets/examples/standalone/ is intentionally NOT added here;
+# it is a self-contained project meant to be built independently.
+if(PROJECT_IS_TOP_LEVEL AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists.txt")
+    add_subdirectory(examples)
+endif()
