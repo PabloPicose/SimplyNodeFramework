@@ -16,6 +16,7 @@ target_sources(SNFCore
         "${SNFCORE_DIR}/EpollPoller.cpp"
         "${SNFCORE_DIR}/CommandLineOption.cpp"
         "${SNFCORE_DIR}/CommandLineParser.cpp"
+        "${SNFCORE_DIR}/IniParser.cpp"
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS "${SRC_DIR}"
@@ -29,6 +30,7 @@ target_sources(SNFCore
             "${SNFCORE_DIR}/EpollPoller.h"
             "${SNFCORE_DIR}/CommandLineOption.h"
             "${SNFCORE_DIR}/CommandLineParser.h"
+            "${SNFCORE_DIR}/IniParser.h"
 )
 
 target_include_directories(SNFCore

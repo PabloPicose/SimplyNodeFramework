@@ -343,7 +343,7 @@ Open `docs/html/index.html` in a browser.
 
 ## TODO list
 
-- [ ] Ini parser
+- [x] Ini parser
 - [ ] Json parser
 - [ ] Serial Port class
 - [ ] TLV Packet (Type-Length-Value), helper class to send packets through TCP/Unix socket
