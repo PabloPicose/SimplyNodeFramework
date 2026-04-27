@@ -10,29 +10,25 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ── SimplyNodeFramework ───────────────────────────────────────────────────────
 #
-# This standalone example intentionally avoids any path reference outside this
-# folder tree and does not rely on network fetches by default.
-#
-# The framework must be vendored under:
-#   ./third_party/SimplyNodeFramework
+# This standalone example resolves SimplyNodeFramework via FetchContent.
+# No manual dependency folder is required.
 include(FetchContent)
 
-set(SNF_STANDALONE_VENDOR_DIR
-    "${CMAKE_CURRENT_LIST_DIR}/third_party/SimplyNodeFramework"
+set(SNF_STANDALONE_SNF_GIT_REPOSITORY
+    "https://github.com/PabloPicose/SimplyNodeFramework.git"
+    CACHE STRING "SimplyNodeFramework Git repository"
+)
+set(SNF_STANDALONE_SNF_GIT_TAG
+    "main"
+    CACHE STRING "SimplyNodeFramework Git tag/branch/commit"
 )
 
-if(EXISTS "${SNF_STANDALONE_VENDOR_DIR}/CMakeLists.txt")
-    message(STATUS "SNF standalone: using vendored SimplyNodeFramework from ${SNF_STANDALONE_VENDOR_DIR}")
-    FetchContent_Declare(
-        SimplyNodeFramework
-        SOURCE_DIR "${SNF_STANDALONE_VENDOR_DIR}"
-    )
-else()
-    message(FATAL_ERROR
-        "SNF standalone: missing vendored dependency at ${SNF_STANDALONE_VENDOR_DIR}. "
-        "Place a SimplyNodeFramework checkout there (with lib/Widgets available)."
-    )
-endif()
+FetchContent_Declare(
+    SimplyNodeFramework
+    GIT_REPOSITORY "${SNF_STANDALONE_SNF_GIT_REPOSITORY}"
+    GIT_TAG        "${SNF_STANDALONE_SNF_GIT_TAG}"
+    GIT_SHALLOW    TRUE
+)
 
 set(SNF_WEB_ASSEMBLY ON  CACHE BOOL "" FORCE)
 set(SNF_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
@@ -75,12 +71,6 @@ endif()
 # Make sure the Emscripten SDK is active before configuring:
 #
 #   source /path/to/emsdk/emsdk_env.sh
-#
-# Vendor SimplyNodeFramework in this folder tree:
-#
-#   mkdir -p third_party
-#   git clone https://github.com/PabloPicose/SimplyNodeFramework.git \
-#             third_party/SimplyNodeFramework
 #
 # Then configure and build from the repo root (or any working directory):
 #
