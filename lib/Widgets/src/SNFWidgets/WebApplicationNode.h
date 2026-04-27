@@ -2,22 +2,19 @@
 
 /**
  * @file WebApplicationNode.h
- * @brief Emscripten+GLFW integration node for WebAssembly builds.
+ * @brief Emscripten+GLFW+ImGui integration node for WebAssembly builds.
  * @ingroup SNFWidgets
- *
- * @note This class is only available when building with SNF_WEB_ASSEMBLY=ON.
- *       It requires the Emscripten toolchain and uses the contrib.glfw3 port.
  */
 
 #include <SNFCore/Node.h>
 #include <SNFCore/Connection.h>
 
-#ifdef __EMSCRIPTEN__
-#include <emscripten.h>
-#include <emscripten/html5.h>
-#endif
+#include <string>
 
-#include <GLFW/glfw3.h>
+// Forward-declare the opaque GLFW type to keep this header free of
+// GLFW and Emscripten includes.  Consumers never need to include GLFW
+// headers just to hold a WebApplicationNode.
+struct GLFWwindow;
 
 namespace snf {
 namespace widgets {
@@ -25,77 +22,92 @@ namespace widgets {
 /**
  * @class WebApplicationNode
  * @ingroup SNFWidgets
- * @brief Drives a GLFW window and the SNFCore event loop from the browser's
- *        animation-frame callback.
+ * @brief Root node that drives a GLFW window, a Dear ImGui context, and the
+ *        SNFCore event loop from the browser's animation-frame callback.
  *
- * Create one instance alongside `snf::Application` and call `run()`.
- * The browser's animation-frame loop invokes `tick()` on every frame, which:
- *   - synchronises the canvas element size with the browser window,
- *   - calls `EventLoop::runPendingWork()` to process pending SNF tasks,
- *     timers, and signals, and
- *   - emits the `frame` signal so that the application can render.
+ * Every frame the node automatically:
+ *  1. Synchronises the canvas to the browser window (web only).
+ *  2. Polls GLFW input events.
+ *  3. Runs one non-blocking SNFCore event-loop pass (tasks, timers, signals).
+ *  4. Starts a Dear ImGui frame.
+ *  5. Renders all child @ref Widget nodes recursively.
+ *  6. Finalises and presents the ImGui draw data.
+ *  7. Emits @ref frame (raw-GL post-render hook).
+ *  8. Swaps the GLFW back-buffer.
  *
- * Typical usage:
+ * Dear ImGui is managed entirely by this class.  Application code never
+ * includes `imgui.h` — just instantiate widgets and connect signals:
+ *
  * @code
- * int main() {
- *     snf::Application app(0, nullptr);
+ * snf::Application app(0, nullptr);
  *
- *     snf::Timer ticker;
- *     ticker.timeout.connect([]() { printf("tick\n"); });
- *     ticker.start(std::chrono::seconds(1));
+ * snf::widgets::WebApplicationNode webApp;
+ * webApp.setTitle("My App");
  *
- *     snf::widgets::WebApplicationNode webApp;
- *     webApp.frame.connect([&]() {
- *         // render your ImGui / OpenGL frame here
- *     });
+ * snf::widgets::Window     win("Settings", &webApp);
+ * snf::widgets::PushButton btn("Apply",    &win);
  *
- *     webApp.run();   // does not return on Emscripten
- *     return 0;
- * }
+ * btn.clicked.connect([]() { std::printf("Apply!\n"); });
+ *
+ * webApp.run();  // does not return on Emscripten
  * @endcode
- *
- * @note `SNFCore` is UI-free.  All rendering code belongs in `frame` signal
- *       handlers, not in SNFCore itself.
  */
 class WebApplicationNode : public snf::Node
 {
 public:
-    /**
-     * @brief Constructs the web application node.
-     * @param parent Optional parent node.  Pass `nullptr` (default) to create
-     *               a root node owned by the main-thread EventLoop.
-     */
     explicit WebApplicationNode(snf::Node* parent = nullptr);
-
     ~WebApplicationNode() override;
+
+    /**
+     * @brief Sets the GLFW window title.
+     *
+     * If called before `run()` the title is applied when the window is
+     * created.  If called after, it is applied immediately.
+     */
+    void setTitle(const std::string& title);
 
     /**
      * @brief Starts the window and enters the main loop.
      *
      * On Emscripten this calls `emscripten_set_main_loop_arg()` and does
-     * **not** return.  On a native build (useful for local development) it
-     * falls back to a standard GLFW while-loop that exits when the window
-     * is closed.
+     * **not** return.  On native builds it falls back to a blocking GLFW
+     * while-loop that exits when the window is closed.
      */
     void run();
 
-    /** @brief Returns the GLFW window handle; `nullptr` before `run()`. */
+    /** @brief Returns the raw GLFW window handle; `nullptr` before `run()`. */
     GLFWwindow* window() const;
 
-    /** @brief Per-iteration update hook from SNFCore's node system (no-op here). */
+    /** @brief Per-iteration SNFCore update hook (no-op; frame work is in tick()). */
     void update() override {}
 
     // ── Signals ──────────────────────────────────────────────────────────────
 
-    /** @brief Emitted once after the GLFW window and OpenGL ES context are
-     *         ready. Connect rendering initialisation here. */
+    /**
+     * @brief Emitted once after the GLFW window, OpenGL ES context, and Dear
+     *        ImGui context are ready.
+     *
+     * Use this to perform one-time GL resource initialisation (load textures,
+     * compile shaders, etc.).  ImGui calls are valid at this point.
+     */
     Signal<> initialized;
 
-    /** @brief Emitted every frame just before the GL swap.  Connect all
-     *         per-frame rendering code here. */
+    /**
+     * @brief Emitted every frame after ImGui content has been fully rendered
+     *        and drawn to the GL framebuffer, just before `glfwSwapBuffers()`.
+     *
+     * Use this for raw OpenGL operations (custom GL drawing, post-processing).
+     * ImGui draw calls are NOT valid inside this handler.
+     */
     Signal<> frame;
 
-    /** @brief Emitted just before the GLFW window is destroyed. */
+    /**
+     * @brief Emitted just before the ImGui context and GLFW window are
+     *        destroyed.
+     *
+     * Use this to release GL resources.
+     * @note Only reached in native builds; browsers close the tab directly.
+     */
     Signal<> shutdown;
 
 private:
@@ -103,8 +115,11 @@ private:
     void tick();
     void initWindow();
     void destroyWindow();
+    void renderWidgets();
 
-    GLFWwindow* m_window = nullptr;
+    GLFWwindow* m_window           = nullptr;
+    bool        m_imguiInitialised = false;
+    std::string m_title            = "SNFWidgets";
 };
 
 }  // namespace widgets
