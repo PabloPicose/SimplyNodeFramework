@@ -58,6 +58,9 @@ if(NOT SNF_WEB_ASSEMBLY)
     
     # SNFHttpServer is a development HTTP server; only for native builds.
     add_subdirectory(lib/HttpServer)
+
+    # SNFWebSocket provides non-TLS ws:// client/server support.
+    add_subdirectory(lib/WebSocket)
 endif()
 
 # SNFWidgets provides the GLFW+ImGui integration layer.
@@ -130,5 +133,25 @@ if(NOT SNF_WEB_ASSEMBLY)
             "${CMAKE_CURRENT_BINARY_DIR}/SNFHttpServerConfig.cmake"
             "${CMAKE_CURRENT_BINARY_DIR}/SNFHttpServerConfigVersion.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFHttpServer"
+    )
+
+    # ── Package config: SNFWebSocket (native Linux only) ────────────────────────────
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SNFWebSocketConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/SNFWebSocketConfig.cmake"
+        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFWebSocket"
+    )
+
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/SNFWebSocketConfigVersion.cmake"
+        VERSION "${PROJECT_VERSION}"
+        COMPATIBILITY SameMajorVersion
+    )
+
+    install(
+        FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/SNFWebSocketConfig.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/SNFWebSocketConfigVersion.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFWebSocket"
     )
 endif()

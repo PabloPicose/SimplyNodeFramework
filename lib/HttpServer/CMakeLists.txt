@@ -1,19 +1,24 @@
 cmake_minimum_required(VERSION 3.26)
 
 set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
-
-add_subdirectory("${SRC_DIR}")
+set(SNFHTTPSERVER_DIR "${SRC_DIR}/SNFHttpServer")
 
 add_library(SNFHttpServer STATIC)
 
 target_sources(SNFHttpServer
     PRIVATE
-        ${SNFHTTPSERVER_SOURCES}
+        "${SNFHTTPSERVER_DIR}/HttpRequest.cpp"
+        "${SNFHTTPSERVER_DIR}/HttpResponse.cpp"
+        "${SNFHTTPSERVER_DIR}/HttpRequestParser.cpp"
+        "${SNFHTTPSERVER_DIR}/HttpServer.cpp"
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS "${SRC_DIR}"
         FILES
-            ${SNFHTTPSERVER_HEADERS}
+            "${SNFHTTPSERVER_DIR}/HttpRequest.h"
+            "${SNFHTTPSERVER_DIR}/HttpResponse.h"
+            "${SNFHTTPSERVER_DIR}/HttpRequestParser.h"
+            "${SNFHTTPSERVER_DIR}/HttpServer.h"
 )
 
 target_link_libraries(SNFHttpServer

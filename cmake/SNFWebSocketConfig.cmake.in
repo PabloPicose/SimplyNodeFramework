@@ -1,0 +1,13 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(SNFCore CONFIG REQUIRED)
+find_dependency(SNFNetwork CONFIG REQUIRED)
+
+include("${CMAKE_CURRENT_LIST_DIR}/SNFWebSocketTargets.cmake")
+
+if (TARGET SNFWebSocket AND NOT TARGET SNFWebSocket::SNFWebSocket)
+    add_library(SNFWebSocket::SNFWebSocket ALIAS SNFWebSocket)
+endif()
+
+check_required_components(SNFWebSocket)
