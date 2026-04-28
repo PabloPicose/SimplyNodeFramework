@@ -95,6 +95,15 @@ target_sources(SNFWidgets
         "${SNFWIDGETS_DIR}/Window.cpp"
         "${SNFWIDGETS_DIR}/PushButton.cpp"
         "${SNFWIDGETS_DIR}/ImGuiDemoWindow.cpp"
+        "${SNFWIDGETS_DIR}/Label.cpp"
+        "${SNFWIDGETS_DIR}/CheckBox.cpp"
+        "${SNFWIDGETS_DIR}/RadioButton.cpp"
+        "${SNFWIDGETS_DIR}/Slider.cpp"
+        "${SNFWIDGETS_DIR}/SpinBox.cpp"
+        "${SNFWIDGETS_DIR}/LineEdit.cpp"
+        "${SNFWIDGETS_DIR}/TextEdit.cpp"
+        "${SNFWIDGETS_DIR}/ComboBox.cpp"
+        "${SNFWIDGETS_DIR}/ProgressBar.cpp"
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS "${SRC_DIR}"
@@ -105,6 +114,15 @@ target_sources(SNFWidgets
             "${SNFWIDGETS_DIR}/Window.h"
             "${SNFWIDGETS_DIR}/PushButton.h"
             "${SNFWIDGETS_DIR}/ImGuiDemoWindow.h"
+            "${SNFWIDGETS_DIR}/Label.h"
+            "${SNFWIDGETS_DIR}/CheckBox.h"
+            "${SNFWIDGETS_DIR}/RadioButton.h"
+            "${SNFWIDGETS_DIR}/Slider.h"
+            "${SNFWIDGETS_DIR}/SpinBox.h"
+            "${SNFWIDGETS_DIR}/LineEdit.h"
+            "${SNFWIDGETS_DIR}/TextEdit.h"
+            "${SNFWIDGETS_DIR}/ComboBox.h"
+            "${SNFWIDGETS_DIR}/ProgressBar.h"
 )
 
 target_include_directories(SNFWidgets
@@ -154,4 +172,8 @@ add_library(SNFWidgets::SNFWidgets ALIAS SNFWidgets)
 # it is a self-contained project meant to be built independently.
 if(PROJECT_IS_TOP_LEVEL AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists.txt")
     add_subdirectory(examples)
+endif()
+
+if(SNF_ENABLE_TESTS)
+    add_subdirectory(test)
 endif()
