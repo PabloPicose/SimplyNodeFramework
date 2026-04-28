@@ -99,18 +99,24 @@ jobs:
         gcovr -r . build-coverage \
           --filter 'lib/.*/src/' \
           --exclude 'lib/.*/test/' \
+          --exclude 'lib/Widgets/' \
+          --exclude 'standalone/' \
           --exclude 'build-coverage/_deps/' \
           --xml-pretty -o coverage/coverage.xml
 
         gcovr -r . build-coverage \
           --filter 'lib/.*/src/' \
           --exclude 'lib/.*/test/' \
+          --exclude 'lib/Widgets/' \
+          --exclude 'standalone/' \
           --exclude 'build-coverage/_deps/' \
           --json-pretty -o coverage/coverage.json
 
         gcovr -r . build-coverage \
           --filter 'lib/.*/src/' \
           --exclude 'lib/.*/test/' \
+          --exclude 'lib/Widgets/' \
+          --exclude 'standalone/' \
           --exclude 'build-coverage/_deps/' \
           --txt > coverage/coverage.txt
 
