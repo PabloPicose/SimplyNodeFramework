@@ -5,6 +5,16 @@
 #include <SNFWidgets/Window.h>
 #include <SNFWidgets/PushButton.h>
 
+#include <SNFWidgets/ApplicationNode.h>
+#include <SNFWidgets/Window.h>
+#include <SNFWidgets/PushButton.h>
+#include <SNFWidgets/LineEdit.h>
+#include <SNFWidgets/ProgressBar.h>
+#include <SNFWidgets/CheckBox.h>
+#include <SNFWidgets/RadioButton.h>
+#include <SNFWidgets/SpinBox.h>
+#include <SNFWidgets/TextEdit.h>
+
 #include <cstdio>
 
 using namespace std::chrono_literals;
@@ -41,9 +51,12 @@ int main()
     // ── Widget tree ───────────────────────────────────────────────────────────
     snf::widgets::Window     window("Hello from SNFWidgets", &webApp);
     snf::widgets::PushButton button("Click me!",             &window);
+    snf::widgets::LineEdit lineEdit("Type something...", &window);
+    snf::widgets::ProgressBar progressBar(0, 100, &window);
 
-    button.clicked.connect([&ticks]() {
+    button.clicked.connect([&ticks, &progressBar]() {
         std::printf("Button clicked — ticks so far: %d\n", ticks);
+        progressBar.setValue((progressBar.value() + 10) % 110);
     });
 
     // run() enters the Emscripten main loop (does not return on web).
