@@ -252,6 +252,8 @@ std::string HttpServer::_guessContentType(const std::string& filePath) const
         return "image/x-icon";
     if (ext == ".webp")
         return "image/webp";
+    if (ext == ".wasm")
+        return "application/wasm";
     if (ext == ".woff")
         return "font/woff";
     if (ext == ".woff2")
