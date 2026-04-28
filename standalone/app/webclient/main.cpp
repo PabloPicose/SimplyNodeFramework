@@ -2,18 +2,12 @@
 #include <SNFCore/Timer.h>
 
 #include <SNFWidgets/ApplicationNode.h>
-#include <SNFWidgets/Window.h>
-#include <SNFWidgets/PushButton.h>
-
-#include <SNFWidgets/ApplicationNode.h>
-#include <SNFWidgets/Window.h>
-#include <SNFWidgets/PushButton.h>
-#include <SNFWidgets/LineEdit.h>
-#include <SNFWidgets/ProgressBar.h>
 #include <SNFWidgets/CheckBox.h>
-#include <SNFWidgets/RadioButton.h>
-#include <SNFWidgets/SpinBox.h>
-#include <SNFWidgets/TextEdit.h>
+#include <SNFWidgets/LineEdit.h>
+#include <SNFWidgets/Layout.h>
+#include <SNFWidgets/ProgressBar.h>
+#include <SNFWidgets/PushButton.h>
+#include <SNFWidgets/Window.h>
 
 #include <cstdio>
 
@@ -49,10 +43,24 @@ int main()
     webApp.setTitle("SNFWidgets Standalone");
 
     // ── Widget tree ───────────────────────────────────────────────────────────
-    snf::widgets::Window     window("Hello from SNFWidgets", &webApp);
-    snf::widgets::PushButton button("Click me!",             &window);
+    snf::widgets::Window window("Hello from SNFWidgets", &webApp);
+
     snf::widgets::LineEdit lineEdit("Type something...", &window);
+
+    snf::widgets::VBoxLayout mainLayout(&window);
+    window.setLayout(&mainLayout);
+
+    snf::widgets::HBoxLayout hbox;
+    mainLayout.addWidget(&hbox);
+
+    snf::widgets::PushButton button("Click me!", &window);
     snf::widgets::ProgressBar progressBar(0, 100, &window);
+    snf::widgets::PushButton button2("Another click", &window);
+
+    hbox.addWidget(&button);
+    // hbox.addWidget(&lineEdit, 1);
+    hbox.addWidget(&button2);
+    mainLayout.addWidget(&progressBar);
 
     button.clicked.connect([&ticks, &progressBar]() {
         std::printf("Button clicked — ticks so far: %d\n", ticks);

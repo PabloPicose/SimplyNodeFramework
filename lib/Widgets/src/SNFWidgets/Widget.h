@@ -52,6 +52,17 @@ protected:
     virtual void renderImGui() = 0;
 
     /**
+     * @brief Renders the widget with optional layout constraints.
+     *
+     * Layout containers call this instead of `renderImGui()` when they want
+     * the next ImGui item to consume a specific width or height.  The default
+     * implementation applies an ImGui item width when @p width is positive and
+     * then delegates to `renderImGui()`. Widgets that support an explicit
+     * height (for example buttons) may override it.
+     */
+    virtual void renderImGuiConstrained(float width, float height);
+
+    /**
      * @brief Iterates direct children and calls `renderImGui()` on each
      *        `Widget` child.
      *
@@ -62,6 +73,7 @@ protected:
 
 private:
     friend class ApplicationNode;
+    friend class Layout;
     friend class Window;
 };
 

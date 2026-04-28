@@ -2,8 +2,21 @@
 
 #include "imgui.h"
 
+#include <algorithm>
+
 namespace snf {
 namespace widgets {
+
+namespace {
+std::string visibleLabel(const std::string& label)
+{
+    const std::size_t marker = label.find("##");
+    if (marker == std::string::npos) {
+        return label;
+    }
+    return label.substr(0, marker);
+}
+}  // namespace
 
 LineEdit::LineEdit(const std::string& label, snf::Node* parent)
     : Widget(parent), m_label(label)
@@ -70,6 +83,28 @@ void LineEdit::renderImGui()
 
     if (returned) {
         editingFinished.emit(m_text);
+    }
+}
+
+void LineEdit::renderImGuiConstrained(float width, float height)
+{
+    (void)height;
+
+    float inputWidth = width;
+    if (width > 0.0f) {
+        const std::string labelText = visibleLabel(m_label);
+        if (! labelText.empty()) {
+            inputWidth -= ImGui::CalcTextSize(labelText.c_str()).x;
+            inputWidth -= ImGui::GetStyle().ItemInnerSpacing.x;
+        }
+        inputWidth = std::max(1.0f, inputWidth);
+        ImGui::PushItemWidth(inputWidth);
+    }
+
+    renderImGui();
+
+    if (width > 0.0f) {
+        ImGui::PopItemWidth();
     }
 }
 

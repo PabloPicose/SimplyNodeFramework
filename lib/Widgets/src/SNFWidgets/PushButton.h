@@ -48,6 +48,7 @@ public:
 
 protected:
     void renderImGui() override;
+    void renderImGuiConstrained(float width, float height) override;
 
 private:
     std::string m_label;

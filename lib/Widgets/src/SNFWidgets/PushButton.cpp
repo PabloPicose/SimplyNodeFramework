@@ -27,5 +27,13 @@ void PushButton::renderImGui()
     }
 }
 
+void PushButton::renderImGuiConstrained(float width, float height)
+{
+    const ImVec2 size(width > 0.0f ? width : 0.0f, height > 0.0f ? height : 0.0f);
+    if (ImGui::Button(m_label.c_str(), size)) {
+        clicked.emit();
+    }
+}
+
 }  // namespace widgets
 }  // namespace snf

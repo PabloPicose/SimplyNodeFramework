@@ -13,6 +13,8 @@
 namespace snf {
 namespace widgets {
 
+class Layout;
+
 /**
  * @class Window
  * @ingroup SNFWidgets
@@ -42,11 +44,24 @@ public:
     /** @brief Returns the current window title. */
     std::string title() const;
 
+    /**
+     * @brief Installs a layout as the window's content manager.
+     *
+     * The layout is reparented to the window when needed. Passing nullptr
+     * disables layout mode and the window renders its direct widget children
+     * in insertion order as before.
+     */
+    void setLayout(Layout* layout);
+
+    /** @brief Returns the currently installed layout, or nullptr. */
+    Layout* layout() const;
+
 protected:
     void renderImGui() override;
 
 private:
     std::string m_title;
+    Layout*     m_layout = nullptr;
 };
 
 }  // namespace widgets

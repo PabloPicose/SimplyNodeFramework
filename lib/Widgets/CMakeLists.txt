@@ -92,6 +92,7 @@ target_sources(SNFWidgets
     PRIVATE
         "${SNFWIDGETS_DIR}/ApplicationNode.cpp"
         "${SNFWIDGETS_DIR}/Widget.cpp"
+        "${SNFWIDGETS_DIR}/Layout.cpp"
         "${SNFWIDGETS_DIR}/Window.cpp"
         "${SNFWIDGETS_DIR}/PushButton.cpp"
         "${SNFWIDGETS_DIR}/ImGuiDemoWindow.cpp"
@@ -112,6 +113,7 @@ target_sources(SNFWidgets
             "${SNFWIDGETS_DIR}/ApplicationNode.h"
             "${SNFWIDGETS_DIR}/WebApplicationNode.h"
             "${SNFWIDGETS_DIR}/Widget.h"
+            "${SNFWIDGETS_DIR}/Layout.h"
             "${SNFWIDGETS_DIR}/Window.h"
             "${SNFWIDGETS_DIR}/PushButton.h"
             "${SNFWIDGETS_DIR}/ImGuiDemoWindow.h"
