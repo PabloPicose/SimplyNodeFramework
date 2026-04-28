@@ -104,6 +104,7 @@ target_sources(SNFWidgets
         "${SNFWIDGETS_DIR}/TextEdit.cpp"
         "${SNFWIDGETS_DIR}/ComboBox.cpp"
         "${SNFWIDGETS_DIR}/ProgressBar.cpp"
+        "${SNFWIDGETS_DIR}/TableView.cpp"
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS "${SRC_DIR}"
@@ -123,6 +124,7 @@ target_sources(SNFWidgets
             "${SNFWIDGETS_DIR}/TextEdit.h"
             "${SNFWIDGETS_DIR}/ComboBox.h"
             "${SNFWIDGETS_DIR}/ProgressBar.h"
+            "${SNFWIDGETS_DIR}/TableView.h"
 )
 
 target_include_directories(SNFWidgets

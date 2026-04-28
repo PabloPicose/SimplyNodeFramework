@@ -8,6 +8,7 @@ add_executable(SNFWidgetsTests
     TextEditTests.cpp
     ComboBoxTests.cpp
     ProgressBarTests.cpp
+    TableViewTests.cpp
 )
 
 target_link_libraries(SNFWidgetsTests
