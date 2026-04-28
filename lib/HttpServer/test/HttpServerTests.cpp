@@ -249,7 +249,7 @@ TEST_F(HttpServerComponentTest, ServerStartsListening)
 {
     HttpServer server;
 
-    ASSERT_TRUE(server.listen("127.0.0.1", 0));
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
 
     uint16_t port = server.serverPort();
     EXPECT_GT(port, 0);
@@ -268,7 +268,7 @@ TEST_F(HttpServerComponentTest, ServerEmitsStartedSignal)
         signalPort = port;
     });
 
-    ASSERT_TRUE(server.listen("127.0.0.1", 0));
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
 
     EXPECT_TRUE(signalEmitted);
     EXPECT_GT(signalPort, 0);

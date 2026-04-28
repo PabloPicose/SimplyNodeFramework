@@ -38,7 +38,7 @@ void HttpServer::serve_static(const std::string& urlPrefix, const std::string& f
     _staticPrefixes.push_back({urlPrefix, fsPath});
 }
 
-bool HttpServer::listen(const std::string& host, std::uint16_t port)
+bool HttpServer::listen(const HostAddress& host, std::uint16_t port)
 {
     if (!_tcpServer)
     {
@@ -60,7 +60,7 @@ bool HttpServer::listen(const std::string& host, std::uint16_t port)
     }
     else
     {
-        on_error.emit("Failed to bind to " + host + ":" + std::to_string(port));
+        on_error.emit("Failed to bind to " + host.host() + ":" + std::to_string(port));
     }
 
     return success;

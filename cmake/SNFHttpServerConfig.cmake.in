@@ -1,5 +1,13 @@
 @PACKAGE_INIT@
 
-include("${CMAKE_CURRENT_DIR}/SNFHttpServerTargets.cmake")
+include(CMakeFindDependencyMacro)
+find_dependency(SNFCore CONFIG REQUIRED)
+find_dependency(SNFNetwork CONFIG REQUIRED)
+
+include("${CMAKE_CURRENT_LIST_DIR}/SNFHttpServerTargets.cmake")
+
+if (TARGET SNFHttpServer AND NOT TARGET SNFHttpServer::SNFHttpServer)
+    add_library(SNFHttpServer::SNFHttpServer ALIAS SNFHttpServer)
+endif()
 
 check_required_components(SNFHttpServer)

@@ -35,6 +35,7 @@ if(SNF_WEB_ASSEMBLY)
 endif()
 
 option(SNF_ENABLE_TESTS "Enable tests for SimplyNodeFramework" ${PROJECT_IS_TOP_LEVEL})
+option(SNF_ENABLE_STANDALONE "Build the in-tree standalone examples" ${PROJECT_IS_TOP_LEVEL})
 
 if (SNF_ENABLE_TESTS)
     include(CTest)
@@ -64,6 +65,10 @@ endif()
 # On desktop (SNF_WEB_ASSEMBLY=OFF) it uses system GLFW 3.4+ and OpenGL 3.3 Core Profile.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/Widgets/CMakeLists.txt")
     add_subdirectory(lib/Widgets)
+endif()
+
+if(SNF_ENABLE_STANDALONE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/standalone/CMakeLists.txt")
+    add_subdirectory(standalone)
 endif()
 
 # ── Package config: SNFCore (always) ─────────────────────────────────────────
@@ -127,4 +132,3 @@ if(NOT SNF_WEB_ASSEMBLY)
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFHttpServer"
     )
 endif()
-

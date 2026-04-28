@@ -11,6 +11,7 @@
 #include "SNFHttpServer/HttpRequest.h"
 #include "SNFHttpServer/HttpResponse.h"
 #include "SNFHttpServer/HttpRequestParser.h"
+#include "SNFNetwork/HostAddress.h"
 
 #include <cstdint>
 #include <functional>
@@ -61,7 +62,7 @@ class TcpSocket;
  * });
  *
  * server.serve_static("/", "./www");
- * server.listen("127.0.0.1", 8080);
+ * server.listen(HostAddress::LocalHost, 8080);
  * @endcode
  */
 class HttpServer : public Node
@@ -106,14 +107,14 @@ public:
 
     /**
      * @brief Starts listening for incoming connections.
-     * @param host Local address to bind to (e.g., "127.0.0.1", "localhost", "0.0.0.0").
+     * @param host Local address to bind to (e.g., HostAddress::LocalHost or HostAddress::AnyIPv4).
      * @param port Port number (0 to let the OS choose).
      * @return `true` on success, `false` on failure.
      *
      * On success, `on_started` is emitted with the actual listening port.
      * On failure, `on_error` is emitted and the server does not start.
      */
-    bool listen(const std::string& host, std::uint16_t port);
+    bool listen(const HostAddress& host, std::uint16_t port);
 
     /**
      * @brief Stops the server and closes all connections.
