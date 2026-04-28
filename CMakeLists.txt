@@ -54,6 +54,9 @@ add_subdirectory(lib/Core)
 # SNFNetwork depends on Linux socket/epoll APIs; excluded from web builds.
 if(NOT SNF_WEB_ASSEMBLY)
     add_subdirectory(lib/Network)
+    
+    # SNFHttpServer is a development HTTP server; only for native builds.
+    add_subdirectory(lib/HttpServer)
 endif()
 
 # SNFWidgets provides the GLFW+ImGui integration layer.
@@ -102,6 +105,26 @@ if(NOT SNF_WEB_ASSEMBLY)
             "${CMAKE_CURRENT_BINARY_DIR}/SNFNetworkConfig.cmake"
             "${CMAKE_CURRENT_BINARY_DIR}/SNFNetworkConfigVersion.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFNetwork"
+    )
+
+    # ── Package config: SNFHttpServer (native Linux only) ────────────────────────────
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SNFHttpServerConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/SNFHttpServerConfig.cmake"
+        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFHttpServer"
+    )
+
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/SNFHttpServerConfigVersion.cmake"
+        VERSION "${PROJECT_VERSION}"
+        COMPATIBILITY SameMajorVersion
+    )
+
+    install(
+        FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/SNFHttpServerConfig.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/SNFHttpServerConfigVersion.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFHttpServer"
     )
 endif()
 
