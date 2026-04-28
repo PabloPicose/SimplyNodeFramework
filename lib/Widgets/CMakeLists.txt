@@ -27,7 +27,30 @@ if(NOT snf_imgui_POPULATED)
 endif()
 # snf_imgui_SOURCE_DIR is now set.
 
-# Internal ImGui static library.  Not installed, not exported.
+# ── GLFW (desktop only) ───────────────────────────────────────────────────────
+#
+# On Emscripten the contrib.glfw3 port is used instead (injected via
+# --use-port=contrib.glfw3 compile/link flags; no CMake target is needed).
+# On desktop we fetch GLFW as a static library via FetchContent.
+if(NOT EMSCRIPTEN)
+    set(GLFW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL        OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        snf_glfw
+        GIT_REPOSITORY https://github.com/glfw/glfw.git
+        GIT_TAG        3.4
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(snf_glfw)
+
+    find_package(OpenGL REQUIRED)
+endif()
+
+# ── Internal ImGui static library ────────────────────────────────────────────
+# Not installed, not exported.
 add_library(SNFWidgets_imgui STATIC
     ${snf_imgui_SOURCE_DIR}/imgui.cpp
     ${snf_imgui_SOURCE_DIR}/imgui_demo.cpp
@@ -53,6 +76,10 @@ if(EMSCRIPTEN)
     # The contrib.glfw3 Emscripten port provides <GLFW/glfw3.h> at compile
     # time; imgui_impl_glfw.cpp needs it.
     target_compile_options(SNFWidgets_imgui PRIVATE --use-port=contrib.glfw3)
+else()
+    # Desktop: GLFW headers come from the fetched glfw target.
+    # OpenGL::GL provides the system libGL.so for linking.
+    target_link_libraries(SNFWidgets_imgui PRIVATE glfw OpenGL::GL)
 endif()
 
 # ── SNFWidgets library ────────────────────────────────────────────────────────
@@ -63,7 +90,7 @@ add_library(SNFWidgets STATIC)
 
 target_sources(SNFWidgets
     PRIVATE
-        "${SNFWIDGETS_DIR}/WebApplicationNode.cpp"
+        "${SNFWIDGETS_DIR}/ApplicationNode.cpp"
         "${SNFWIDGETS_DIR}/Widget.cpp"
         "${SNFWIDGETS_DIR}/Window.cpp"
         "${SNFWIDGETS_DIR}/PushButton.cpp"
@@ -72,6 +99,7 @@ target_sources(SNFWidgets
         FILE_SET HEADERS
         BASE_DIRS "${SRC_DIR}"
         FILES
+            "${SNFWIDGETS_DIR}/ApplicationNode.h"
             "${SNFWIDGETS_DIR}/WebApplicationNode.h"
             "${SNFWIDGETS_DIR}/Widget.h"
             "${SNFWIDGETS_DIR}/Window.h"
@@ -92,12 +120,10 @@ target_link_libraries(SNFWidgets
 
 target_compile_features(SNFWidgets PUBLIC cxx_std_17)
 
-# Emscripten GLFW3 port integration.
-#
-# --use-port=contrib.glfw3 must appear in both compile and link flags:
-#   PRIVATE compile: SNFWidgets' own .cpp files (#include <GLFW/glfw3.h>)
-#   INTERFACE compile + link: propagated to any executable that links SNFWidgets
 if(EMSCRIPTEN)
+    # --use-port=contrib.glfw3 must appear in both compile and link flags:
+    #   PRIVATE compile: SNFWidgets' own .cpp files (#include <GLFW/glfw3.h>)
+    #   INTERFACE compile + link: propagated to any executable that links SNFWidgets
     target_compile_options(SNFWidgets
         PRIVATE    --use-port=contrib.glfw3
         INTERFACE  --use-port=contrib.glfw3
@@ -109,6 +135,10 @@ if(EMSCRIPTEN)
         -sMIN_WEBGL_VERSION=2
         -sMAX_WEBGL_VERSION=2
     )
+else()
+    # Desktop: link GLFW and OpenGL.  PRIVATE keeps them out of the public
+    # interface (consumers do not need GLFW headers in their own code).
+    target_link_libraries(SNFWidgets PRIVATE glfw OpenGL::GL)
 endif()
 
 add_library(SNFWidgets::SNFWidgets ALIAS SNFWidgets)

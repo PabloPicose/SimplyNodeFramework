@@ -32,7 +32,7 @@ class Window : public Widget
 public:
     /**
      * @param title  Window title shown in the title bar.
-     * @param parent Parent node (another Widget or a WebApplicationNode).
+     * @param parent Parent node (another Widget or an ApplicationNode).
      */
     explicit Window(const std::string& title, snf::Node* parent = nullptr);
 

@@ -1,6 +1,6 @@
 #include <SNFCore/Application.h>
 #include <SNFCore/Timer.h>
-#include <SNFWidgets/WebApplicationNode.h>
+#include <SNFWidgets/ApplicationNode.h>
 
 #include <chrono>
 #include <cstdio>
@@ -29,7 +29,7 @@ int main()
     ticker.start(1000ms);
 
     // ── Web application node ──────────────────────────────────────────────────
-    snf::widgets::WebApplicationNode webApp;
+    snf::widgets::ApplicationNode webApp;
     webApp.setTitle("SNFWidgets Minimal");
 
     webApp.initialized.connect([]() {

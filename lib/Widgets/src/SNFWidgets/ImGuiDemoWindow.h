@@ -18,7 +18,7 @@ namespace widgets {
  *
  * Useful for exploring available ImGui widgets and for testing the
  * SNFWidgets render pipeline.  Add it as a child of the
- * `WebApplicationNode` (or any container widget):
+ * `ApplicationNode` (or any container widget):
  *
  * @code
  * snf::widgets::ImGuiDemoWindow demo(&webApp);

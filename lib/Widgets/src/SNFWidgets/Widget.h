@@ -17,7 +17,7 @@ namespace widgets {
  * @brief Abstract base for every UI element managed by SNFWidgets.
  *
  * Widgets form a tree through the SNFCore Node parent-child relationship.
- * Attach a widget to a `WebApplicationNode` (or another `Widget`) by passing
+ * Attach a widget to an `ApplicationNode` (or another `Widget`) by passing
  * it as the `parent` argument:
  *
  * @code
@@ -61,7 +61,7 @@ protected:
     void renderChildren();
 
 private:
-    friend class WebApplicationNode;
+    friend class ApplicationNode;
     friend class Window;
 };
 

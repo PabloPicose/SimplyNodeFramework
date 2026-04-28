@@ -1,6 +1,6 @@
 #include <SNFCore/Application.h>
 #include <SNFCore/Timer.h>
-#include <SNFWidgets/WebApplicationNode.h>
+#include <SNFWidgets/ApplicationNode.h>
 #include <SNFWidgets/ImGuiDemoWindow.h>
 #include <SNFWidgets/Window.h>
 #include <SNFWidgets/PushButton.h>
@@ -38,7 +38,7 @@ int main()
     ticker.start(1000ms);
 
     // ── Application node ─────────────────────────────────────────────────
-    snf::widgets::WebApplicationNode webApp;
+    snf::widgets::ApplicationNode webApp;
     webApp.setTitle("SNFWidgets Demo");
 
     // ── ImGui built-in demo window ────────────────────────────────────────

@@ -56,8 +56,10 @@ if(NOT SNF_WEB_ASSEMBLY)
     add_subdirectory(lib/Network)
 endif()
 
-# SNFWidgets provides the Emscripten+GLFW integration layer; web builds only.
-if(SNF_WEB_ASSEMBLY AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/Widgets/CMakeLists.txt")
+# SNFWidgets provides the GLFW+ImGui integration layer.
+# On web (SNF_WEB_ASSEMBLY=ON) it uses the Emscripten contrib.glfw3 port and OpenGL ES 3.
+# On desktop (SNF_WEB_ASSEMBLY=OFF) it uses system GLFW 3.4+ and OpenGL 3.3 Core Profile.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/Widgets/CMakeLists.txt")
     add_subdirectory(lib/Widgets)
 endif()
 
