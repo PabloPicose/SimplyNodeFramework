@@ -40,7 +40,7 @@ int main(int argc, char **argv) {
 
   server.on_started.connect([](uint16_t port) {
     std::cout << "Server started on port " << port << "\n";
-    std::cout << "Launch on: http://localhost:" << port << std::endl;
+    std::cout << "Launch on: http://127.0.0.1:" << port << std::endl;
   });
 
   server.on_error.connect([](const std::string& errorMsg) {
@@ -50,7 +50,7 @@ int main(int argc, char **argv) {
   std::cout << "Serving web assets from: " << webRoot << "\n";
   server.serve_static("/", webRoot);
 
-  if (!server.listen(HostAddress::LocalHost, resolvePort())) {
+  if (!server.listen(HostAddress::AnyIPv4, resolvePort())) {
     return 1;
   }
 

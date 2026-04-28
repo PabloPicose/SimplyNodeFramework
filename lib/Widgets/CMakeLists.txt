@@ -132,6 +132,7 @@ if(EMSCRIPTEN)
         --use-port=contrib.glfw3
         -sWASM=1
         -sALLOW_MEMORY_GROWTH=1
+        -sFULL_ES3=1
         -sMIN_WEBGL_VERSION=2
         -sMAX_WEBGL_VERSION=2
     )

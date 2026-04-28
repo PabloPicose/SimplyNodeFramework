@@ -24,6 +24,7 @@
 #ifdef __EMSCRIPTEN__
 #  define GLFW_INCLUDE_NONE
 #  include <GLES3/gl3.h>
+#  include <GLFW/emscripten_glfw3.h>
 #  include <emscripten.h>
 #  include <emscripten/html5.h>
 #endif
@@ -157,11 +158,15 @@ void ApplicationNode::tick()
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
     // 7. Post-render hook: raw OpenGL operations that should execute after
-    //    ImGui has been composited (but before the buffer swap).
+    //    ImGui has been composited, but before presentation.
     frame.emit();
 
-    // 8. Swap the front and back buffers.
+    // 8. Swap the front and back buffers.  The contrib.glfw3 Emscripten port
+    // presents the canvas as part of the browser frame; glfwSwapBuffers() is
+    // intentionally not implemented there.
+#ifndef __EMSCRIPTEN__
     glfwSwapBuffers(m_window);
+#endif
 }
 
 void ApplicationNode::renderWidgets()
@@ -183,10 +188,13 @@ void ApplicationNode::initWindow()
     }
 
 #ifdef __EMSCRIPTEN__
-    // WebGL 2 / OpenGL ES 3 context via the Emscripten contrib.glfw3 port.
+    // WebGL 2 via the Emscripten contrib.glfw3 port.  This port maps
+    // GLFW_CONTEXT_VERSION_MAJOR directly to Emscripten's WebGL majorVersion,
+    // so use 2 here even though the shader language is GLSL ES 3.00 below.
     glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+    emscripten_glfw_set_next_window_canvas_selector("#canvas");
 #else
     // Desktop: OpenGL 3.3 Core Profile.
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -202,7 +210,9 @@ void ApplicationNode::initWindow()
     }
 
     glfwMakeContextCurrent(m_window);
+#ifndef __EMSCRIPTEN__
     glfwSwapInterval(1);  // Enable vsync.
+#endif
 
     // ── Dear ImGui context ────────────────────────────────────────────────
     IMGUI_CHECKVERSION();

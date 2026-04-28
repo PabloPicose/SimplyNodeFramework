@@ -41,7 +41,8 @@ namespace widgets {
  *  5. Renders all child @ref Widget nodes recursively.
  *  6. Finalises and presents the ImGui draw data.
  *  7. Emits @ref frame (raw-GL post-render hook).
- *  8. Swaps the GLFW back-buffer.
+ *  8. Presents the frame (desktop swaps the GLFW back-buffer; web presents
+ *     through the browser frame callback).
  *
  * Dear ImGui is managed entirely by this class.  Application code never
  * includes `imgui.h` — just instantiate widgets and connect signals:
@@ -103,7 +104,7 @@ public:
 
     /**
      * @brief Emitted every frame after ImGui content has been fully rendered
-     *        and drawn to the GL framebuffer, just before `glfwSwapBuffers()`.
+     *        and drawn to the GL framebuffer, just before presentation.
      *
      * Use this for raw OpenGL operations (custom GL drawing, post-processing).
      * ImGui draw calls are NOT valid inside this handler.

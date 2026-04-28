@@ -7,6 +7,8 @@ target_link_libraries(snf_standalone_app PRIVATE SNFWidgets::SNFWidgets)
 target_compile_options(snf_standalone_app PRIVATE -Wall -Wextra)
 
 if(EMSCRIPTEN)
+    set(SNF_STANDALONE_WEB_DIR "${CMAKE_CURRENT_LIST_DIR}/../../web")
+
     target_link_options(snf_standalone_app PRIVATE
         -sNO_FILESYSTEM=1
         -sDISABLE_EXCEPTION_CATCHING=1
@@ -16,6 +18,6 @@ if(EMSCRIPTEN)
     set_target_properties(snf_standalone_app PROPERTIES
         SUFFIX ".html"
         OUTPUT_NAME "index"
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/web"
+        RUNTIME_OUTPUT_DIRECTORY "${SNF_STANDALONE_WEB_DIR}"
     )
 endif()
