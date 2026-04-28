@@ -98,6 +98,15 @@ void HttpServer::_onNewConnection()
         socket->errorOccurred.connect([this, socket](const std::string& msg) {
             _onSocketError(socket, msg);
         });
+        socket->bytesWritten.connect([this, socket](std::size_t n) {
+            auto stateIt = _socketStates.find(socket);
+            if (stateIt == _socketStates.end())
+                return;
+            SocketState& state = stateIt->second;
+            state.totalSent += n;
+            if (state.pendingClose && state.totalSent >= state.totalToSend)
+                _closeSocket(socket);
+        });
     }
 }
 
@@ -180,11 +189,16 @@ void HttpServer::_onSocketReadyRead(TcpSocket* socket)
 
         // Send response
         std::string serialized = response.serialize();
-        socket->write(serialized);
 
-        // Close connection (HTTP/1.1 without Keep-Alive)
-        socket->close();
-        _socketStates.erase(socket);
+        // Schedule close only after all bytes are confirmed flushed by bytesWritten signal.
+        // For large files the kernel send buffer fills up and flushPendingWrites() returns
+        // EAGAIN; closing immediately would discard the unsent bytes still in m_writeBuffer.
+        auto& state = _socketStates[socket];
+        state.pendingClose = true;
+        state.totalToSend  = serialized.size();
+        state.totalSent    = 0;
+
+        socket->write(serialized);
         return;
     }
 
@@ -192,9 +206,13 @@ void HttpServer::_onSocketReadyRead(TcpSocket* socket)
     {
         HttpResponse errorResponse = HttpResponse::badRequest(parser.error());
         std::string serialized = errorResponse.serialize();
+
+        auto& state = _socketStates[socket];
+        state.pendingClose = true;
+        state.totalToSend  = serialized.size();
+        state.totalSent    = 0;
+
         socket->write(serialized);
-        socket->close();
-        _socketStates.erase(socket);
     }
 }
 

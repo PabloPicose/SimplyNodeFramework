@@ -156,6 +156,9 @@ private:
     struct SocketState
     {
         HttpRequestParser parser;
+        bool        pendingClose  = false; ///< Close socket after write buffer drains.
+        std::size_t totalToSend   = 0;     ///< Bytes expected to be sent for current response.
+        std::size_t totalSent     = 0;     ///< Bytes confirmed sent via bytesWritten so far.
     };
 
     std::unique_ptr<TcpServer> _tcpServer;
