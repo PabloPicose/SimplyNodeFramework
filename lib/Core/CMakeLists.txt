@@ -50,6 +50,18 @@ if(SNF_WEB_ASSEMBLY)
     target_compile_definitions(SNFCore PRIVATE SNF_PLATFORM_WEB)
 endif()
 
+# If using GCC < 9, we need to link against stdc++fs to get filesystem support.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" 
+   AND 
+   CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9)
+
+    target_link_libraries(SNFCore
+        PUBLIC
+            stdc++fs
+    )
+
+endif()
+
 target_include_directories(SNFCore
     PUBLIC
         $<BUILD_INTERFACE:${SRC_DIR}>
