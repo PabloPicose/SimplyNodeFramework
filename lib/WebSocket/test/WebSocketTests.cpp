@@ -10,6 +10,7 @@
 #include <SNFNetwork/TcpServer.h>
 #include <SNFNetwork/TcpSocket.h>
 #include <SNFWebSocket/WebSocket.h>
+#include <SNFWebSocket/WebSocketServer.h>
 
 using namespace snf;
 using namespace std::chrono_literals;
@@ -23,11 +24,20 @@ public:
 
     void TearDown() override
     {
+        for (WebSocket* socket : acceptedSockets) {
+            if (socket) {
+                socket->close();
+                delete socket;
+            }
+        }
+        acceptedSockets.clear();
+
         delete app;
         app = nullptr;
     }
 
     Application* app = nullptr;
+    std::vector<WebSocket*> acceptedSockets;
 };
 
 void stopLoopFrom(Node& node)
@@ -61,14 +71,26 @@ std::uint16_t reserveUnusedPort()
 
 }  // namespace
 
-TEST_F(WebSocketClientFixture, ConnectsToExternalEchoServerWhenAvailable)
+TEST_F(WebSocketClientFixture, ConnectsToLocalEchoServer)
 {
+    WebSocketServer server;
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+
+    server.newConnection.connect([&]() {
+        WebSocket* peer = server.nextPendingConnection();
+        ASSERT_NE(peer, nullptr);
+        acceptedSockets.push_back(peer);
+        peer->textMessageReceived.connect([peer](const std::string& message) {
+            peer->sendTextMessage(message);
+        });
+    });
+
     WebSocket socket;
 
     bool didConnect = false;
     bool gotEcho = false;
     std::string errorMessage;
-    const std::string payload = "snf external echo";
+    const std::string payload = "snf local echo";
 
     socket.connected.connect([&]() {
         didConnect = true;
@@ -89,12 +111,8 @@ TEST_F(WebSocketClientFixture, ConnectsToExternalEchoServerWhenAvailable)
     Timer shutdown;
     armShutdown(shutdown, 3s);
 
-    socket.connectToHost(HostAddress::LocalHost, 8765);
+    socket.connectToHost(HostAddress::LocalHost, server.serverPort());
     app->run();
-
-    if (!didConnect && !errorMessage.empty()) {
-        GTEST_SKIP() << "External echo server ws://127.0.0.1:8765 is not available: " << errorMessage;
-    }
 
     EXPECT_TRUE(errorMessage.empty()) << errorMessage;
     EXPECT_TRUE(didConnect);

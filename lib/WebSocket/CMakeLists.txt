@@ -5,18 +5,38 @@ set(SNFWEBSOCKET_DIR "${SRC_DIR}/SNFWebSocket")
 
 add_library(SNFWebSocket STATIC)
 
-target_sources(SNFWebSocket
-    PRIVATE
-        "${SNFWEBSOCKET_DIR}/WebSocket.cpp"
+set(SNFWEBSOCKET_PRIVATE_SOURCES
+    "${SNFWEBSOCKET_DIR}/WebSocket.cpp"
+)
+
+set(SNFWEBSOCKET_PUBLIC_HEADERS
+    "${SNFWEBSOCKET_DIR}/WebSocket.h"
+)
+
+if(SNF_WEB_ASSEMBLY)
+    list(APPEND SNFWEBSOCKET_PRIVATE_SOURCES
+        "${SNFWEBSOCKET_DIR}/WebSocketImplEmscripten.cpp"
+    )
+else()
+    list(APPEND SNFWEBSOCKET_PRIVATE_SOURCES
+        "${SNFWEBSOCKET_DIR}/WebSocketImplNative.cpp"
         "${SNFWEBSOCKET_DIR}/WebSocketServer.cpp"
         "${SNFWEBSOCKET_DIR}/WebSocketFrame.cpp"
         "${SNFWEBSOCKET_DIR}/WebSocketHandshake.cpp"
+    )
+    list(APPEND SNFWEBSOCKET_PUBLIC_HEADERS
+        "${SNFWEBSOCKET_DIR}/WebSocketServer.h"
+    )
+endif()
+
+target_sources(SNFWebSocket
+    PRIVATE
+        ${SNFWEBSOCKET_PRIVATE_SOURCES}
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS "${SRC_DIR}"
         FILES
-            "${SNFWEBSOCKET_DIR}/WebSocket.h"
-            "${SNFWEBSOCKET_DIR}/WebSocketServer.h"
+            ${SNFWEBSOCKET_PUBLIC_HEADERS}
 )
 
 target_link_libraries(SNFWebSocket
@@ -47,6 +67,6 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/SNFWebSocket
 )
 
-if(SNF_ENABLE_TESTS)
+if(SNF_ENABLE_TESTS AND NOT SNF_WEB_ASSEMBLY)
     add_subdirectory(test)
 endif()

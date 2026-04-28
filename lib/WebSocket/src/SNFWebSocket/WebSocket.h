@@ -20,12 +20,10 @@ namespace snf {
 class TcpSocket;
 
 namespace websocket::detail {
-enum class OpCode : std::uint8_t;
-struct WebSocketFrame;
-class WebSocketFrameParser;
+class WebSocketBackend;
 }  // namespace websocket::detail
 
-enum class WebSocketState {
+enum class WebSocketState : std::uint8_t {
     Closed,
     Connecting,
     Open,
@@ -84,41 +82,13 @@ public:
 private:
     friend class WebSocketServer;
 
+#ifndef __EMSCRIPTEN__
     explicit WebSocket(std::unique_ptr<TcpSocket> acceptedSocket, Node* parent = nullptr);
+#endif
     void beginServerConnection();
 
-    void attachSocketSignals();
-    void handleTcpConnected();
-    void handleTcpReadyRead();
-    void handleTcpDisconnected();
-    void handleTcpError(const std::string& errorMessage);
-
-    void processHandshakeBytes(const std::vector<std::uint8_t>& data);
-    void processFrameBytes(const std::vector<std::uint8_t>& data);
-    void processFrame(const websocket::detail::WebSocketFrame& frame);
-
-    bool sendFrame(websocket::detail::OpCode opcode,
-                   const std::vector<std::uint8_t>& payload,
-                   bool requireOpen = true);
-
-    void fail(std::string errorMessage);
-    void setState(WebSocketState state);
-    bool shouldMaskOutgoingFrames() const;
-
 private:
-    std::unique_ptr<TcpSocket> m_socket;
-    WebSocketState m_state = WebSocketState::Closed;
-    bool m_clientMode = true;
-    bool m_handshakeComplete = false;
-    bool m_closeFrameSent = false;
-    std::string m_handshakeBuffer;
-    std::string m_clientKey;
-    std::string m_host;
-    std::uint16_t m_port = 0;
-    std::string m_path = "/";
-    std::uint8_t m_fragmentOpcode = 0;
-    std::vector<std::uint8_t> m_fragmentPayload;
-    std::unique_ptr<websocket::detail::WebSocketFrameParser> m_frameParser;
+    std::unique_ptr<websocket::detail::WebSocketBackend> m_backend;
 };
 
 }  // namespace snf

@@ -51,17 +51,16 @@ endif()
 
 # ── Library targets ───────────────────────────────────────────────────────────
 add_subdirectory(lib/Core)
+add_subdirectory(lib/Network)
 
-# SNFNetwork depends on Linux socket/epoll APIs; excluded from web builds.
 if(NOT SNF_WEB_ASSEMBLY)
-    add_subdirectory(lib/Network)
-    
     # SNFHttpServer is a development HTTP server; only for native builds.
     add_subdirectory(lib/HttpServer)
-
-    # SNFWebSocket provides non-TLS ws:// client/server support.
-    add_subdirectory(lib/WebSocket)
 endif()
+
+# SNFWebSocket provides non-TLS ws:// client support on all platforms.
+# Its server and manual framing backend are native-only.
+add_subdirectory(lib/WebSocket)
 
 # SNFWidgets provides the GLFW+ImGui integration layer.
 # On web (SNF_WEB_ASSEMBLY=ON) it uses the Emscripten contrib.glfw3 port and OpenGL ES 3.
@@ -94,8 +93,7 @@ install(
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFCore"
 )
 
-# ── Package config: SNFNetwork (native Linux only) ────────────────────────────
-if(NOT SNF_WEB_ASSEMBLY)
+# ── Package config: SNFNetwork ───────────────────────────────────────────────
     configure_package_config_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SNFNetworkConfig.cmake.in"
         "${CMAKE_CURRENT_BINARY_DIR}/SNFNetworkConfig.cmake"
@@ -115,6 +113,7 @@ if(NOT SNF_WEB_ASSEMBLY)
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFNetwork"
     )
 
+if(NOT SNF_WEB_ASSEMBLY)
     # ── Package config: SNFHttpServer (native Linux only) ────────────────────────────
     configure_package_config_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SNFHttpServerConfig.cmake.in"
@@ -134,8 +133,9 @@ if(NOT SNF_WEB_ASSEMBLY)
             "${CMAKE_CURRENT_BINARY_DIR}/SNFHttpServerConfigVersion.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFHttpServer"
     )
+endif()
 
-    # ── Package config: SNFWebSocket (native Linux only) ────────────────────────────
+# ── Package config: SNFWebSocket ─────────────────────────────────────────────
     configure_package_config_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SNFWebSocketConfig.cmake.in"
         "${CMAKE_CURRENT_BINARY_DIR}/SNFWebSocketConfig.cmake"
@@ -154,4 +154,3 @@ if(NOT SNF_WEB_ASSEMBLY)
             "${CMAKE_CURRENT_BINARY_DIR}/SNFWebSocketConfigVersion.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFWebSocket"
     )
-endif()
