@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -83,6 +84,29 @@ void armShutdown(Timer& timer, std::chrono::milliseconds timeout)
     timer.start(timeout);
 }
 
+bool pumpPendingWorkUntil(Application& application,
+                          const std::function<bool()>& predicate,
+                          std::chrono::milliseconds timeout)
+{
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (EventLoop* loop = application.getOrCreateCurrentThreadEventLoop()) {
+            loop->runPendingWork();
+        }
+
+        if (predicate()) {
+            return true;
+        }
+
+        std::this_thread::sleep_for(1ms);
+    }
+
+    if (EventLoop* loop = application.getOrCreateCurrentThreadEventLoop()) {
+        loop->runPendingWork();
+    }
+    return predicate();
+}
+
 }  // namespace
 
 TEST_F(TcpSocketFixture, connectAndEchoRoundTrip)
@@ -137,6 +161,52 @@ TEST_F(TcpSocketFixture, connectAndEchoRoundTrip)
     EXPECT_TRUE(didWrite);
     EXPECT_TRUE(didReadyRead);
     EXPECT_EQ(received, payload);
+}
+
+TEST_F(TcpSocketFixture, pendingWorkReceivesTcpEventsFromBackgroundDispatcher)
+{
+    TcpSocket socket(false);
+
+    const std::thread::id ownerThread = std::this_thread::get_id();
+    std::thread::id connectedThread;
+    std::thread::id readyReadThread;
+    const std::string payload = "snf-background-dispatcher";
+
+    bool didConnect = false;
+    bool didReadyRead = false;
+    std::string received;
+    std::string errorMessage;
+
+    socket.connected.connect([&]() {
+        connectedThread = std::this_thread::get_id();
+        didConnect = true;
+        socket.write(payload);
+    });
+
+    socket.readyRead.connect([&]() {
+        readyReadThread = std::this_thread::get_id();
+        didReadyRead = true;
+        const std::vector<std::uint8_t> data = socket.readAll();
+        received.append(data.begin(), data.end());
+    });
+
+    socket.errorOccurred.connect([&](const std::string& error) { errorMessage = error; });
+
+    socket.connectToHost(HostAddress::LocalHost, echoServerPort);
+
+    const bool completed = pumpPendingWorkUntil(*app,
+                                                [&]() {
+                                                    return received == payload || ! errorMessage.empty();
+                                                },
+                                                3s);
+
+    EXPECT_TRUE(completed);
+    EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
+    EXPECT_TRUE(didConnect);
+    EXPECT_TRUE(didReadyRead);
+    EXPECT_EQ(received, payload);
+    EXPECT_EQ(connectedThread, ownerThread);
+    EXPECT_EQ(readyReadThread, ownerThread);
 }
 
 TEST_F(TcpSocketFixture, exposesPeerAddressAndPort)
@@ -197,20 +267,26 @@ TEST_F(TcpSocketFixture, connectToLocalhostHostName)
     bool didConnect = false;
     std::string errorMessage;
 
+    auto stopIfConnectedAndAccepted = [&]() {
+        if (accepted && didConnect) {
+            if (EventLoop* loop = server.ownerEventLoop()) {
+                loop->post([loop]() { loop->stop(); });
+            }
+        }
+    };
+
     server.newConnection.connect([&]() {
         accepted = server.nextPendingConnection();
         if (! accepted) {
             return;
         }
 
-        // Once accept happened, we're done validating hostname connectivity.
-        if (EventLoop* loop = server.ownerEventLoop()) {
-            loop->post([loop]() { loop->stop(); });
-        }
+        stopIfConnectedAndAccepted();
     });
 
     socket.connected.connect([&]() {
         didConnect = true;
+        stopIfConnectedAndAccepted();
     });
 
     socket.errorOccurred.connect([&](const std::string& error) {

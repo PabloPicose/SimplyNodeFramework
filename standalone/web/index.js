@@ -3670,6 +3670,202 @@ async function createWasm() {
       return success ? 0 : -5;
     };
 
+  class HandleAllocator {
+      allocated = [undefined];
+      freelist = [];
+      get(id) {
+        assert(this.allocated[id] !== undefined, `invalid handle: ${id}`);
+        return this.allocated[id];
+      }
+      has(id) {
+        return this.allocated[id] !== undefined;
+      }
+      allocate(handle) {
+        var id = this.freelist.pop() || this.allocated.length;
+        this.allocated[id] = handle;
+        return id;
+      }
+      free(id) {
+        assert(this.allocated[id] !== undefined);
+        // Set the slot to `undefined` rather than using `delete` here since
+        // apparently arrays with holes in them can be less efficient.
+        this.allocated[id] = undefined;
+        this.freelist.push(id);
+      }
+    }
+  var webSockets = new HandleAllocator();;
+  
+  var WS = {
+  socketEvent:null,
+  getSocket(socketId) {
+        if (!webSockets.has(socketId)) {
+          return 0;
+        }
+        return webSockets.get(socketId);
+      },
+  getSocketEvent(socketId) {
+        // Singleton event pointer.  Use EmscriptenWebSocketCloseEvent, which is
+        // the largest event struct
+        this.socketEvent ||= _malloc(520);
+        HEAPU32[((this.socketEvent)>>2)] = socketId;
+        return this.socketEvent;
+      },
+  };
+  
+  var _emscripten_websocket_close = (socketId, code, reason) => {
+      var socket = WS.getSocket(socketId);
+      if (!socket) {
+        return -3;
+      }
+  
+      var reasonStr = reason ? UTF8ToString(reason) : undefined;
+      // According to WebSocket specification, only close codes that are recognized have integer values
+      // 1000-4999, with 3000-3999 and 4000-4999 denoting user-specified close codes:
+      // https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent#Status_codes
+      // Therefore be careful to call the .close() function with exact number and types of parameters.
+      // Coerce code==0 to undefined, since Wasm->JS call can only marshal integers, and 0 is not allowed.
+      if (reason) socket.close(code || undefined, UTF8ToString(reason));
+      else if (code) socket.close(code);
+      else socket.close();
+      return 0;
+    };
+
+  var _emscripten_websocket_delete = (socketId) => {
+      var socket = WS.getSocket(socketId);
+      if (!socket) {
+        return -3;
+      }
+  
+      socket.onopen = socket.onerror = socket.onclose = socket.onmessage = null;
+      webSockets.free(socketId);
+      return 0;
+    };
+
+  var _emscripten_websocket_is_supported = () => typeof WebSocket != 'undefined';
+
+  var _emscripten_websocket_new = (createAttributes) => {
+      if (typeof WebSocket == 'undefined') {
+        return -1;
+      }
+      if (!createAttributes) {
+        return -5;
+      }
+  
+      var url = UTF8ToString(HEAPU32[((createAttributes)>>2)]);
+      var protocols = HEAPU32[(((createAttributes)+(4))>>2)]
+      // TODO: Add support for createOnMainThread==false; currently all WebSocket connections are created on the main thread.
+      // var createOnMainThread = HEAP8[createAttributes+2];
+  
+      var socket = protocols ? new WebSocket(url, UTF8ToString(protocols).split(',')) : new WebSocket(url);
+      // We always marshal received WebSocket data back to Wasm, so enable receiving the data as arraybuffers for easy marshalling.
+      socket.binaryType = 'arraybuffer';
+      // TODO: While strictly not necessary, this ID would be good to be unique across all threads to avoid confusion.
+      var socketId = webSockets.allocate(socket);
+  
+      return socketId;
+    };
+
+  var _emscripten_websocket_send_binary = (socketId, binaryData, dataLength) => {
+      var socket = WS.getSocket(socketId);
+      if (!socket) {
+        return -3;
+      }
+  
+      socket.send(HEAPU8.subarray((binaryData), binaryData+dataLength));
+      return 0;
+    };
+
+  
+  var _emscripten_websocket_send_utf8_text = (socketId, textData) => {
+      var socket = WS.getSocket(socketId);
+      if (!socket) {
+        return -3;
+      }
+  
+      var str = UTF8ToString(textData);
+      socket.send(str);
+      return 0;
+    };
+
+  
+  
+  var _emscripten_websocket_set_onclose_callback_on_thread = (socketId, userData, callbackFunc, thread) => {
+      var socket = WS.getSocket(socketId);
+      if (!socket) {
+        return -3;
+      }
+  
+      socket.onclose = function(e) {
+        var eventPtr = WS.getSocketEvent(socketId);
+        HEAP8[(eventPtr)+(4)] = e.wasClean,
+        HEAP16[(((eventPtr)+(6))>>1)] = e.code,
+        stringToUTF8(e.reason, eventPtr + 8, 512);
+        getWasmTableEntry(callbackFunc)(0/*TODO*/, eventPtr, userData);
+      }
+      return 0;
+    };
+
+  
+  var _emscripten_websocket_set_onerror_callback_on_thread = (socketId, userData, callbackFunc, thread) => {
+      var socket = WS.getSocket(socketId);
+      if (!socket) {
+        return -3;
+      }
+  
+      socket.onerror = function(e) {
+        var eventPtr = WS.getSocketEvent(socketId);
+        getWasmTableEntry(callbackFunc)(0/*TODO*/, eventPtr, userData);
+      }
+      return 0;
+    };
+
+  
+  
+  
+  
+  var _emscripten_websocket_set_onmessage_callback_on_thread = (socketId, userData, callbackFunc, thread) => {
+      var socket = WS.getSocket(socketId);
+      if (!socket) {
+        return -3;
+      }
+  
+      socket.onmessage = function(e) {
+        var isText = typeof e.data == 'string';
+        if (isText) {
+          var buf = stringToNewUTF8(e.data);
+          var len = lengthBytesUTF8(e.data)+1;
+        } else {
+          var len = e.data.byteLength;
+          var buf = _malloc(len);
+          HEAP8.set(new Uint8Array(e.data), buf);
+        }
+        var eventPtr = WS.getSocketEvent(socketId);
+        HEAPU32[(((eventPtr)+(4))>>2)] = buf,
+        HEAP32[(((eventPtr)+(8))>>2)] = len,
+        HEAP8[(eventPtr)+(12)] = isText,
+        getWasmTableEntry(callbackFunc)(0/*TODO*/, eventPtr, userData);
+        _free(buf);
+      }
+      return 0;
+    };
+
+  
+  var _emscripten_websocket_set_onopen_callback_on_thread = (socketId, userData, callbackFunc, thread) => {
+  // TODO:
+  //    if (thread == 2 ||
+  //      (thread == _pthread_self()) return emscripten_websocket_set_onopen_callback_on_calling_thread(socketId, userData, callbackFunc);
+      var socket = WS.getSocket(socketId);
+      if (!socket) {
+        return -3;
+      }
+  
+      socket.onopen = function(e) {
+        var eventPtr = WS.getSocketEvent(socketId);
+        getWasmTableEntry(callbackFunc)(0/*TODO*/, eventPtr, userData);
+      }
+      return 0;
+    };
+
   var ENV = {
   };
   
@@ -4746,7 +4942,6 @@ Module['FS_createPreloadedFile'] = FS.createPreloadedFile;
   'asmjsMangle',
   'asyncLoad',
   'mmapAlloc',
-  'HandleAllocator',
   'getNativeTypeSize',
   'addOnInit',
   'addOnPostCtor',
@@ -4897,6 +5092,7 @@ missingLibrarySymbols.forEach(missingLibrarySymbol)
   'callUserCallback',
   'maybeExit',
   'alignMemory',
+  'HandleAllocator',
   'wasmTable',
   'noExitRuntime',
   'addOnPreRun',
@@ -4997,6 +5193,8 @@ missingLibrarySymbols.forEach(missingLibrarySymbol)
   'allocateUTF8OnStack',
   'print',
   'printErr',
+  'webSockets',
+  'WS',
   'GLFW3',
 ];
 unexportedSymbols.forEach(unexportedRuntimeSymbol);
@@ -5011,7 +5209,7 @@ function checkIncomingModuleAPI() {
   ignoredModuleProp('fetchSettings');
 }
 var ASM_CONSTS = {
-  166400: ($0) => { return Module.glfwGetWindow(UTF8ToString($0)); }
+  292148: ($0) => { return Module.glfwGetWindow(UTF8ToString($0)); }
 };
 var wasmImports = {
   /** @export */
@@ -5132,6 +5330,26 @@ var wasmImports = {
   emscripten_webgl_destroy_context: _emscripten_webgl_destroy_context,
   /** @export */
   emscripten_webgl_make_context_current: _emscripten_webgl_make_context_current,
+  /** @export */
+  emscripten_websocket_close: _emscripten_websocket_close,
+  /** @export */
+  emscripten_websocket_delete: _emscripten_websocket_delete,
+  /** @export */
+  emscripten_websocket_is_supported: _emscripten_websocket_is_supported,
+  /** @export */
+  emscripten_websocket_new: _emscripten_websocket_new,
+  /** @export */
+  emscripten_websocket_send_binary: _emscripten_websocket_send_binary,
+  /** @export */
+  emscripten_websocket_send_utf8_text: _emscripten_websocket_send_utf8_text,
+  /** @export */
+  emscripten_websocket_set_onclose_callback_on_thread: _emscripten_websocket_set_onclose_callback_on_thread,
+  /** @export */
+  emscripten_websocket_set_onerror_callback_on_thread: _emscripten_websocket_set_onerror_callback_on_thread,
+  /** @export */
+  emscripten_websocket_set_onmessage_callback_on_thread: _emscripten_websocket_set_onmessage_callback_on_thread,
+  /** @export */
+  emscripten_websocket_set_onopen_callback_on_thread: _emscripten_websocket_set_onopen_callback_on_thread,
   /** @export */
   environ_get: _environ_get,
   /** @export */
@@ -5256,6 +5474,9 @@ var _free = createExportWrapper('free', 1);
 var _fflush = createExportWrapper('fflush', 1);
 var _emscripten_stack_get_end = () => (_emscripten_stack_get_end = wasmExports['emscripten_stack_get_end'])();
 var _emscripten_stack_get_base = () => (_emscripten_stack_get_base = wasmExports['emscripten_stack_get_base'])();
+var _htonl = createExportWrapper('htonl', 1);
+var _htons = createExportWrapper('htons', 1);
+var _ntohs = createExportWrapper('ntohs', 1);
 var _emscripten_stack_init = () => (_emscripten_stack_init = wasmExports['emscripten_stack_init'])();
 var _emscripten_stack_get_free = () => (_emscripten_stack_get_free = wasmExports['emscripten_stack_get_free'])();
 var __emscripten_stack_restore = (a0) => (__emscripten_stack_restore = wasmExports['_emscripten_stack_restore'])(a0);

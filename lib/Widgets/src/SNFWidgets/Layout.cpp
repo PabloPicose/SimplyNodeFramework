@@ -145,7 +145,7 @@ void Layout::renderWidget(Widget* widget, float width, float height)
     }
 
     ImGui::PushID(widget);
-    widget->renderImGuiConstrained(width, height);
+    widget->renderWidgetConstrained(width, height);
     ImGui::PopID();
 }
 

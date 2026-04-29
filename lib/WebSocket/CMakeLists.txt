@@ -53,6 +53,10 @@ target_include_directories(SNFWebSocket
 
 target_compile_features(SNFWebSocket PUBLIC cxx_std_17)
 
+if(SNF_WEB_ASSEMBLY)
+    target_link_options(SNFWebSocket INTERFACE -lwebsocket.js)
+endif()
+
 add_library(SNFWebSocket::SNFWebSocket ALIAS SNFWebSocket)
 
 install(TARGETS SNFWebSocket

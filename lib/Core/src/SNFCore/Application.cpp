@@ -57,7 +57,7 @@ std::thread::id Application::threadId() { return std::this_thread::get_id(); }
 void Application::loopOnce()
 {
     if (EventLoop* loop = mainEventLoop()) {
-        loop->run();
+        loop->runPendingWork();
     }
 }
 

@@ -312,12 +312,12 @@ void Window::renderContents()
         }
 
         if (child == m_layout) {
-            m_layout->renderImGui();
+            m_layout->Widget::renderWidget();
             continue;
         }
 
         if (! m_layout->containsWidget(child)) {
-            child->renderImGui();
+            child->renderWidget();
         }
     }
 }
@@ -329,6 +329,7 @@ void Window::renderImGui()
     }
 
     unsigned int effectiveFlags = m_flags;
+    const bool effectivelyEnabled = isEffectivelyEnabled();
 
     if (m_fullSize) {
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -349,6 +350,13 @@ void Window::renderImGui()
         }
     }
 
+    if (! effectivelyEnabled) {
+        effectiveFlags |= flagValue(Flag::NoResize);
+        effectiveFlags |= flagValue(Flag::NoMove);
+        effectiveFlags |= flagValue(Flag::NoCollapse);
+        effectiveFlags |= flagValue(Flag::NoScrollWithMouse);
+    }
+
     if (m_alwaysOnTop) {
         ImGui::SetNextWindowFocus();
     }
@@ -357,7 +365,7 @@ void Window::renderImGui()
 
     if (m_mode == Mode::Normal) {
         bool open = m_open;
-        bool* openPtr = m_closeButtonVisible ? &open : nullptr;
+        bool* openPtr = (effectivelyEnabled && m_closeButtonVisible) ? &open : nullptr;
 
         // ImGui::Begin() / ImGui::End() must always be paired, even when the
         // window is collapsed or clipped.  Children are rendered only when the
@@ -381,7 +389,7 @@ void Window::renderImGui()
     bool open = m_open;
     bool visible = false;
     if (m_mode == Mode::Modal) {
-        bool* openPtr = m_closeButtonVisible ? &open : nullptr;
+        bool* openPtr = (effectivelyEnabled && m_closeButtonVisible) ? &open : nullptr;
         visible = ImGui::BeginPopupModal(m_title.c_str(), openPtr, imguiFlags);
     } else {
         visible = ImGui::BeginPopup(m_title.c_str(), imguiFlags);

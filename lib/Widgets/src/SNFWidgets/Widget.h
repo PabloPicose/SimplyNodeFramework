@@ -41,6 +41,29 @@ public:
     /** @brief Per-iteration SNFCore update hook (no-op for widgets). */
     void update() override {}
 
+    /**
+     * @brief Enables or disables user interaction with this widget.
+     *
+     * A disabled widget is still rendered, but user input is ignored and the
+     * framework applies the platform's disabled visual treatment. Programmatic
+     * setters keep working; this only affects interaction through the UI.
+     *
+     * Child widgets inherit the disabled state of their widget ancestors when
+     * rendered through SNFWidgets containers/layouts.
+     */
+    void setEnabled(bool enabled);
+
+    /** @brief Convenience inverse of `setEnabled()`. */
+    void setDisabled(bool disabled);
+
+    /** @brief Returns this widget's local enabled state. */
+    bool isEnabled() const;
+
+    /**
+     * @brief Returns whether this widget and all widget ancestors are enabled.
+     */
+    bool isEffectivelyEnabled() const;
+
 protected:
     /**
      * @brief Called by the framework inside an active Dear ImGui frame.
@@ -71,10 +94,18 @@ protected:
      */
     void renderChildren();
 
+    /** @brief Framework entry point that applies common widget state. */
+    void renderWidget();
+
+    /** @brief Framework entry point with layout constraints and common state. */
+    void renderWidgetConstrained(float width, float height);
+
 private:
     friend class ApplicationNode;
     friend class Layout;
     friend class Window;
+
+    bool m_enabled = true;
 };
 
 }  // namespace widgets

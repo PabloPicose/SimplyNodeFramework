@@ -1,4 +1,5 @@
 add_executable(SNFWidgetsTests
+    WidgetTests.cpp
     LabelTests.cpp
     LayoutTests.cpp
     WindowTests.cpp

@@ -6,32 +6,16 @@
 #include <SNFCore/EpollPoller.h>
 
 #include <algorithm>
-#include <iterator>
+#include <utility>
 
 namespace snf {
-
-namespace {
-
-int toTimeoutMs(const std::chrono::steady_clock::time_point deadline)
-{
-    const auto now = std::chrono::steady_clock::now();
-    if (deadline <= now) {
-        return 0;
-    }
-
-    const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
-    if (duration.count() <= 0) {
-        return 1;
-    }
-    return static_cast<int>(duration.count());
-}
-
-}  // namespace
 
 EventLoop::EventLoop() : m_ioPoller(std::make_unique<EpollPoller>()), m_owner(std::this_thread::get_id()) {}
 
 EventLoop::~EventLoop()
 {
+    stopIoThread();
+
     // Destroy root nodes owned by this loop. Iterate a copy because
     // ~Node() calls removeRootNode(), which mutates m_rootNodes.
     const std::vector<Node*> roots = [this] {
@@ -55,7 +39,7 @@ void EventLoop::enqueueDelete(Node* node)
         std::lock_guard<std::mutex> lock(m_mutex);
         m_nodesToDelete.push_back(node);
     }
-    m_ioPoller->wakeUp();
+    m_condition.notify_one();
 }
 
 void EventLoop::addNode(Node* node)
@@ -76,7 +60,7 @@ void EventLoop::addRootNode(Node* node)
         std::lock_guard<std::mutex> lock(m_mutex);
         m_rootNodes.push_back(node);
     }
-    m_ioPoller->wakeUp();
+    m_condition.notify_one();
 }
 
 void EventLoop::removeRootNode(Node* node)
@@ -129,6 +113,7 @@ void EventLoop::run()
             if (readyIO.callback) {
                 readyIO.callback(readyIO.events);
             }
+            markReadyIOHandled(readyIO.fd);
         }
 
         // Tick all root nodes.
@@ -141,25 +126,28 @@ void EventLoop::run()
             node->run();
         }
 
-        // Block until there is work or a stop request.
+        // Block until there is work, a timer deadline, or a stop request.
+        // File-descriptor readiness is handled by the dedicated I/O thread,
+        // which posts tasks back to this owner loop.
         std::unique_lock<std::mutex> lock(m_mutex);
         if (m_stop.load()) {
             break;
         }
 
-        // Exit if no work remains (generic check)
         if (! hasPendingWorkLocked()) {
             break;
         }
 
-        int timeoutMs = -1;
         std::chrono::steady_clock::time_point nextDeadline;
         if (nextTimerDeadlineLocked(nextDeadline)) {
-            timeoutMs = toTimeoutMs(nextDeadline);
+            m_condition.wait_until(lock, nextDeadline, [this]() {
+                return m_stop.load() || ! m_tasks.empty() || ! m_nodesToDelete.empty() || ! m_readyIO.empty();
+            });
+        } else {
+            m_condition.wait(lock, [this]() {
+                return m_stop.load() || ! m_tasks.empty() || ! m_nodesToDelete.empty() || ! m_readyIO.empty();
+            });
         }
-
-        lock.unlock();
-        waitForIO(timeoutMs);
     }
 }
 
@@ -167,6 +155,7 @@ void EventLoop::stop()
 {
     m_stop.store(true);
     m_ioPoller->wakeUp();
+    m_condition.notify_all();
 }
 
 void EventLoop::runPendingWork()
@@ -192,15 +181,12 @@ void EventLoop::runPendingWork()
         }
     }
 
-    // Poll I/O without blocking so external loops (GLFW, browser callbacks,
-    // tests that drive the loop manually) can still make socket progress.
-    waitForIO(0);
-
-    // Deliver I/O callbacks made ready by the non-blocking poll above.
+    // Deliver I/O callbacks posted by the dedicated I/O thread.
     for (ReadyIOEntry& readyIO : takeReadyIO()) {
         if (readyIO.callback) {
             readyIO.callback(readyIO.events);
         }
+        markReadyIOHandled(readyIO.fd);
     }
 
     // Tick all root nodes.
@@ -220,7 +206,7 @@ void EventLoop::post(EventLoop::Task t)
         std::lock_guard<std::mutex> lock(m_mutex);
         m_tasks.push(std::move(t));
     }
-    m_ioPoller->wakeUp();
+    m_condition.notify_one();
 }
 
 std::size_t EventLoop::pendingDeleteCount() const
@@ -251,7 +237,7 @@ void EventLoop::scheduleTimer(Timer* timer, std::chrono::steady_clock::time_poin
             m_timers.end());
         m_timers.push_back(TimerEntry{timer, deadline, generation});
     }
-    m_ioPoller->wakeUp();
+    m_condition.notify_one();
 }
 
 void EventLoop::cancelTimer(Timer* timer)
@@ -263,7 +249,7 @@ void EventLoop::cancelTimer(Timer* timer)
                 m_timers.begin(), m_timers.end(), [timer](const TimerEntry& entry) { return entry.timer == timer; }),
             m_timers.end());
     }
-    m_ioPoller->wakeUp();
+    m_condition.notify_one();
 }
 
 void EventLoop::registerIO(int fd, std::uint32_t events, std::function<void(std::uint32_t)> callback)
@@ -274,11 +260,12 @@ void EventLoop::registerIO(int fd, std::uint32_t events, std::function<void(std:
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        m_ioWatches[fd] = IOWatchEntry{events, std::move(callback)};
+        m_ioWatches[fd] = IOWatchEntry{events, std::move(callback), false};
     }
 
     m_ioPoller->addOrUpdate(fd, events);
     m_ioPoller->wakeUp();
+    ensureIoThreadRunning();
 }
 
 void EventLoop::modifyIO(int fd, std::uint32_t events)
@@ -313,6 +300,10 @@ void EventLoop::unregisterIO(int fd)
             return;
         }
         m_ioWatches.erase(it);
+        m_readyIO.erase(std::remove_if(m_readyIO.begin(),
+                                       m_readyIO.end(),
+                                       [fd](const ReadyIOEntry& entry) { return entry.fd == fd; }),
+                        m_readyIO.end());
     }
 
     m_ioPoller->remove(fd);
@@ -360,12 +351,6 @@ std::vector<Node*> EventLoop::takePendingDeletes()
     return nodesToDelete;
 }
 
-bool EventLoop::hasDueTimerLocked(std::chrono::steady_clock::time_point now) const
-{
-    return std::any_of(
-        m_timers.begin(), m_timers.end(), [now](const TimerEntry& entry) { return entry.deadline <= now; });
-}
-
 bool EventLoop::nextTimerDeadlineLocked(std::chrono::steady_clock::time_point& deadline) const
 {
     if (m_timers.empty()) {
@@ -396,36 +381,94 @@ std::vector<EventLoop::TimerEntry> EventLoop::takeDueTimers(std::chrono::steady_
     return dueTimers;
 }
 
-void EventLoop::waitForIO(int timeoutMs)
-{
-    const std::vector<EpollPoller::Event> nativeEvents = m_ioPoller->wait(timeoutMs);
-    if (nativeEvents.empty()) {
-        return;
-    }
-
-    std::vector<ReadyIOEntry> ready;
-    ready.reserve(nativeEvents.size());
-
-    std::lock_guard<std::mutex> lock(m_mutex);
-    for (const EpollPoller::Event& event : nativeEvents) {
-        const int fd = event.fd;
-        auto it = m_ioWatches.find(fd);
-        if (it == m_ioWatches.end()) {
-            continue;
-        }
-
-        ready.push_back(ReadyIOEntry{event.events, it->second.callback});
-    }
-
-    m_readyIO.insert(m_readyIO.end(), std::make_move_iterator(ready.begin()), std::make_move_iterator(ready.end()));
-}
-
 std::vector<EventLoop::ReadyIOEntry> EventLoop::takeReadyIO()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::vector<ReadyIOEntry> ready;
     ready.swap(m_readyIO);
     return ready;
+}
+
+void EventLoop::markReadyIOHandled(int fd)
+{
+    if (fd < 0) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = m_ioWatches.find(fd);
+    if (it != m_ioWatches.end()) {
+        it->second.queued = false;
+    }
+}
+
+void EventLoop::ensureIoThreadRunning()
+{
+#if !defined(SNF_PLATFORM_WEB)
+    bool shouldStart = false;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (! m_ioThreadStarted) {
+            m_ioThreadStarted = true;
+            m_ioThreadStop.store(false);
+            shouldStart = true;
+        }
+    }
+
+    if (shouldStart) {
+        m_ioThread = std::thread([this]() { ioThreadMain(); });
+    }
+#endif
+}
+
+void EventLoop::stopIoThread()
+{
+#if !defined(SNF_PLATFORM_WEB)
+    m_ioThreadStop.store(true);
+    if (m_ioPoller) {
+        m_ioPoller->wakeUp();
+    }
+
+    if (m_ioThread.joinable() && m_ioThread.get_id() != std::this_thread::get_id()) {
+        m_ioThread.join();
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_ioThreadStarted = false;
+    }
+#endif
+}
+
+void EventLoop::ioThreadMain()
+{
+#if !defined(SNF_PLATFORM_WEB)
+    while (! m_ioThreadStop.load()) {
+        const std::vector<EpollPoller::Event> nativeEvents = m_ioPoller->wait(-1);
+        if (nativeEvents.empty()) {
+            continue;
+        }
+
+        bool queuedWork = false;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            for (const EpollPoller::Event& event : nativeEvents) {
+                auto it = m_ioWatches.find(event.fd);
+                if (it == m_ioWatches.end() || it->second.queued) {
+                    continue;
+                }
+
+                it->second.queued = true;
+                m_readyIO.push_back(ReadyIOEntry{event.fd, event.events, it->second.callback});
+                queuedWork = true;
+            }
+        }
+
+        if (queuedWork) {
+            m_condition.notify_one();
+        }
+    }
+#endif
 }
 
 }  // namespace snf

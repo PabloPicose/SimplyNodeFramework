@@ -2,12 +2,13 @@
 
 /**
  * @file EventLoop.h
- * @brief Per-thread event dispatcher: tasks, timers, and epoll I/O.
+ * @brief Per-thread event dispatcher: tasks, timers, and asynchronous I/O.
  * @ingroup SNFCore_Application
  */
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -35,7 +36,13 @@ class EpollPoller;
  * The loop processes three kinds of work:
  * - **Tasks** — arbitrary `std::function<void()>` callables posted via `post()`.
  * - **Timers** — `Timer` objects scheduled via `scheduleTimer()`.
- * - **I/O** — file-descriptor interest sets managed via `registerIO()` / `modifyIO()`.
+ * - **I/O** — file-descriptor readiness queued by the platform dispatcher.
+ *
+ * On native Linux builds, file descriptors are watched by a dedicated epoll
+ * thread that sleeps in `epoll_wait()` until an fd becomes ready. The resulting
+ * callbacks are queued back to this owner `EventLoop`, so socket code still
+ * executes on the thread that owns the object. WebAssembly builds use the
+ * browser/event-system specific path and do not start an epoll thread.
  *
  * @note `EventLoop` is not part of the public library API that end-users
  *       call directly. Prefer `Application::run()`, `Timer`, and node signals
@@ -53,8 +60,8 @@ public:
     /**
      * @brief Posts a task to be executed on this EventLoop's thread.
      *
-     * Thread-safe: may be called from any thread. The task is guaranteed to
-     * run before the next blocking `epoll_wait`.
+     * Thread-safe: may be called from any thread. The task is delivered by the
+     * owning event loop thread.
      */
     void post(Task t);
 
@@ -85,16 +92,16 @@ public:
     /**
      * @brief Starts the event loop and blocks until `stop()` is called.
      *
-     * Processes tasks, due timers, and I/O events in a tight loop with an
-     * `epoll_wait` that blocks up to the next timer deadline when idle.
+     * Processes tasks, due timers, queued I/O callbacks, and root nodes. When
+     * idle, the loop sleeps on a condition variable until there is work to do.
      */
     void run();
 
     /**
      * @brief Performs a single non-blocking pass of the event loop.
      *
-     * Drains the task queue, fires any due timers, processes any already-
-     * ready I/O callbacks, and ticks all root nodes — then returns
+     * Drains the task queue, fires any due timers, delivers any queued I/O
+     * callbacks, and ticks all root nodes — then returns
      * immediately without waiting for future work.
      *
      * This is the intended integration point for WebAssembly builds, where
@@ -175,25 +182,30 @@ private:
         std::uint64_t generation = 0;
     };
 
-    bool hasDueTimerLocked(std::chrono::steady_clock::time_point now) const;
     bool nextTimerDeadlineLocked(std::chrono::steady_clock::time_point& deadline) const;
     std::vector<TimerEntry> takeDueTimers(std::chrono::steady_clock::time_point now);
 
     struct IOWatchEntry {
         std::uint32_t events = 0;
         std::function<void(std::uint32_t)> callback;
+        bool queued = false;
     };
 
     struct ReadyIOEntry {
+        int fd = -1;
         std::uint32_t events = 0;
         std::function<void(std::uint32_t)> callback;
     };
 
-    void waitForIO(int timeoutMs);
     std::vector<ReadyIOEntry> takeReadyIO();
+    void markReadyIOHandled(int fd);
+    void ensureIoThreadRunning();
+    void stopIoThread();
+    void ioThreadMain();
 
 private:
     mutable std::mutex m_mutex;
+    std::condition_variable m_condition;
     std::queue<Task> m_tasks;
     std::vector<Node*> m_nodesToDelete;
     std::vector<Node*> m_nodes;
@@ -202,6 +214,9 @@ private:
     std::unordered_map<int, IOWatchEntry> m_ioWatches;
     std::vector<ReadyIOEntry> m_readyIO;
     std::unique_ptr<EpollPoller> m_ioPoller;
+    std::thread m_ioThread;
+    bool m_ioThreadStarted = false;
+    std::atomic_bool m_ioThreadStop{false};
     std::atomic_bool m_stop{false};
     const std::thread::id m_owner;
 };

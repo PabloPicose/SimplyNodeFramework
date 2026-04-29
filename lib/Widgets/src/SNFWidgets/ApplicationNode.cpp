@@ -173,7 +173,7 @@ void ApplicationNode::renderWidgets()
 {
     for (std::size_t i = 0; i < childrenCount(); ++i) {
         if (auto* widget = dynamic_cast<Widget*>(getChild(i))) {
-            widget->renderImGui();
+            widget->renderWidget();
         }
     }
 }

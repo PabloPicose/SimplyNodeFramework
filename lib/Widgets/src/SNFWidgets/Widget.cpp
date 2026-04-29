@@ -7,6 +7,67 @@ namespace widgets {
 
 Widget::Widget(snf::Node* parent) : snf::Node(parent) {}
 
+void Widget::setEnabled(bool enabled)
+{
+    m_enabled = enabled;
+}
+
+void Widget::setDisabled(bool disabled)
+{
+    setEnabled(! disabled);
+}
+
+bool Widget::isEnabled() const
+{
+    return m_enabled;
+}
+
+bool Widget::isEffectivelyEnabled() const
+{
+    if (! m_enabled) {
+        return false;
+    }
+
+    const snf::Node* current = parent();
+    while (current) {
+        const auto* widgetParent = dynamic_cast<const Widget*>(current);
+        if (widgetParent && ! widgetParent->isEnabled()) {
+            return false;
+        }
+        current = current->parent();
+    }
+
+    return true;
+}
+
+void Widget::renderWidget()
+{
+    const bool disabled = ! isEffectivelyEnabled();
+    if (disabled) {
+        ImGui::BeginDisabled();
+    }
+
+    renderImGui();
+
+    if (disabled) {
+        ImGui::EndDisabled();
+    }
+}
+
+void Widget::renderWidgetConstrained(float width, float height)
+{
+    const bool disabled = ! isEffectivelyEnabled();
+    if (disabled) {
+        ImGui::BeginDisabled();
+    }
+
+    renderImGuiConstrained(width, height);
+
+    if (disabled) {
+        ImGui::EndDisabled();
+    }
+}
+
 void Widget::renderImGuiConstrained(float width, float height)
 {
     (void)height;
@@ -27,7 +88,7 @@ void Widget::renderChildren()
 {
     for (std::size_t i = 0; i < childrenCount(); ++i) {
         if (auto* child = dynamic_cast<Widget*>(getChild(i))) {
-            child->renderImGui();
+            child->renderWidget();
         }
     }
 }

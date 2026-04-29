@@ -12,6 +12,11 @@ include(CMakePackageConfigHelpers)
 option(SNF_WEB_ASSEMBLY
     "Build SNFCore for WebAssembly/Emscripten (requires the Emscripten toolchain)"
     OFF)
+option(SNF_ENABLE_TESTS "Enable tests for SimplyNodeFramework" ${PROJECT_IS_TOP_LEVEL})
+option(SNF_ENABLE_WEB_TESTS
+    "Enable Node-runnable WebAssembly smoke tests when SNF_WEB_ASSEMBLY is ON"
+    ${PROJECT_IS_TOP_LEVEL})
+option(SNF_ENABLE_STANDALONE "Build the in-tree standalone examples" ${PROJECT_IS_TOP_LEVEL})
 
 # Safety checks: mismatching toolchain / option causes a clear configure error.
 if(EMSCRIPTEN AND NOT SNF_WEB_ASSEMBLY)
@@ -28,17 +33,18 @@ if(SNF_WEB_ASSEMBLY AND NOT EMSCRIPTEN)
         "or set SNF_WEB_ASSEMBLY=OFF for native builds.")
 endif()
 
-# Tests cannot run inside a browser; force them off in web mode.
+# Native gtest suites use POSIX sockets, GLFW/OpenGL, and other host APIs.
+# Keep those off in WebAssembly mode and use the explicit web smoke tests below.
 if(SNF_WEB_ASSEMBLY)
     set(SNF_ENABLE_TESTS OFF CACHE BOOL
-        "Tests disabled automatically in WebAssembly mode" FORCE)
+        "Native tests disabled automatically in WebAssembly mode" FORCE)
 endif()
 
-option(SNF_ENABLE_TESTS "Enable tests for SimplyNodeFramework" ${PROJECT_IS_TOP_LEVEL})
-option(SNF_ENABLE_STANDALONE "Build the in-tree standalone examples" ${PROJECT_IS_TOP_LEVEL})
+if(SNF_ENABLE_TESTS OR (SNF_WEB_ASSEMBLY AND SNF_ENABLE_WEB_TESTS))
+    include(CTest)
+endif()
 
 if (SNF_ENABLE_TESTS)
-    include(CTest)
     include(FetchContent)
 
     FetchContent_Declare(
@@ -71,6 +77,25 @@ endif()
 
 if(SNF_ENABLE_STANDALONE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/standalone/CMakeLists.txt")
     add_subdirectory(standalone)
+endif()
+
+if(SNF_WEB_ASSEMBLY AND SNF_ENABLE_WEB_TESTS)
+    add_executable(SNFWebAssemblySmokeTests
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/WebAssemblySmokeTests.cpp"
+    )
+    target_link_libraries(SNFWebAssemblySmokeTests
+        PRIVATE
+            SNFCore
+            SNFNetwork
+            SNFWebSocket
+    )
+    target_compile_features(SNFWebAssemblySmokeTests PRIVATE cxx_std_17)
+    target_link_options(SNFWebAssemblySmokeTests PRIVATE
+        -sENVIRONMENT=node
+        -sEXIT_RUNTIME=1
+        -sNO_FILESYSTEM=1
+    )
+    add_test(NAME SNFWebAssemblySmokeTests COMMAND SNFWebAssemblySmokeTests)
 endif()
 
 # ── Package config: SNFCore (always) ─────────────────────────────────────────
