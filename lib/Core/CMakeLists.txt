@@ -60,6 +60,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
     target_link_libraries(SNFCore
         PUBLIC
             stdc++fs
+            Threads::Threads
     )
 
 endif()
