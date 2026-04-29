@@ -9,9 +9,13 @@
 #include <SNFWidgets/PushButton.h>
 #include <SNFWidgets/Window.h>
 
+#include <SNFWebSocket/WebSocket.h>
+
+namespace wg = snf::widgets;
+
+
 #include <cstdio>
 
-using namespace std::chrono_literals;
 
 /**
  * Minimal standalone SNFWidgets web application.
@@ -31,41 +35,29 @@ int main()
 
     // ── SNFCore timer ─────────────────────────────────────────────────────────
     // Fires once per second; output is visible in the browser console (F12).
-    snf::Timer ticker;
-    int ticks = 0;
-    ticker.timeout.connect([&]() {
-        std::printf("tick %d\n", ++ticks);
-    });
-    ticker.start(1000ms);
 
     // ── Web application root ──────────────────────────────────────────────────
-    snf::widgets::ApplicationNode webApp;
+    wg::ApplicationNode webApp;
     webApp.setTitle("SNFWidgets Standalone");
 
+
+
     // ── Widget tree ───────────────────────────────────────────────────────────
-    snf::widgets::Window window("Hello from SNFWidgets", &webApp);
+    wg::Window window("Hello from SNFWidgets", &webApp);
+    // window.setFullSize(true);
 
-    snf::widgets::LineEdit lineEdit("Type something...", &window);
+    wg::VBoxLayout main_layout(&window);
 
-    snf::widgets::VBoxLayout mainLayout(&window);
-    window.setLayout(&mainLayout);
+    wg::HBoxLayout ip_layout(&main_layout);
+    wg::LineEdit le_host("Host", &window);
+    le_host.setPlaceholder("Host");
+    ip_layout.addChild(&le_host);
 
-    snf::widgets::HBoxLayout hbox;
-    mainLayout.addWidget(&hbox);
+    wg::LineEdit le_port("Port", &window);
+    ip_layout.addChild(&le_port);
 
-    snf::widgets::PushButton button("Click me!", &window);
-    snf::widgets::ProgressBar progressBar(0, 100, &window);
-    snf::widgets::PushButton button2("Another click", &window);
+    main_layout.addChild(&ip_layout);
 
-    hbox.addWidget(&button);
-    // hbox.addWidget(&lineEdit, 1);
-    hbox.addWidget(&button2);
-    mainLayout.addWidget(&progressBar);
-
-    button.clicked.connect([&ticks, &progressBar]() {
-        std::printf("Button clicked — ticks so far: %d\n", ticks);
-        progressBar.setValue((progressBar.value() + 10) % 110);
-    });
 
     // run() enters the Emscripten main loop (does not return on web).
     webApp.run();

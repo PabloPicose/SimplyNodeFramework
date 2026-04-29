@@ -1,6 +1,6 @@
-add_executable(httpapp main.cpp)
+add_executable(httpapp http-main.cpp)
 
-target_link_libraries(httpapp PRIVATE SNFCore SNFHttpServer SNFNetwork)
+target_link_libraries(httpapp PRIVATE SNFCore SNFHttpServer SNFNetwork SNFWebSocket)
 
 set(SNF_HTTPAPP_WEB_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../web")
 set(SNF_HTTPAPP_WEB_RUNTIME_DIR "$<TARGET_FILE_DIR:httpapp>/web")

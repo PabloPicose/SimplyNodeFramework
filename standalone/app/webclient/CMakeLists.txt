@@ -1,21 +1,24 @@
-add_executable(snf_standalone_app main.cpp)
+add_executable(webclient webclient-main.cpp)
 
 # SNFWidgets::SNFWidgets transitively provides SNFCore, ImGui, and the
 # Emscripten GLFW3 port link/compile options.
-target_link_libraries(snf_standalone_app PRIVATE SNFWidgets::SNFWidgets)
+target_link_libraries(webclient PRIVATE 
+    SNFWidgets::SNFWidgets 
+    SNFWebSocket::SNFWebSocket
+)
 
-target_compile_options(snf_standalone_app PRIVATE -Wall -Wextra)
+target_compile_options(webclient PRIVATE -Wall -Wextra)
 
 if(EMSCRIPTEN)
     set(SNF_STANDALONE_WEB_DIR "${CMAKE_CURRENT_LIST_DIR}/../../web")
 
-    target_link_options(snf_standalone_app PRIVATE
+    target_link_options(webclient PRIVATE
         -sNO_FILESYSTEM=1
         -sDISABLE_EXCEPTION_CATCHING=1
         --shell-file=${SNF_STANDALONE_EMSCRIPTEN_SHELL_FILE}
     )
 
-    set_target_properties(snf_standalone_app PROPERTIES
+    set_target_properties(webclient PROPERTIES
         SUFFIX ".html"
         OUTPUT_NAME "index"
         RUNTIME_OUTPUT_DIRECTORY "${SNF_STANDALONE_WEB_DIR}"

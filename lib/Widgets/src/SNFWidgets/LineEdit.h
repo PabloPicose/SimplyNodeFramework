@@ -45,6 +45,48 @@ class LineEdit : public Widget
 {
 public:
     /**
+     * @enum LayoutPolicy
+     * @brief Controls how the editable field and companion text share width.
+     *
+     * `InputExpands` keeps the input useful first and clips companion text
+     * when the available layout width becomes narrow.
+     * `TextPriority` preserves label/auxiliary text first and gives the input
+     * the remaining width.
+     * `InputPriority` gives the input its preferred width first and clips or
+     * hides companion text with the remaining width.
+     * `FixedTextWidth` reserves `companionTextWidth()` for label/auxiliary
+     * text and lets the input use the rest.
+     */
+    enum class LayoutPolicy {
+        InputExpands,
+        TextPriority,
+        InputPriority,
+        FixedTextWidth,
+    };
+
+    /**
+     * @enum TextPlacement
+     * @brief Placement for the visible part of `label()`.
+     *
+     * ImGui id suffixes such as `"Name##id"` remain supported; only the
+     * visible `"Name"` part participates in layout.
+     */
+    enum class TextPlacement {
+        Hidden,
+        Left,
+        Right,
+    };
+
+    /**
+     * @enum TextOverflow
+     * @brief Behaviour for label/auxiliary text that does not fit.
+     */
+    enum class TextOverflow {
+        Clip,
+        Hide,
+    };
+
+    /**
      * @param label  ImGui label (use "##id" for a hidden label).
      * @param parent Parent node (a Window or another container Widget).
      */
@@ -64,6 +106,68 @@ public:
 
     /** @brief Returns the current label. */
     std::string label() const;
+
+    /** @brief Sets placeholder text shown inside the empty input field. */
+    void setPlaceholder(const std::string& placeholder);
+
+    /** @brief Returns the placeholder text. */
+    std::string placeholder() const;
+
+    /** @brief Sets auxiliary text rendered next to the editable field. */
+    void setAuxiliaryText(const std::string& text);
+
+    /** @brief Returns the auxiliary text. */
+    std::string auxiliaryText() const;
+
+    /** @brief Sets the width-sharing policy used in constrained layouts. */
+    void setLayoutPolicy(LayoutPolicy policy);
+
+    /** @brief Returns the current width-sharing policy. */
+    LayoutPolicy layoutPolicy() const;
+
+    /** @brief Sets where the visible label text is rendered. */
+    void setTextPlacement(TextPlacement placement);
+
+    /** @brief Returns where the visible label text is rendered. */
+    TextPlacement textPlacement() const;
+
+    /** @brief Sets how companion text behaves when it does not fit. */
+    void setTextOverflow(TextOverflow overflow);
+
+    /** @brief Returns the current companion text overflow mode. */
+    TextOverflow textOverflow() const;
+
+    /**
+     * @brief Sets the minimum editable-field width in pixels.
+     *
+     * Values below zero are clamped to zero. A zero minimum lets the layout
+     * shrink the input as far as ImGui can still render safely.
+     */
+    void setMinimumInputWidth(float width);
+
+    /** @brief Returns the configured minimum editable-field width. */
+    float minimumInputWidth() const;
+
+    /**
+     * @brief Sets the preferred editable-field width in pixels.
+     *
+     * A value of zero means "use the available width after companion text".
+     */
+    void setPreferredInputWidth(float width);
+
+    /** @brief Returns the configured preferred editable-field width. */
+    float preferredInputWidth() const;
+
+    /**
+     * @brief Sets the reserved width for label/auxiliary text in pixels.
+     *
+     * This value is used by `LayoutPolicy::FixedTextWidth`; zero falls back to
+     * the natural measured text width.
+     */
+    void setCompanionTextWidth(float width);
+
+    /** @brief Returns the configured companion text width. */
+    float companionTextWidth() const;
 
     /**
      * @brief Emitted when the user edits the text and the content changes.
@@ -92,10 +196,21 @@ private:
      *        capacity for further typing.
      */
     void syncBuffer();
+    void renderWithAvailableWidth(float width);
+    bool renderInputText(float width);
+    bool renderCompanionText(const std::string& text, float width) const;
 
     std::string        m_label;
     std::string        m_text;
+    std::string        m_placeholder;
+    std::string        m_auxiliaryText;
     std::vector<char>  m_buffer;   ///< Mutable buffer passed to ImGui::InputText.
+    LayoutPolicy       m_layoutPolicy = LayoutPolicy::InputExpands;
+    TextPlacement      m_textPlacement = TextPlacement::Right;
+    TextOverflow       m_textOverflow = TextOverflow::Clip;
+    float              m_minimumInputWidth = 0.0f;
+    float              m_preferredInputWidth = 0.0f;
+    float              m_companionTextWidth = 0.0f;
 };
 
 }  // namespace widgets
