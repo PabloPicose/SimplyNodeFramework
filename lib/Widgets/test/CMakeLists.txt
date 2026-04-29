@@ -1,6 +1,7 @@
 add_executable(SNFWidgetsTests
     WidgetTests.cpp
     LabelTests.cpp
+    PushButtonTests.cpp
     LayoutTests.cpp
     WindowTests.cpp
     MessageBoxTests.cpp
@@ -19,6 +20,11 @@ target_link_libraries(SNFWidgetsTests
     PRIVATE
         SNFWidgets
         GTest::gtest_main
+)
+
+target_include_directories(SNFWidgetsTests
+    PRIVATE
+        ${snf_imgui_SOURCE_DIR}
 )
 
 target_compile_features(SNFWidgetsTests PRIVATE cxx_std_17)
