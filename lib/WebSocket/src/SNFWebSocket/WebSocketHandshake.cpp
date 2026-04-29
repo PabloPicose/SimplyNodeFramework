@@ -278,6 +278,17 @@ std::string headerValue(const HttpMessage& message, const std::string& key)
     return it->second;
 }
 
+std::string formatHostHeader(std::string host, std::uint16_t port)
+{
+    if (host.find(':') != std::string::npos && (host.empty() || host.front() != '[')) {
+        host = "[" + host + "]";
+    }
+
+    std::ostringstream stream;
+    stream << host << ":" << port;
+    return stream.str();
+}
+
 }  // namespace
 
 std::string createClientKey()
@@ -304,10 +315,10 @@ std::string buildClientHandshakeRequest(const std::string& host,
                                         const std::string& path,
                                         const std::string& clientKey)
 {
-    const std::string requestPath = path.empty() ? "/" : path;
+    const std::string requestPath = path.empty() ? "/" : (path.front() == '/' ? path : "/" + path);
     std::ostringstream stream;
     stream << "GET " << requestPath << " HTTP/1.1\r\n"
-           << "Host: " << host << ":" << port << "\r\n"
+           << "Host: " << formatHostHeader(host, port) << "\r\n"
            << "Upgrade: websocket\r\n"
            << "Connection: Upgrade\r\n"
            << "Sec-WebSocket-Key: " << clientKey << "\r\n"

@@ -192,8 +192,11 @@ void EventLoop::runPendingWork()
         }
     }
 
-    // Deliver any I/O callbacks that were already made ready by a previous
-    // wait() call.  No new wait() is issued; control returns to the caller.
+    // Poll I/O without blocking so external loops (GLFW, browser callbacks,
+    // tests that drive the loop manually) can still make socket progress.
+    waitForIO(0);
+
+    // Deliver I/O callbacks made ready by the non-blocking poll above.
     for (ReadyIOEntry& readyIO : takeReadyIO()) {
         if (readyIO.callback) {
             readyIO.callback(readyIO.events);

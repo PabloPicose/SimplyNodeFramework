@@ -29,6 +29,19 @@ TEST(WebSocketHandshakeTest, ValidatesClientRequest)
     EXPECT_EQ(key, "dGhlIHNhbXBsZSBub25jZQ==");
 }
 
+TEST(WebSocketHandshakeTest, BuildsClientRequestWithNormalizedPathAndIpv6Host)
+{
+    const std::string request = buildClientHandshakeRequest(
+        "2001:db8::1",
+        8765,
+        "echo",
+        "dGhlIHNhbXBsZSBub25jZQ==");
+
+    EXPECT_NE(request.find("GET /echo HTTP/1.1\r\n"), std::string::npos);
+    EXPECT_NE(request.find("Host: [2001:db8::1]:8765\r\n"), std::string::npos);
+    EXPECT_NE(request.find("Upgrade: websocket\r\n"), std::string::npos);
+}
+
 TEST(WebSocketHandshakeTest, RejectsInvalidClientRequest)
 {
     const std::string request =

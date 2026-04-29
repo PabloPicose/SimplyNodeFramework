@@ -28,6 +28,12 @@ std::string buildWebSocketUrl(const HostAddress& address, std::uint16_t port, co
     return stream.str();
 }
 
+bool isWildcardConnectAddress(const HostAddress& address)
+{
+    return address.toString() == HostAddress::AnyIPv4.toString() ||
+           address.toString() == HostAddress::AnyIPv6.toString();
+}
+
 }  // namespace
 
 class WebSocketImplEmscripten final : public websocket::detail::WebSocketBackend
@@ -47,6 +53,12 @@ public:
     void connectToHost(const HostAddress& address, std::uint16_t port, const std::string& path) override
     {
         close();
+
+        if (isWildcardConnectAddress(address)) {
+            fail("WebSocket client cannot connect to wildcard address '" + address.toString() +
+                 "'. Use a concrete peer address such as 127.0.0.1.");
+            return;
+        }
 
         if (!emscripten_websocket_is_supported()) {
             fail("Emscripten WebSocket API is not supported in this environment");

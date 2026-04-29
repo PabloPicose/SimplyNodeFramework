@@ -20,6 +20,12 @@ std::string toString(const std::vector<std::uint8_t>& data)
     return std::string(data.begin(), data.end());
 }
 
+bool isWildcardConnectAddress(const HostAddress& address)
+{
+    return address.toString() == HostAddress::AnyIPv4.toString() ||
+           address.toString() == HostAddress::AnyIPv6.toString();
+}
+
 }  // namespace
 
 class WebSocketImplNative final : public websocket::detail::WebSocketBackend
@@ -96,6 +102,12 @@ private:
 void WebSocketImplNative::connectToHost(const HostAddress& address, std::uint16_t port, const std::string& path)
 {
     close();
+
+    if (isWildcardConnectAddress(address)) {
+        fail("WebSocket client cannot connect to wildcard address '" + address.toString() +
+             "'. Use a concrete peer address such as 127.0.0.1.");
+        return;
+    }
 
     m_socket = std::make_unique<TcpSocket>(false);
     m_clientMode = true;
