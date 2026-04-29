@@ -70,6 +70,16 @@ WebSocketState WebSocket::state() const
     return m_backend ? m_backend->state() : WebSocketState::Closed;
 }
 
+HostAddress WebSocket::peerAddress() const
+{
+    return m_backend ? m_backend->peerAddress() : HostAddress();
+}
+
+std::uint16_t WebSocket::peerPort() const
+{
+    return m_backend ? m_backend->peerPort() : 0;
+}
+
 void WebSocket::beginServerConnection()
 {
     m_backend->beginServerConnection();

@@ -109,6 +109,12 @@ public:
     /** @brief Returns the current connection state. */
     TcpSocketState state() const;
 
+    /** @brief Returns the connected peer address, or an empty address if disconnected. */
+    HostAddress peerAddress() const;
+
+    /** @brief Returns the connected peer port, or 0 if disconnected. */
+    std::uint16_t peerPort() const;
+
     Signal<>            connected;     ///< Emitted when the TCP handshake completes.
     Signal<>            disconnected;  ///< Emitted when the connection is closed.
     Signal<>            readyRead;     ///< Emitted when data is available in the read buffer.

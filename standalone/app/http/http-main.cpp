@@ -59,15 +59,16 @@ int main(int argc, char** argv)
     ws_server.newConnection.connect([&]() {
         while (auto ws = ws_server.nextPendingConnection()) {
             ws->setParent(&ws_server);
+            std::printf("New WebSocket connection from %s\n", ws->peerAddress().toString().c_str());
         }
     });
-    ws_server.errorOccurred.connect([](std::string err) {
-        std::cerr << "WebSocket server error: " << err << "\n";
-    });
+    ws_server.errorOccurred.connect([](std::string err) { std::cerr << "WebSocket server error: " << err << "\n"; });
 
     if (! ws_server.listen(HostAddress::AnyIPv4, 30123)) {
         std::cerr << "Failed to start WebSocket server" << "\n";
         return 1;
+    } else {
+        std::cout << "WebSocket server started on port 30123\n";
     }
 
     return app.run();

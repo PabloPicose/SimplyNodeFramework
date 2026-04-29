@@ -28,6 +28,8 @@ public:
     virtual bool isOpen() const = 0;
     virtual bool isValid() const = 0;
     virtual WebSocketState state() const = 0;
+    virtual HostAddress peerAddress() const = 0;
+    virtual std::uint16_t peerPort() const = 0;
 
     virtual void beginServerConnection() = 0;
 };

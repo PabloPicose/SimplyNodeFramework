@@ -52,8 +52,29 @@ public:
     /** @brief Returns the raw hostname/IP string. */
     const std::string& host() const;
 
+    /** @brief Returns the host string in display/serialization form. */
+    std::string toString() const;
+
     /** @brief Returns `true` if no host string has been set. */
     bool isEmpty() const;
+
+    /**
+     * @brief Returns true if the stored host is syntactically valid.
+     *
+     * Validation is local and deterministic: it accepts IPv4 literals, IPv6
+     * literals, and ASCII DNS hostnames. It does not perform DNS resolution,
+     * so an otherwise valid hostname may still fail in `resolve()`.
+     */
+    bool isValid() const;
+
+    /**
+     * @brief Validates a host string without constructing a HostAddress.
+     *
+     * Empty strings are considered invalid here. `resolve()` still supports an
+     * empty host for `HostResolveMode::Bind`, where it maps to the system's
+     * passive wildcard address.
+     */
+    static bool isValidHost(const std::string& host);
 
     /**
      * @brief Resolves the host string to a list of `sockaddr_storage` entries.

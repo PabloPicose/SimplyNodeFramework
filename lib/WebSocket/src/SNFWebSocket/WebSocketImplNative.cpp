@@ -53,6 +53,8 @@ public:
     bool isOpen() const override;
     bool isValid() const override;
     WebSocketState state() const override;
+    HostAddress peerAddress() const override;
+    std::uint16_t peerPort() const override;
     void beginServerConnection() override;
 
 private:
@@ -158,6 +160,30 @@ bool WebSocketImplNative::isValid() const
 WebSocketState WebSocketImplNative::state() const
 {
     return m_state;
+}
+
+HostAddress WebSocketImplNative::peerAddress() const
+{
+    if (m_socket) {
+        const HostAddress tcpPeer = m_socket->peerAddress();
+        if (! tcpPeer.isEmpty()) {
+            return tcpPeer;
+        }
+    }
+
+    return HostAddress(m_host);
+}
+
+std::uint16_t WebSocketImplNative::peerPort() const
+{
+    if (m_socket) {
+        const std::uint16_t tcpPeerPort = m_socket->peerPort();
+        if (tcpPeerPort != 0) {
+            return tcpPeerPort;
+        }
+    }
+
+    return m_port;
 }
 
 void WebSocketImplNative::beginServerConnection()

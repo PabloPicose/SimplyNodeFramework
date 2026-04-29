@@ -7,10 +7,11 @@
  */
 
 #include "Widget.h"
-#include <SNFCore/AbstractTableModel.h>
 #include <SNFCore/Connection.h>
 
 namespace snf {
+
+    class AbstractTableModel;
 namespace widgets {
 
 /**

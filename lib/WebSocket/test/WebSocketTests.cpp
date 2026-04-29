@@ -76,10 +76,12 @@ TEST_F(WebSocketClientFixture, ConnectsToLocalEchoServer)
     WebSocketServer server;
     ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
 
+    bool serverPeerEndpointOk = false;
     server.newConnection.connect([&]() {
         WebSocket* peer = server.nextPendingConnection();
         ASSERT_NE(peer, nullptr);
         acceptedSockets.push_back(peer);
+        serverPeerEndpointOk = peer->peerAddress().isValid() && peer->peerPort() > 0;
         peer->textMessageReceived.connect([peer](const std::string& message) {
             peer->sendTextMessage(message);
         });
@@ -94,6 +96,8 @@ TEST_F(WebSocketClientFixture, ConnectsToLocalEchoServer)
 
     socket.connected.connect([&]() {
         didConnect = true;
+        EXPECT_EQ(socket.peerAddress().toString(), HostAddress::LocalHost.toString());
+        EXPECT_EQ(socket.peerPort(), server.serverPort());
         socket.sendTextMessage(payload);
     });
 
@@ -117,6 +121,7 @@ TEST_F(WebSocketClientFixture, ConnectsToLocalEchoServer)
     EXPECT_TRUE(errorMessage.empty()) << errorMessage;
     EXPECT_TRUE(didConnect);
     EXPECT_TRUE(gotEcho);
+    EXPECT_TRUE(serverPeerEndpointOk);
 }
 
 TEST_F(WebSocketClientFixture, ReportsErrorWhenPortHasNoServer)

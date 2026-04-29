@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <string>
 
+#include <SNFCore/AbstractTableModel.h>
+
 namespace snf {
 namespace widgets {
 

@@ -1,11 +1,96 @@
 #include "SNFNetwork/HostAddress.h"
 
+#include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/socket.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cstring>
 
 namespace snf {
+
+namespace {
+bool isAsciiAlphaNumeric(char ch)
+{
+    const auto value = static_cast<unsigned char>(ch);
+    return std::isalnum(value) != 0;
+}
+
+bool isValidHostnameLabel(const std::string& host, std::size_t begin, std::size_t end)
+{
+    const std::size_t length = end - begin;
+    if (length == 0 || length > 63) {
+        return false;
+    }
+
+    if (! isAsciiAlphaNumeric(host[begin]) || ! isAsciiAlphaNumeric(host[end - 1])) {
+        return false;
+    }
+
+    for (std::size_t i = begin; i < end; ++i) {
+        const char ch = host[i];
+        if (! isAsciiAlphaNumeric(ch) && ch != '-') {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool isValidIpLiteral(const std::string& host)
+{
+    in_addr ipv4{};
+    if (::inet_pton(AF_INET, host.c_str(), &ipv4) == 1) {
+        return true;
+    }
+
+    in6_addr ipv6{};
+    return ::inet_pton(AF_INET6, host.c_str(), &ipv6) == 1;
+}
+
+bool isValidDnsHostname(const std::string& host)
+{
+    if (host.empty() || host.size() > 253) {
+        return false;
+    }
+
+    const bool looksLikeMalformedIpv4 =
+        host.find('.') != std::string::npos &&
+        std::all_of(host.begin(), host.end(), [](char ch) {
+            const auto value = static_cast<unsigned char>(ch);
+            return std::isdigit(value) != 0 || ch == '.';
+        });
+    if (looksLikeMalformedIpv4) {
+        return false;
+    }
+
+    if (host.front() == '.' || host.front() == '-' || host.front() == '[' || host.front() == ']') {
+        return false;
+    }
+
+    const std::size_t effectiveSize = host.back() == '.' ? host.size() - 1 : host.size();
+    if (effectiveSize == 0) {
+        return false;
+    }
+
+    std::size_t labelBegin = 0;
+    while (labelBegin < effectiveSize) {
+        const std::size_t labelEnd = host.find('.', labelBegin);
+        const std::size_t end = labelEnd == std::string::npos || labelEnd > effectiveSize
+            ? effectiveSize
+            : labelEnd;
+
+        if (! isValidHostnameLabel(host, labelBegin, end)) {
+            return false;
+        }
+
+        labelBegin = end + 1;
+    }
+
+    return true;
+}
+}  // namespace
 
 const HostAddress HostAddress::LocalHost{"127.0.0.1"};
 const HostAddress HostAddress::LocalHostIPv6{"::1"};
@@ -16,7 +101,16 @@ HostAddress::HostAddress(std::string host) : m_host(std::move(host)) {}
 
 const std::string& HostAddress::host() const { return m_host; }
 
+std::string HostAddress::toString() const { return m_host; }
+
 bool HostAddress::isEmpty() const { return m_host.empty(); }
+
+bool HostAddress::isValid() const { return isValidHost(m_host); }
+
+bool HostAddress::isValidHost(const std::string& host)
+{
+    return isValidIpLiteral(host) || isValidDnsHostname(host);
+}
 
 bool HostAddress::resolve(std::uint16_t port,
                           HostResolveMode mode,

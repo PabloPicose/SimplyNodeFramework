@@ -72,6 +72,20 @@ public:
     bool isValid() const;
     WebSocketState state() const;
 
+    /**
+     * @brief Returns the peer address for the current connection.
+     *
+     * Native builds query the underlying TCP socket when available. Emscripten
+     * builds return the host passed to `connectToHost()`, because browsers do
+     * not expose a socket-level peer address API.
+     */
+    HostAddress peerAddress() const;
+
+    /**
+     * @brief Returns the peer port, or 0 if no peer endpoint is known.
+     */
+    std::uint16_t peerPort() const;
+
     Signal<> connected;
     Signal<> disconnected;
     Signal<std::string> textMessageReceived;

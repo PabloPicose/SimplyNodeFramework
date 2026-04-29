@@ -54,6 +54,8 @@ public:
         }
 
         m_url = buildWebSocketUrl(address, port, path);
+        m_peerAddress = address;
+        m_peerPort = port;
 
         EmscriptenWebSocketCreateAttributes attributes;
         emscripten_websocket_init_create_attributes(&attributes);
@@ -118,6 +120,8 @@ public:
     bool isOpen() const override { return m_state == WebSocketState::Open; }
     bool isValid() const override { return m_state != WebSocketState::Error; }
     WebSocketState state() const override { return m_state; }
+    HostAddress peerAddress() const override { return m_peerAddress; }
+    std::uint16_t peerPort() const override { return m_peerPort; }
 
     void beginServerConnection() override
     {
@@ -201,6 +205,8 @@ private:
     EMSCRIPTEN_WEBSOCKET_T m_socket = 0;
     WebSocketState m_state = WebSocketState::Closed;
     std::string m_url;
+    HostAddress m_peerAddress;
+    std::uint16_t m_peerPort = 0;
 };
 
 namespace websocket::detail {

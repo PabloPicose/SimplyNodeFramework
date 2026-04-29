@@ -139,6 +139,51 @@ TEST_F(TcpSocketFixture, connectAndEchoRoundTrip)
     EXPECT_EQ(received, payload);
 }
 
+TEST_F(TcpSocketFixture, exposesPeerAddressAndPort)
+{
+    TcpSocket socket(false);
+
+    bool didConnect = false;
+    std::string errorMessage;
+
+    socket.connected.connect([&]() {
+        didConnect = true;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    socket.errorOccurred.connect([&](const std::string& error) {
+        errorMessage = error;
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 2s);
+
+    socket.connectToHost(HostAddress::LocalHost, echoServerPort);
+    app->run();
+
+    ASSERT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
+    ASSERT_TRUE(didConnect);
+    EXPECT_EQ(socket.peerAddress().toString(), HostAddress::LocalHost.toString());
+    EXPECT_EQ(socket.peerPort(), echoServerPort);
+    ASSERT_FALSE(acceptedSockets.empty());
+    EXPECT_FALSE(acceptedSockets.front()->peerAddress().isEmpty());
+    EXPECT_TRUE(acceptedSockets.front()->peerAddress().isValid());
+    EXPECT_GT(acceptedSockets.front()->peerPort(), 0);
+}
+
+TEST_F(TcpSocketFixture, disconnectedSocketHasNoPeerEndpoint)
+{
+    TcpSocket socket(false);
+
+    EXPECT_TRUE(socket.peerAddress().isEmpty());
+    EXPECT_EQ(socket.peerPort(), 0);
+}
+
 TEST_F(TcpSocketFixture, connectToLocalhostHostName)
 {
     TcpServer server;

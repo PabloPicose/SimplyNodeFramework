@@ -4,6 +4,7 @@
 #include "SNFCore/NodePtr.h"
 #include "SNFNetwork/HostAddress.h"
 
+#include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/epoll.h>
@@ -34,6 +35,45 @@ socklen_t socketAddressLength(const sockaddr_storage& address)
         return static_cast<socklen_t>(sizeof(sockaddr_in6));
     }
     return static_cast<socklen_t>(sizeof(sockaddr_in));
+}
+
+bool peerEndpoint(int fd, std::string& address, std::uint16_t& port)
+{
+    address.clear();
+    port = 0;
+
+    if (fd < 0) {
+        return false;
+    }
+
+    sockaddr_storage storage{};
+    socklen_t storageLength = sizeof(storage);
+    if (::getpeername(fd, reinterpret_cast<sockaddr*>(&storage), &storageLength) != 0) {
+        return false;
+    }
+
+    char buffer[INET6_ADDRSTRLEN] = {};
+    if (storage.ss_family == AF_INET) {
+        const auto* ipv4 = reinterpret_cast<const sockaddr_in*>(&storage);
+        if (! ::inet_ntop(AF_INET, &ipv4->sin_addr, buffer, sizeof(buffer))) {
+            return false;
+        }
+        address = buffer;
+        port = ntohs(ipv4->sin_port);
+        return true;
+    }
+
+    if (storage.ss_family == AF_INET6) {
+        const auto* ipv6 = reinterpret_cast<const sockaddr_in6*>(&storage);
+        if (! ::inet_ntop(AF_INET6, &ipv6->sin6_addr, buffer, sizeof(buffer))) {
+            return false;
+        }
+        address = buffer;
+        port = ntohs(ipv6->sin6_port);
+        return true;
+    }
+
+    return false;
 }
 
 }  // namespace
@@ -226,6 +266,28 @@ TcpSocketState TcpSocket::state() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_state;
+}
+
+HostAddress TcpSocket::peerAddress() const
+{
+    std::string address;
+    std::uint16_t port = 0;
+    if (! peerEndpoint(descriptor(), address, port)) {
+        return HostAddress();
+    }
+
+    return HostAddress(address);
+}
+
+std::uint16_t TcpSocket::peerPort() const
+{
+    std::string address;
+    std::uint16_t port = 0;
+    if (! peerEndpoint(descriptor(), address, port)) {
+        return 0;
+    }
+
+    return port;
 }
 
 void TcpSocket::handleEvents(std::uint32_t nativeEvents)

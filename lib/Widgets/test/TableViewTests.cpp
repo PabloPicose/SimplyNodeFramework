@@ -2,6 +2,7 @@
 
 #include "SNFWidgets/TableView.h"
 #include <SNFCore/Application.h>
+#include <SNFCore/AbstractTableModel.h>
 
 #include <string>
 #include <vector>
