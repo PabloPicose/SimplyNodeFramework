@@ -185,6 +185,67 @@ TEST_F(WebSocketServerFixture, SupportsBinaryMessages)
     EXPECT_EQ(echo, payload);
 }
 
+TEST_F(WebSocketServerFixture, QueuedBinaryMessagesArriveInOrder)
+{
+    WebSocketServer server;
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+
+    const std::vector<std::uint8_t> first(2 * 1024 * 1024, static_cast<std::uint8_t>('A'));
+    const std::vector<std::uint8_t> second(128 * 1024, static_cast<std::uint8_t>('B'));
+    const std::vector<std::uint8_t> third(64 * 1024, static_cast<std::uint8_t>('C'));
+    const std::vector<std::vector<std::uint8_t>> expected{first, second, third};
+
+    std::vector<std::vector<std::uint8_t>> echoed;
+    std::string clientError;
+    std::string serverError;
+
+    server.newConnection.connect([&]() {
+        WebSocket* peer = server.nextPendingConnection();
+        ASSERT_NE(peer, nullptr);
+        acceptedSockets.push_back(peer);
+        peer->binaryMessageReceived.connect([peer](const std::vector<std::uint8_t>& message) {
+            peer->sendBinaryMessage(message);
+        });
+        peer->errorOccurred.connect([&](const std::string& error) {
+            serverError = error;
+            stopLoopFrom(server);
+        });
+    });
+
+    server.errorOccurred.connect([&](const std::string& error) {
+        serverError = error;
+        stopLoopFrom(server);
+    });
+
+    WebSocket client;
+    client.connected.connect([&]() {
+        EXPECT_TRUE(client.sendBinaryMessage(first));
+        EXPECT_TRUE(client.sendBinaryMessage(second));
+        EXPECT_TRUE(client.sendBinaryMessage(third));
+    });
+    client.binaryMessageReceived.connect([&](const std::vector<std::uint8_t>& message) {
+        echoed.push_back(message);
+        if (echoed.size() == expected.size()) {
+            client.close();
+            stopLoopFrom(client);
+        }
+    });
+    client.errorOccurred.connect([&](const std::string& error) {
+        clientError = error;
+        stopLoopFrom(client);
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 5s);
+
+    client.connectToHost(HostAddress::LocalHost, server.serverPort());
+    app->run();
+
+    EXPECT_TRUE(clientError.empty()) << clientError;
+    EXPECT_TRUE(serverError.empty()) << serverError;
+    EXPECT_EQ(echoed, expected);
+}
+
 TEST_F(WebSocketServerFixture, SupportsPingPong)
 {
     WebSocketServer server;

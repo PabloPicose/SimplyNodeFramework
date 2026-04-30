@@ -5,6 +5,7 @@ set(SNFNETWORK_SOURCES
 )
 
 set(SNFNETWORK_HEADERS
+    "${SNFNETWORK_DIR}/ByteArray.h"
     "${SNFNETWORK_DIR}/HostAddress.h"
 )
 

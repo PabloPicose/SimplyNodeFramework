@@ -6,10 +6,12 @@
  * @ingroup SNFNetwork_Unix
  */
 
+#include "SNFNetwork/ByteArray.h"
 #include "SNFNetwork/IOEvent.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -84,6 +86,9 @@ public:
      * @brief Queues @p data for asynchronous transmission.
      * @return Number of bytes accepted into the write buffer.
      */
+    std::size_t write(ByteArray data);
+
+    /** @brief Overload accepting an unsigned-byte vector. */
     std::size_t write(const std::vector<std::uint8_t>& data);
 
     /** @brief Overload accepting a UTF-8 string. */
@@ -131,7 +136,7 @@ private:
     bool m_blocking = false;
     LocalSocketState m_state = LocalSocketState::Disconnected;
     std::vector<std::uint8_t> m_readBuffer;
-    std::vector<std::uint8_t> m_writeBuffer;
+    std::deque<ByteArray> m_writeQueue;
 };
 
 }  // namespace snf

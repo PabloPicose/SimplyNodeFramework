@@ -13,6 +13,7 @@
 
 #include <cerrno>
 #include <cstring>
+#include <utility>
 
 namespace snf {
 
@@ -211,11 +212,13 @@ void TcpSocket::close()
     }
 }
 
-std::size_t TcpSocket::write(const std::vector<std::uint8_t>& data)
+std::size_t TcpSocket::write(ByteArray data)
 {
-    if (data.empty()) {
+    if (data.remainingSize() == 0) {
         return 0;
     }
+
+    const std::size_t acceptedBytes = data.remainingSize();
 
     if (EventLoop* loop = ownerEventLoop(); loop && ! loop->isInThisThread()) {
         const bool canQueue = [this]() {
@@ -227,13 +230,12 @@ std::size_t TcpSocket::write(const std::vector<std::uint8_t>& data)
             return 0;
         }
 
-        const std::vector<std::uint8_t> pending = data;
-        loop->post([self = NodePtr<TcpSocket>(this), pending]() {
+        loop->post([self = NodePtr<TcpSocket>(this), pending = std::move(data)]() mutable {
             if (self) {
-                self->write(pending);
+                self->write(std::move(pending));
             }
         });
-        return data.size();
+        return acceptedBytes;
     }
 
     {
@@ -241,17 +243,22 @@ std::size_t TcpSocket::write(const std::vector<std::uint8_t>& data)
         if (m_state != TcpSocketState::Connected && m_state != TcpSocketState::Connecting) {
             return 0;
         }
-        m_writeBuffer.insert(m_writeBuffer.end(), data.begin(), data.end());
+        m_writeQueue.push_back(std::move(data));
     }
 
     flushPendingWrites();
     updateInterestForState();
-    return data.size();
+    return acceptedBytes;
+}
+
+std::size_t TcpSocket::write(const std::vector<std::uint8_t>& data)
+{
+    return write(ByteArray(data));
 }
 
 std::size_t TcpSocket::write(const std::string& data)
 {
-    return write(std::vector<std::uint8_t>(data.begin(), data.end()));
+    return write(ByteArray(data));
 }
 
 std::vector<std::uint8_t> TcpSocket::readAll()
@@ -345,22 +352,33 @@ bool TcpSocket::flushPendingWrites()
     }
 
     while (true) {
-        std::vector<std::uint8_t> localBuffer;
+        const std::byte* remainingData = nullptr;
+        std::size_t remainingSize = 0;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            if (m_writeBuffer.empty()) {
+            while (! m_writeQueue.empty() && m_writeQueue.front().fullyConsumed()) {
+                m_writeQueue.pop_front();
+            }
+
+            if (m_writeQueue.empty()) {
                 return true;
             }
-            localBuffer = m_writeBuffer;
+
+            remainingData = m_writeQueue.front().remainingData();
+            remainingSize = m_writeQueue.front().remainingSize();
         }
 
-        const ssize_t written = ::send(fd, localBuffer.data(), localBuffer.size(), MSG_NOSIGNAL);
+        const ssize_t written = ::send(fd, remainingData, remainingSize, MSG_NOSIGNAL);
         if (written > 0) {
             {
                 std::lock_guard<std::mutex> lock(m_mutex);
                 const std::size_t consumed = static_cast<std::size_t>(written);
-                m_writeBuffer.erase(m_writeBuffer.begin(),
-                                    m_writeBuffer.begin() + static_cast<std::ptrdiff_t>(consumed));
+                if (! m_writeQueue.empty()) {
+                    m_writeQueue.front().advance(consumed);
+                    if (m_writeQueue.front().fullyConsumed()) {
+                        m_writeQueue.pop_front();
+                    }
+                }
             }
             emitBytesWritten(static_cast<std::size_t>(written));
             continue;
@@ -461,7 +479,7 @@ bool TcpSocket::transitionToDisconnected(bool emitSignal)
     const bool wasConnected = m_state == TcpSocketState::Connected || m_state == TcpSocketState::Connecting;
     m_state = TcpSocketState::Disconnected;
     m_readBuffer.clear();
-    m_writeBuffer.clear();
+    m_writeQueue.clear();
 
     return emitSignal && wasConnected;
 }
@@ -488,7 +506,7 @@ void TcpSocket::updateInterestForState()
         flags |= IOEventFlags::Read;
 
         std::lock_guard<std::mutex> lock(m_mutex);
-        if (! m_writeBuffer.empty()) {
+        if (! m_writeQueue.empty()) {
             flags |= IOEventFlags::Write;
         }
     }

@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
+#include <cstddef>
 #include <string>
 #include <thread>
 #include <vector>
@@ -9,10 +12,13 @@
 #include <SNFCore/Application.h>
 #include <SNFCore/EventLoop.h>
 #include <SNFCore/Timer.h>
+#include <SNFNetwork/ByteArray.h>
 #include <SNFNetwork/LocalServer.h>
 #include <SNFNetwork/LocalSocket.h>
 
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 using namespace snf;
 using namespace std::chrono_literals;
@@ -153,6 +159,7 @@ TEST_F(LocalSocketPlainFixture, writeEmptyPayloadReturnsZero)
 
     EXPECT_EQ(socket.write(std::string()), 0u);
     EXPECT_EQ(socket.write(std::vector<std::uint8_t>{}), 0u);
+    EXPECT_EQ(socket.write(ByteArray()), 0u);
 }
 
 TEST_F(LocalSocketPlainFixture, adoptedInvalidFdStaysDisconnected)
@@ -498,6 +505,155 @@ TEST_F(LocalSocketFixture, writeFromOtherThreadIsMarshaled)
     EXPECT_TRUE(connectedSignal);
     ASSERT_EQ(received.size(), payload.size());
     EXPECT_EQ(std::string(received.begin(), received.end()), payload);
+}
+
+TEST_F(LocalSocketPlainFixture, byteArrayWriteStartsAtCurrentOffset)
+{
+    int descriptors[2] = {-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, descriptors), 0);
+
+    LocalSocket socket(descriptors[0], false);
+    descriptors[0] = -1;
+
+    ByteArray bytes(std::string("ABCDE"));
+    bytes.advance(2);
+
+    EXPECT_EQ(socket.write(std::move(bytes)), 3u);
+
+    std::uint8_t buffer[16] = {};
+    const ssize_t readBytes = ::recv(descriptors[1], buffer, sizeof(buffer), 0);
+    ::close(descriptors[1]);
+
+    ASSERT_EQ(readBytes, 3);
+    EXPECT_EQ(std::string(buffer, buffer + readBytes), "CDE");
+}
+
+TEST_F(LocalSocketPlainFixture, queuedByteArraysFlushInFifoOrder)
+{
+    int descriptors[2] = {-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, descriptors), 0);
+
+    int sendBufferSize = 4096;
+    ASSERT_EQ(::setsockopt(descriptors[0], SOL_SOCKET, SO_SNDBUF, &sendBufferSize, sizeof(sendBufferSize)), 0);
+
+    LocalSocket socket(descriptors[0], false);
+    descriptors[0] = -1;
+
+    const std::size_t firstSize = 4 * 1024 * 1024;
+    const std::size_t secondSize = 128 * 1024;
+    const std::size_t thirdSize = 64 * 1024;
+
+    const std::vector<std::uint8_t> first(firstSize, static_cast<std::uint8_t>('A'));
+    const std::vector<std::uint8_t> second(secondSize, static_cast<std::uint8_t>('B'));
+    const std::vector<std::uint8_t> third(thirdSize, static_cast<std::uint8_t>('C'));
+
+    std::size_t totalBytesWritten = 0;
+    socket.bytesWritten.connect([&](std::size_t written) { totalBytesWritten += written; });
+
+    EXPECT_EQ(socket.write(ByteArray(first)), first.size());
+    EXPECT_EQ(socket.write(ByteArray(second)), second.size());
+    EXPECT_EQ(socket.write(ByteArray(third)), third.size());
+
+    std::vector<std::uint8_t> received;
+    received.reserve(firstSize + secondSize + thirdSize);
+
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (received.size() < firstSize + secondSize + thirdSize && std::chrono::steady_clock::now() < deadline) {
+        if (EventLoop* loop = socket.ownerEventLoop()) {
+            loop->runPendingWork();
+        }
+
+        std::uint8_t buffer[64 * 1024];
+        while (true) {
+            const ssize_t readBytes = ::recv(descriptors[1], buffer, sizeof(buffer), MSG_DONTWAIT);
+            if (readBytes > 0) {
+                received.insert(received.end(), buffer, buffer + readBytes);
+                continue;
+            }
+
+            if (readBytes == 0) {
+                ADD_FAILURE() << "Peer closed before all queued data was read";
+                break;
+            }
+
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                break;
+            }
+
+            if (errno == EINTR) {
+                continue;
+            }
+
+            ADD_FAILURE() << "recv() failed with errno " << errno;
+            break;
+        }
+
+        if (received.size() < firstSize + secondSize + thirdSize) {
+            std::this_thread::sleep_for(1ms);
+        }
+    }
+
+    ::close(descriptors[1]);
+
+    ASSERT_EQ(received.size(), firstSize + secondSize + thirdSize);
+    EXPECT_EQ(totalBytesWritten, firstSize + secondSize + thirdSize);
+    EXPECT_TRUE(std::all_of(received.begin(), received.begin() + static_cast<std::ptrdiff_t>(firstSize),
+                            [](std::uint8_t byte) { return byte == static_cast<std::uint8_t>('A'); }));
+    EXPECT_TRUE(std::all_of(received.begin() + static_cast<std::ptrdiff_t>(firstSize),
+                            received.begin() + static_cast<std::ptrdiff_t>(firstSize + secondSize),
+                            [](std::uint8_t byte) { return byte == static_cast<std::uint8_t>('B'); }));
+    EXPECT_TRUE(std::all_of(received.begin() + static_cast<std::ptrdiff_t>(firstSize + secondSize), received.end(),
+                            [](std::uint8_t byte) { return byte == static_cast<std::uint8_t>('C'); }));
+}
+
+TEST_F(LocalSocketPlainFixture, closeClearsPendingByteArrayQueue)
+{
+    int descriptors[2] = {-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, descriptors), 0);
+
+    int sendBufferSize = 4096;
+    ASSERT_EQ(::setsockopt(descriptors[0], SOL_SOCKET, SO_SNDBUF, &sendBufferSize, sizeof(sendBufferSize)), 0);
+
+    LocalSocket socket(descriptors[0], false);
+    descriptors[0] = -1;
+
+    std::size_t totalBytesWritten = 0;
+    socket.bytesWritten.connect([&](std::size_t written) { totalBytesWritten += written; });
+
+    const std::size_t firstSize = 4 * 1024 * 1024;
+    const std::vector<std::uint8_t> first(firstSize, static_cast<std::uint8_t>('A'));
+    const std::vector<std::uint8_t> second(128 * 1024, static_cast<std::uint8_t>('B'));
+
+    EXPECT_EQ(socket.write(ByteArray(first)), first.size());
+    EXPECT_EQ(socket.write(ByteArray(second)), second.size());
+
+    socket.close();
+
+    std::vector<std::uint8_t> received;
+    std::uint8_t buffer[64 * 1024] = {};
+    while (true) {
+        const ssize_t readBytes = ::recv(descriptors[1], buffer, sizeof(buffer), MSG_DONTWAIT);
+        if (readBytes > 0) {
+            received.insert(received.end(), buffer, buffer + readBytes);
+            continue;
+        }
+        if (readBytes == 0 || errno == EAGAIN || errno == EWOULDBLOCK) {
+            break;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        ADD_FAILURE() << "recv() failed with errno " << errno;
+        break;
+    }
+
+    ::close(descriptors[1]);
+
+    EXPECT_EQ(socket.state(), LocalSocketState::Disconnected);
+    EXPECT_EQ(totalBytesWritten, received.size());
+    EXPECT_LT(received.size(), first.size() + second.size());
+    EXPECT_TRUE(std::all_of(received.begin(), received.end(),
+                            [](std::uint8_t byte) { return byte == static_cast<std::uint8_t>('A'); }));
 }
 
 // ============================================================================
