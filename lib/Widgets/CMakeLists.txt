@@ -107,6 +107,7 @@ target_sources(SNFWidgets
         "${SNFWIDGETS_DIR}/ComboBox.cpp"
         "${SNFWIDGETS_DIR}/ProgressBar.cpp"
         "${SNFWIDGETS_DIR}/TableView.cpp"
+        "${SNFWIDGETS_DIR}/DataWidgetMapper.cpp"
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS "${SRC_DIR}"
@@ -129,6 +130,7 @@ target_sources(SNFWidgets
             "${SNFWIDGETS_DIR}/ComboBox.h"
             "${SNFWIDGETS_DIR}/ProgressBar.h"
             "${SNFWIDGETS_DIR}/TableView.h"
+            "${SNFWIDGETS_DIR}/DataWidgetMapper.h"
 )
 
 target_include_directories(SNFWidgets
@@ -176,7 +178,11 @@ add_library(SNFWidgets::SNFWidgets ALIAS SNFWidgets)
 #
 # Note: lib/Widgets/examples/standalone/ is intentionally NOT added here;
 # it is a self-contained project meant to be built independently.
-if(PROJECT_IS_TOP_LEVEL AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists.txt")
+if(NOT DEFINED SNF_ENABLE_EXAMPLES)
+    option(SNF_ENABLE_EXAMPLES "Build SimplyNodeFramework examples" ${PROJECT_IS_TOP_LEVEL})
+endif()
+
+if(SNF_ENABLE_EXAMPLES AND PROJECT_IS_TOP_LEVEL AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists.txt")
     add_subdirectory(examples)
 endif()
 

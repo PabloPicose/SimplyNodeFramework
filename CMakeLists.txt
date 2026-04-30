@@ -13,6 +13,7 @@ option(SNF_WEB_ASSEMBLY
     "Build SNFCore for WebAssembly/Emscripten (requires the Emscripten toolchain)"
     OFF)
 option(SNF_ENABLE_TESTS "Enable tests for SimplyNodeFramework" ${PROJECT_IS_TOP_LEVEL})
+option(SNF_ENABLE_EXAMPLES "Build SimplyNodeFramework examples" ${PROJECT_IS_TOP_LEVEL})
 option(SNF_ENABLE_WEB_TESTS
     "Enable Node-runnable WebAssembly smoke tests when SNF_WEB_ASSEMBLY is ON"
     ${PROJECT_IS_TOP_LEVEL})
@@ -77,6 +78,10 @@ endif()
 
 if(SNF_ENABLE_STANDALONE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/standalone/CMakeLists.txt")
     add_subdirectory(standalone)
+endif()
+
+if(SNF_ENABLE_EXAMPLES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists.txt")
+    add_subdirectory(examples)
 endif()
 
 if(SNF_WEB_ASSEMBLY AND SNF_ENABLE_WEB_TESTS)

@@ -14,6 +14,7 @@ add_executable(SNFWidgetsTests
     ComboBoxTests.cpp
     ProgressBarTests.cpp
     TableViewTests.cpp
+    DataWidgetMapperTests.cpp
 )
 
 target_link_libraries(SNFWidgetsTests
