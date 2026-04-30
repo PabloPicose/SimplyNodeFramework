@@ -347,8 +347,10 @@ Open `docs/html/index.html` in a browser.
 - [ ] Json parser
 - [ ] Serial Port class
 - [ ] TLV Packet (Type-Length-Value), helper class to send packets through TCP/Unix socket
-- [ ] WebSocket support
-- [ ] HTTP client/server
+- [x] WebSocket support
+- [x] HTTP server
+- [x] HTTP Request/Response parser
+- [ ] HTTP request handler (e.g. for REST APIs)
 - [ ] ALSA audio support
 
 ### TLV

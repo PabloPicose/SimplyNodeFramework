@@ -217,7 +217,7 @@ private:
     std::thread m_ioThread;
     bool m_ioThreadStarted = false;
     std::atomic_bool m_ioThreadStop{false};
-    std::atomic_bool m_stop{false};
+    bool m_stop = false;
     const std::thread::id m_owner;
 };
 }  // namespace snf

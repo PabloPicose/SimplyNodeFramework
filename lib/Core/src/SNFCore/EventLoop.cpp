@@ -88,7 +88,7 @@ std::size_t EventLoop::getRootNodesToDeleteCount() const { return pendingDeleteC
 
 void EventLoop::run()
 {
-    while (! m_stop.load()) {
+    for (;;) {
         // Drain task queue.
         Task task;
         while (popNextTask(task)) {
@@ -130,7 +130,7 @@ void EventLoop::run()
         // File-descriptor readiness is handled by the dedicated I/O thread,
         // which posts tasks back to this owner loop.
         std::unique_lock<std::mutex> lock(m_mutex);
-        if (m_stop.load()) {
+        if (m_stop) {
             break;
         }
 
@@ -141,11 +141,11 @@ void EventLoop::run()
         std::chrono::steady_clock::time_point nextDeadline;
         if (nextTimerDeadlineLocked(nextDeadline)) {
             m_condition.wait_until(lock, nextDeadline, [this]() {
-                return m_stop.load() || ! m_tasks.empty() || ! m_nodesToDelete.empty() || ! m_readyIO.empty();
+                return m_stop || ! m_tasks.empty() || ! m_nodesToDelete.empty() || ! m_readyIO.empty();
             });
         } else {
             m_condition.wait(lock, [this]() {
-                return m_stop.load() || ! m_tasks.empty() || ! m_nodesToDelete.empty() || ! m_readyIO.empty();
+                return m_stop || ! m_tasks.empty() || ! m_nodesToDelete.empty() || ! m_readyIO.empty();
             });
         }
     }
@@ -153,7 +153,10 @@ void EventLoop::run()
 
 void EventLoop::stop()
 {
-    m_stop.store(true);
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_stop = true;
+    }
     m_ioPoller->wakeUp();
     m_condition.notify_all();
 }

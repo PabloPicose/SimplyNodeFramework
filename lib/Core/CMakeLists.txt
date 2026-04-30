@@ -5,6 +5,8 @@ set(SNFCORE_DIR "${SRC_DIR}/SNFCore")
 
 add_library(SNFCore STATIC)
 
+find_package(Threads REQUIRED)
+
 # ── Platform-specific I/O poller implementation ───────────────────────────────
 # On Linux the real epoll/eventfd backend is used.
 # On WebAssembly the stub is compiled instead: same EpollPoller contract,
