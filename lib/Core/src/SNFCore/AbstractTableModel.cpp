@@ -1,8 +1,33 @@
 #include "SNFCore/AbstractTableModel.h"
 
+#include <sstream>
+#include <type_traits>
+
 namespace snf {
 
 AbstractTableModel::~AbstractTableModel() = default;
+
+std::string modelValueToString(const ModelValue& value)
+{
+    return std::visit(
+        [](const auto& current) -> std::string {
+            using ValueT = std::decay_t<decltype(current)>;
+            if constexpr (std::is_same_v<ValueT, std::monostate>) {
+                return {};
+            } else if constexpr (std::is_same_v<ValueT, bool>) {
+                return current ? "true" : "false";
+            } else if constexpr (std::is_same_v<ValueT, std::string>) {
+                return current;
+            } else if constexpr (std::is_same_v<ValueT, double>) {
+                std::ostringstream stream;
+                stream << current;
+                return stream.str();
+            } else {
+                return std::to_string(current);
+            }
+        },
+        value);
+}
 
 ModelIndex AbstractTableModel::index(int row, int column) const
 {
@@ -10,10 +35,14 @@ ModelIndex AbstractTableModel::index(int row, int column) const
     return result.isValid() ? result : ModelIndex();
 }
 
-std::string AbstractTableModel::data(const ModelIndex& index) const
+ModelValue AbstractTableModel::data(const ModelIndex& index, ModelDataRole role) const
 {
+    if (role != ModelDataRole::Display && role != ModelDataRole::Edit) {
+        return std::monostate{};
+    }
+
     if (! index.isValid() || index.model() != this) {
-        return {};
+        return std::monostate{};
     }
 
     return data(index.row(), index.column());
@@ -44,13 +73,13 @@ bool AbstractTableModel::setData(int /*row*/, int /*column*/, const std::string&
     return false;
 }
 
-bool AbstractTableModel::setData(const ModelIndex& index, const std::string& value)
+bool AbstractTableModel::setData(const ModelIndex& index, const ModelValue& value, ModelDataRole role)
 {
-    if (! index.isValid() || index.model() != this) {
+    if (role != ModelDataRole::Edit || ! index.isValid() || index.model() != this) {
         return false;
     }
 
-    return setData(index.row(), index.column(), value);
+    return setData(index.row(), index.column(), modelValueToString(value));
 }
 
 void AbstractTableModel::notifyDataChanged(int row, int column)

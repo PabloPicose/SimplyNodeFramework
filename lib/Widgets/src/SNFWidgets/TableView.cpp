@@ -476,7 +476,7 @@ void TableView::renderImGui()
                 ImGui::TableSetColumnIndex(column);
 
                 const snf::ModelIndex index = m_model->index(row, column);
-                const std::string cell = m_model->data(index);
+                const std::string cell = snf::modelValueToString(m_model->data(index));
                 const bool selected = containsSelectionKey(keyForCell(row, column));
 
                 ImGui::PushID(row);

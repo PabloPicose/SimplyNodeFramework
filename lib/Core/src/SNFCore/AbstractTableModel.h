@@ -9,9 +9,29 @@
 #include <SNFCore/Connection.h>
 #include <SNFCore/ModelIndex.h>
 
+#include <cstdint>
 #include <string>
+#include <variant>
 
 namespace snf {
+
+/**
+ * @enum ModelDataRole
+ * @ingroup SNFCore
+ * @brief Describes the purpose for data requested from a model index.
+ */
+enum class ModelDataRole {
+    Display, ///< Human-readable value for views.
+    Edit,    ///< Editable value used by editors.
+};
+
+/**
+ * @brief Type-safe model value used by table models.
+ */
+using ModelValue = std::variant<std::monostate, bool, int, std::int64_t, double, std::string>;
+
+/** @brief Converts a ModelValue into display text. */
+std::string modelValueToString(const ModelValue& value);
 
 /**
  * @class AbstractTableModel
@@ -61,8 +81,8 @@ public:
      */
     virtual std::string data(int row, int column) const = 0;
 
-    /** @brief Returns the string value for @p index. */
-    virtual std::string data(const ModelIndex& index) const;
+    /** @brief Returns the value for @p index and @p role. */
+    virtual ModelValue data(const ModelIndex& index, ModelDataRole role = ModelDataRole::Display) const;
 
     /**
      * @brief Returns the horizontal header string for @p section.
@@ -97,7 +117,9 @@ public:
     virtual bool setData(int row, int column, const std::string& value);
 
     /** @brief Updates @p index if the model supports editing. */
-    virtual bool setData(const ModelIndex& index, const std::string& value);
+    virtual bool setData(const ModelIndex& index,
+                         const ModelValue& value,
+                         ModelDataRole role = ModelDataRole::Edit);
 
     /** @brief Emitted when a cell value changes. Arguments are row, column. */
     Signal<int, int> dataChanged;

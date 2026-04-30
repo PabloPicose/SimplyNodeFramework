@@ -3,7 +3,9 @@
 #include "SNFCore/AbstractTableModel.h"
 #include "SNFCore/ModelIndex.h"
 
+#include <cstdint>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -94,6 +96,38 @@ public:
     std::string data(int, int) const override { return {}; }
 };
 
+class VariantTableModel : public snf::AbstractTableModel
+{
+public:
+    int rowCount() const override { return 1; }
+    int columnCount() const override { return 4; }
+
+    std::string data(int row, int column) const override
+    {
+        return snf::modelValueToString(data(index(row, column)));
+    }
+
+    snf::ModelValue data(const snf::ModelIndex& index, snf::ModelDataRole role = snf::ModelDataRole::Display) const override
+    {
+        if (! index.isValid() || index.model() != this || role != snf::ModelDataRole::Display) {
+            return std::monostate{};
+        }
+
+        switch (index.column()) {
+        case 0:
+            return true;
+        case 1:
+            return 42;
+        case 2:
+            return 2.5;
+        case 3:
+            return std::string("text");
+        default:
+            return std::monostate{};
+        }
+    }
+};
+
 }  // namespace
 
 TEST(AbstractTableModelTests, emptyModel)
@@ -121,7 +155,7 @@ TEST(AbstractTableModelTests, readsDataAndHeaders)
 
     EXPECT_EQ(model.data(0, 0), "Ada");
     EXPECT_EQ(model.data(1, 1), "Hopper");
-    EXPECT_EQ(base.data(model.index(1, 1)), "Hopper");
+    EXPECT_EQ(snf::modelValueToString(base.data(model.index(1, 1))), "Hopper");
     EXPECT_EQ(model.headerData(0), "First");
     EXPECT_EQ(model.headerData(1), "Last");
 }
@@ -151,7 +185,7 @@ TEST(AbstractTableModelTests, invalidIndexesReturnEmptyStrings)
     EXPECT_EQ(model.data(0, 2), "");
     EXPECT_EQ(model.headerData(-1), "");
     EXPECT_EQ(model.headerData(2), "");
-    EXPECT_EQ(base.data(snf::ModelIndex()), "");
+    EXPECT_TRUE(std::holds_alternative<std::monostate>(base.data(snf::ModelIndex())));
 }
 
 TEST(AbstractTableModelTests, defaultOptionalApiIsReadOnly)
@@ -163,7 +197,30 @@ TEST(AbstractTableModelTests, defaultOptionalApiIsReadOnly)
     EXPECT_FALSE(model.isEditable(0, 0));
     EXPECT_FALSE(model.setData(0, 0, "value"));
     EXPECT_FALSE(model.isEditable(snf::ModelIndex()));
-    EXPECT_FALSE(model.setData(snf::ModelIndex(), "value"));
+    EXPECT_FALSE(model.setData(snf::ModelIndex(), snf::ModelValue(std::string("value"))));
+}
+
+TEST(AbstractTableModelTests, modelValueConvertsToDisplayString)
+{
+    EXPECT_EQ(snf::modelValueToString(std::monostate{}), "");
+    EXPECT_EQ(snf::modelValueToString(true), "true");
+    EXPECT_EQ(snf::modelValueToString(false), "false");
+    EXPECT_EQ(snf::modelValueToString(42), "42");
+    EXPECT_EQ(snf::modelValueToString(std::int64_t{9000000000LL}), "9000000000");
+    EXPECT_EQ(snf::modelValueToString(2.5), "2.5");
+    EXPECT_EQ(snf::modelValueToString(std::string("text")), "text");
+}
+
+TEST(AbstractTableModelTests, modelCanReturnTypedValues)
+{
+    VariantTableModel model;
+    const snf::AbstractTableModel& base = model;
+
+    EXPECT_EQ(std::get<bool>(base.data(model.index(0, 0))), true);
+    EXPECT_EQ(std::get<int>(base.data(model.index(0, 1))), 42);
+    EXPECT_EQ(std::get<double>(base.data(model.index(0, 2))), 2.5);
+    EXPECT_EQ(std::get<std::string>(base.data(model.index(0, 3))), "text");
+    EXPECT_TRUE(std::holds_alternative<std::monostate>(base.data(model.index(0, 3), snf::ModelDataRole::Edit)));
 }
 
 TEST(AbstractTableModelTests, setDataEmitsDataChangedWhenValueChanges)
@@ -193,8 +250,8 @@ TEST(AbstractTableModelTests, setDataAcceptsModelIndex)
     const snf::ModelIndex index = model.index(0, 1);
 
     EXPECT_TRUE(base.isEditable(index));
-    EXPECT_TRUE(base.setData(index, "Byron"));
-    EXPECT_EQ(base.data(index), "Byron");
+    EXPECT_TRUE(base.setData(index, snf::ModelValue(std::string("Byron"))));
+    EXPECT_EQ(snf::modelValueToString(base.data(index)), "Byron");
 }
 
 TEST(AbstractTableModelTests, setDataDoesNotEmitForSameOrInvalidValue)
