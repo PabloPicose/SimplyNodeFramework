@@ -1,8 +1,12 @@
 #include "SNFNetwork/HostAddress.h"
 
 #include <arpa/inet.h>
-#include <netdb.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
+
+#if !defined(__EMSCRIPTEN__)
+#include <netdb.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -90,6 +94,49 @@ bool isValidDnsHostname(const std::string& host)
 
     return true;
 }
+
+#if defined(__EMSCRIPTEN__)
+bool appendNumericAddress(const std::string& host, std::uint16_t port, std::vector<sockaddr_storage>& addresses)
+{
+    sockaddr_storage storage{};
+
+    auto* ipv4 = reinterpret_cast<sockaddr_in*>(&storage);
+    ipv4->sin_family = AF_INET;
+    ipv4->sin_port = htons(port);
+    if (::inet_pton(AF_INET, host.c_str(), &ipv4->sin_addr) == 1) {
+        addresses.push_back(storage);
+        return true;
+    }
+
+    storage = sockaddr_storage{};
+    auto* ipv6 = reinterpret_cast<sockaddr_in6*>(&storage);
+    ipv6->sin6_family = AF_INET6;
+    ipv6->sin6_port = htons(port);
+    if (::inet_pton(AF_INET6, host.c_str(), &ipv6->sin6_addr) == 1) {
+        addresses.push_back(storage);
+        return true;
+    }
+
+    return false;
+}
+
+void appendPassiveWildcardAddresses(std::uint16_t port, std::vector<sockaddr_storage>& addresses)
+{
+    sockaddr_storage ipv4Storage{};
+    auto* ipv4 = reinterpret_cast<sockaddr_in*>(&ipv4Storage);
+    ipv4->sin_family = AF_INET;
+    ipv4->sin_port = htons(port);
+    ipv4->sin_addr.s_addr = htonl(INADDR_ANY);
+    addresses.push_back(ipv4Storage);
+
+    sockaddr_storage ipv6Storage{};
+    auto* ipv6 = reinterpret_cast<sockaddr_in6*>(&ipv6Storage);
+    ipv6->sin6_family = AF_INET6;
+    ipv6->sin6_port = htons(port);
+    ipv6->sin6_addr = in6addr_any;
+    addresses.push_back(ipv6Storage);
+}
+#endif
 }  // namespace
 
 const HostAddress HostAddress::LocalHost{"127.0.0.1"};
@@ -125,6 +172,20 @@ bool HostAddress::resolve(std::uint16_t port,
         return false;
     }
 
+#if defined(__EMSCRIPTEN__)
+    if (mode == HostResolveMode::Bind && m_host.empty()) {
+        appendPassiveWildcardAddresses(port, addresses);
+        return true;
+    }
+
+    if (appendNumericAddress(m_host, port, addresses)) {
+        return true;
+    }
+
+    errorMessage = "Host name resolution is not available in WebAssembly builds. Browser WebSocket APIs resolve "
+                   "hostnames from the URL; use resolve() only for numeric IP literals in this build.";
+    return false;
+#else
     addrinfo hints{};
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
@@ -162,6 +223,7 @@ bool HostAddress::resolve(std::uint16_t port,
     }
 
     return true;
+#endif
 }
 
 }  // namespace snf

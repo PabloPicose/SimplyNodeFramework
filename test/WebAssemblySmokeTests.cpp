@@ -4,9 +4,12 @@
 #include <SNFNetwork/HostAddress.h>
 #include <SNFWebSocket/WebSocket.h>
 
+#include <sys/socket.h>
+
 #include <chrono>
 #include <iostream>
 #include <string>
+#include <vector>
 
 using namespace snf;
 using namespace std::chrono_literals;
@@ -56,26 +59,66 @@ void testHostAddress()
     expect(HostAddress::LocalHostIPv6.isValid(), "HostAddress validates IPv6 localhost");
     expect(HostAddress::isValidHost("example.com"), "HostAddress validates hostnames");
     expect(! HostAddress::isValidHost("bad host.example"), "HostAddress rejects invalid hostnames");
+
+    std::vector<sockaddr_storage> addresses;
+    std::string error;
+
+    expect(HostAddress::LocalHost.resolve(80, HostResolveMode::Connect, addresses, error),
+           "WebAssembly HostAddress resolves numeric IPv4 locally");
+    expect(! addresses.empty(), "WebAssembly numeric IPv4 resolve returns a candidate");
+
+    addresses.clear();
+    error.clear();
+    expect(HostAddress::LocalHostIPv6.resolve(80, HostResolveMode::Connect, addresses, error),
+           "WebAssembly HostAddress resolves numeric IPv6 locally");
+    expect(! addresses.empty(), "WebAssembly numeric IPv6 resolve returns a candidate");
+
+    addresses.clear();
+    error.clear();
+    expect(! HostAddress("example.com").resolve(80, HostResolveMode::Connect, addresses, error),
+           "WebAssembly HostAddress does not use native DNS resolution for hostnames");
+    expect(addresses.empty(), "WebAssembly hostname resolve does not return native socket candidates");
+    expect(error.find("WebAssembly") != std::string::npos, "WebAssembly hostname resolve error is explicit");
 }
 
 void testWebSocketApiSurface()
 {
-    Application app(0, nullptr);
-    WebSocket socket;
+    {
+        Application app(0, nullptr);
+        WebSocket socket;
 
-    bool errorEmitted = false;
-    std::string errorMessage;
-    socket.errorOccurred.connect([&](const std::string& error) {
-        errorEmitted = true;
-        errorMessage = error;
-    });
+        bool errorEmitted = false;
+        std::string errorMessage;
+        socket.errorOccurred.connect([&](const std::string& error) {
+            errorEmitted = true;
+            errorMessage = error;
+        });
 
-    socket.connectToHost(HostAddress::AnyIPv4, 8765, "/");
+        socket.connectToHost(HostAddress::AnyIPv4, 8765, "/");
 
-    expect(errorEmitted, "Emscripten WebSocket rejects wildcard connect address");
-    expect(socket.state() == WebSocketState::Error, "Rejected WebSocket enters Error state");
-    expect(errorMessage.find("wildcard") != std::string::npos, "Wildcard WebSocket error is descriptive");
-    expect(! socket.isOpen(), "Rejected WebSocket is not open");
+        expect(errorEmitted, "Emscripten WebSocket rejects wildcard connect address");
+        expect(socket.state() == WebSocketState::Error, "Rejected WebSocket enters Error state");
+        expect(errorMessage.find("wildcard") != std::string::npos, "Wildcard WebSocket error is descriptive");
+        expect(! socket.isOpen(), "Rejected WebSocket is not open");
+    }
+
+    {
+        Application app(0, nullptr);
+        WebSocket socket;
+
+        bool errorEmitted = false;
+        std::string errorMessage;
+        socket.errorOccurred.connect([&](const std::string& error) {
+            errorEmitted = true;
+            errorMessage = error;
+        });
+
+        socket.connectToHost(HostAddress("ws://localhost"), 8765, "/");
+
+        expect(errorEmitted, "Emscripten WebSocket rejects invalid host strings");
+        expect(socket.state() == WebSocketState::Error, "Invalid host WebSocket enters Error state");
+        expect(errorMessage.find("Invalid") != std::string::npos, "Invalid host WebSocket error is descriptive");
+    }
 }
 
 }  // namespace

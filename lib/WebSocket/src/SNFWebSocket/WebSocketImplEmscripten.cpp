@@ -54,6 +54,12 @@ public:
     {
         close();
 
+        if (! address.isValid()) {
+            fail("Invalid WebSocket host address '" + address.toString() +
+                 "'. Pass a hostname or IP address, not a URL.");
+            return;
+        }
+
         if (isWildcardConnectAddress(address)) {
             fail("WebSocket client cannot connect to wildcard address '" + address.toString() +
                  "'. Use a concrete peer address such as 127.0.0.1.");

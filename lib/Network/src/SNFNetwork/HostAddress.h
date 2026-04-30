@@ -28,7 +28,8 @@ enum class HostResolveMode {
  * @class HostAddress
  * @ingroup SNFNetwork_Util
  * @brief Wraps a hostname or IP address string and resolves it to
- *        `sockaddr_storage` entries via `getaddrinfo`.
+ *        `sockaddr_storage` entries when the platform supports native
+ *        socket-style resolution.
  *
  * Several common addresses are provided as static constants:
  * @code
@@ -78,6 +79,11 @@ public:
 
     /**
      * @brief Resolves the host string to a list of `sockaddr_storage` entries.
+     *
+     * Native builds use the platform resolver. WebAssembly/browser builds do
+     * not perform DNS-style native resolution here; numeric IPv4/IPv6 literals
+     * are converted locally, while hostnames return a clear failure so browser
+     * APIs such as WebSocket can resolve them through their URL layer.
      *
      * @param port         Port number to embed in the resolved addresses.
      * @param mode         `Connect` or `Bind`; affects `AI_PASSIVE` hint.

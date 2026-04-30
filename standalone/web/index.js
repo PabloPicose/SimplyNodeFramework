@@ -5209,7 +5209,7 @@ function checkIncomingModuleAPI() {
   ignoredModuleProp('fetchSettings');
 }
 var ASM_CONSTS = {
-  292132: ($0) => { return Module.glfwGetWindow(UTF8ToString($0)); }
+  292228: ($0) => { return Module.glfwGetWindow(UTF8ToString($0)); }
 };
 var wasmImports = {
   /** @export */
@@ -5474,9 +5474,6 @@ var _free = createExportWrapper('free', 1);
 var _fflush = createExportWrapper('fflush', 1);
 var _emscripten_stack_get_end = () => (_emscripten_stack_get_end = wasmExports['emscripten_stack_get_end'])();
 var _emscripten_stack_get_base = () => (_emscripten_stack_get_base = wasmExports['emscripten_stack_get_base'])();
-var _htonl = createExportWrapper('htonl', 1);
-var _htons = createExportWrapper('htons', 1);
-var _ntohs = createExportWrapper('ntohs', 1);
 var _emscripten_stack_init = () => (_emscripten_stack_init = wasmExports['emscripten_stack_init'])();
 var _emscripten_stack_get_free = () => (_emscripten_stack_get_free = wasmExports['emscripten_stack_get_free'])();
 var __emscripten_stack_restore = (a0) => (__emscripten_stack_restore = wasmExports['_emscripten_stack_restore'])(a0);
