@@ -5209,7 +5209,7 @@ function checkIncomingModuleAPI() {
   ignoredModuleProp('fetchSettings');
 }
 var ASM_CONSTS = {
-  292148: ($0) => { return Module.glfwGetWindow(UTF8ToString($0)); }
+  292132: ($0) => { return Module.glfwGetWindow(UTF8ToString($0)); }
 };
 var wasmImports = {
   /** @export */
