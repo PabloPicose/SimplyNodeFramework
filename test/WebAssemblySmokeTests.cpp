@@ -119,6 +119,44 @@ void testWebSocketApiSurface()
         expect(socket.state() == WebSocketState::Error, "Invalid host WebSocket enters Error state");
         expect(errorMessage.find("Invalid") != std::string::npos, "Invalid host WebSocket error is descriptive");
     }
+
+    {
+        expect(WebSocket::currentOriginAddress().isEmpty(),
+               "Current origin host is empty outside a browser page");
+        expect(WebSocket::currentOriginPort() == 0, "Current origin port is zero outside a browser page");
+
+        Application app(0, nullptr);
+        WebSocket socket;
+
+        bool errorEmitted = false;
+        std::string errorMessage;
+        socket.errorOccurred.connect([&](const std::string& error) {
+            errorEmitted = true;
+            errorMessage = error;
+        });
+
+        socket.connectToCurrentOrigin("/");
+
+        expect(errorEmitted, "connectToCurrentOrigin reports missing browser location outside a page");
+        expect(socket.state() == WebSocketState::Error, "Missing current origin enters Error state");
+        expect(errorMessage.find("current browser location") != std::string::npos,
+               "Missing current origin error is descriptive");
+    }
+
+    {
+        Application app(0, nullptr);
+        WebSocket socket;
+
+        bool errorEmitted = false;
+        socket.errorOccurred.connect([&](const std::string&) {
+            errorEmitted = true;
+        });
+
+        socket.connectToCurrentHost(30123, "/");
+
+        expect(errorEmitted, "connectToCurrentHost reports missing browser location outside a page");
+        expect(socket.state() == WebSocketState::Error, "Missing current host enters Error state");
+    }
 }
 
 }  // namespace

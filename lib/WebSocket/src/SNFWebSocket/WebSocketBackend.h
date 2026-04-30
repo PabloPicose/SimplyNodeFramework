@@ -31,6 +31,11 @@ public:
     virtual HostAddress peerAddress() const = 0;
     virtual std::uint16_t peerPort() const = 0;
 
+#ifdef __EMSCRIPTEN__
+    virtual void connectToCurrentOrigin(const std::string& path) = 0;
+    virtual void connectToCurrentHost(std::uint16_t port, const std::string& path) = 0;
+#endif
+
     virtual void beginServerConnection() = 0;
 };
 

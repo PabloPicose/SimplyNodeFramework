@@ -1,7 +1,9 @@
 #include "SNFWebSocket/WebSocketBackend.h"
 
+#include <emscripten/emscripten.h>
 #include <emscripten/websocket.h>
 
+#include <cstdlib>
 #include <sstream>
 #include <utility>
 
@@ -9,23 +11,81 @@ namespace snf {
 
 namespace {
 
-std::string buildWebSocketUrl(const HostAddress& address, std::uint16_t port, const std::string& path)
+EM_JS(char*, snf_browser_origin_host, (), {
+    if (typeof window === 'undefined' || !window.location) {
+        return 0;
+    }
+
+    var host = window.location.hostname || "";
+    if (host.length >= 2 && host[0] === '[' && host[host.length - 1] === ']') {
+        host = host.substring(1, host.length - 1);
+    }
+    return stringToNewUTF8(host);
+});
+
+EM_JS(int, snf_browser_origin_port, (), {
+    if (typeof window === 'undefined' || !window.location) {
+        return 0;
+    }
+
+    var port = window.location.port || "";
+    if (port) {
+        return parseInt(port, 10) || 0;
+    }
+
+    if (window.location.protocol === 'https:') {
+        return 443;
+    }
+    if (window.location.protocol === 'http:') {
+        return 80;
+    }
+    return 0;
+});
+
+EM_JS(int, snf_browser_origin_is_secure, (), {
+    if (typeof window === 'undefined' || !window.location) {
+        return 0;
+    }
+    return window.location.protocol === 'https:' ? 1 : 0;
+});
+
+std::string takeOwnedCString(char* value)
 {
-    std::string host = address.host();
+    if (! value) {
+        return {};
+    }
+
+    std::string output(value);
+    std::free(value);
+    return output;
+}
+
+std::string normalizedPath(const std::string& path)
+{
+    if (path.empty()) {
+        return "/";
+    }
+    if (path.front() == '/') {
+        return path;
+    }
+    return "/" + path;
+}
+
+std::string buildWebSocketUrl(const std::string& rawHost, std::uint16_t port, const std::string& path, bool secure)
+{
+    std::string host = rawHost;
     if (host.find(':') != std::string::npos && (host.empty() || host.front() != '[')) {
         host = "[" + host + "]";
     }
 
     std::ostringstream stream;
-    stream << "ws://" << host << ":" << port;
-    if (path.empty()) {
-        stream << "/";
-    } else if (path.front() == '/') {
-        stream << path;
-    } else {
-        stream << "/" << path;
-    }
+    stream << (secure ? "wss://" : "ws://") << host << ":" << port << normalizedPath(path);
     return stream.str();
+}
+
+std::string buildWebSocketUrl(const HostAddress& address, std::uint16_t port, const std::string& path)
+{
+    return buildWebSocketUrl(address.host(), port, path, false);
 }
 
 bool isWildcardConnectAddress(const HostAddress& address)
@@ -96,6 +156,39 @@ public:
         setState(WebSocketState::Connecting);
     }
 
+#ifdef __EMSCRIPTEN__
+    void connectToCurrentOrigin(const std::string& path) override
+    {
+        close();
+
+        const HostAddress address = WebSocket::currentOriginAddress();
+        const std::uint16_t port = WebSocket::currentOriginPort();
+        const bool secure = WebSocket::currentOriginIsSecure();
+
+        if (address.isEmpty() || port == 0) {
+            fail("Cannot derive WebSocket URL from current browser location");
+            return;
+        }
+
+        connectToBrowserUrl(address, port, path, secure);
+    }
+
+    void connectToCurrentHost(std::uint16_t port, const std::string& path) override
+    {
+        close();
+
+        const HostAddress address = WebSocket::currentOriginAddress();
+        const bool secure = WebSocket::currentOriginIsSecure();
+
+        if (address.isEmpty() || port == 0) {
+            fail("Cannot derive WebSocket URL from current browser location");
+            return;
+        }
+
+        connectToBrowserUrl(address, port, path, secure);
+    }
+#endif
+
     bool sendTextMessage(const std::string& message) override
     {
         if (!isOpen() || m_socket <= 0) {
@@ -147,6 +240,38 @@ public:
     }
 
 private:
+    void connectToBrowserUrl(const HostAddress& address, std::uint16_t port, const std::string& path, bool secure)
+    {
+        if (!emscripten_websocket_is_supported()) {
+            fail("Emscripten WebSocket API is not supported in this environment");
+            return;
+        }
+
+        m_url = buildWebSocketUrl(address.host(), port, path, secure);
+        m_peerAddress = address;
+        m_peerPort = port;
+
+        EmscriptenWebSocketCreateAttributes attributes;
+        emscripten_websocket_init_create_attributes(&attributes);
+        attributes.url = m_url.c_str();
+        attributes.protocols = nullptr;
+        attributes.createOnMainThread = true;
+
+        m_socket = emscripten_websocket_new(&attributes);
+        if (m_socket <= 0) {
+            m_socket = 0;
+            fail("Failed to create Emscripten WebSocket");
+            return;
+        }
+
+        emscripten_websocket_set_onopen_callback(m_socket, this, &WebSocketImplEmscripten::onOpen);
+        emscripten_websocket_set_onmessage_callback(m_socket, this, &WebSocketImplEmscripten::onMessage);
+        emscripten_websocket_set_onerror_callback(m_socket, this, &WebSocketImplEmscripten::onError);
+        emscripten_websocket_set_onclose_callback(m_socket, this, &WebSocketImplEmscripten::onClose);
+
+        setState(WebSocketState::Connecting);
+    }
+
     static bool onOpen(int, const EmscriptenWebSocketOpenEvent*, void* userData)
     {
         static_cast<WebSocketImplEmscripten*>(userData)->handleOpen();
@@ -235,5 +360,24 @@ std::unique_ptr<WebSocketBackend> createWebSocketBackend(WebSocket& owner)
 }
 
 }  // namespace websocket::detail
+
+HostAddress WebSocket::currentOriginAddress()
+{
+    return HostAddress(takeOwnedCString(snf_browser_origin_host()));
+}
+
+std::uint16_t WebSocket::currentOriginPort()
+{
+    const int port = snf_browser_origin_port();
+    if (port <= 0 || port > 65535) {
+        return 0;
+    }
+    return static_cast<std::uint16_t>(port);
+}
+
+bool WebSocket::currentOriginIsSecure()
+{
+    return snf_browser_origin_is_secure() != 0;
+}
 
 }  // namespace snf

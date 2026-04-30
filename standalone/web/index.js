@@ -5209,8 +5209,11 @@ function checkIncomingModuleAPI() {
   ignoredModuleProp('fetchSettings');
 }
 var ASM_CONSTS = {
-  292228: ($0) => { return Module.glfwGetWindow(UTF8ToString($0)); }
+  293004: ($0) => { return Module.glfwGetWindow(UTF8ToString($0)); }
 };
+function snf_browser_origin_host() { if (typeof window === 'undefined' || !window.location) { return 0; } var host = window.location.hostname || ""; if (host.length >= 2 && host[0] === '[' && host[host.length - 1] === ']') { host = host.substring(1, host.length - 1); } return stringToNewUTF8(host); }
+function snf_browser_origin_port() { if (typeof window === 'undefined' || !window.location) { return 0; } var port = window.location.port || ""; if (port) { return parseInt(port, 10) || 0; } if (window.location.protocol === 'https:') { return 443; } if (window.location.protocol === 'http:') { return 80; } return 0; }
+function snf_browser_origin_is_secure() { if (typeof window === 'undefined' || !window.location) { return 0; } return window.location.protocol === 'https:' ? 1 : 0; }
 var wasmImports = {
   /** @export */
   __assert_fail: ___assert_fail,
@@ -5463,14 +5466,20 @@ var wasmImports = {
   /** @export */
   glVertexAttribPointer: _glVertexAttribPointer,
   /** @export */
-  glViewport: _glViewport
+  glViewport: _glViewport,
+  /** @export */
+  snf_browser_origin_host,
+  /** @export */
+  snf_browser_origin_is_secure,
+  /** @export */
+  snf_browser_origin_port
 };
 var wasmExports;
 createWasm();
 var ___wasm_call_ctors = createExportWrapper('__wasm_call_ctors', 0);
 var _main = Module['_main'] = createExportWrapper('main', 2);
-var _malloc = createExportWrapper('malloc', 1);
 var _free = createExportWrapper('free', 1);
+var _malloc = createExportWrapper('malloc', 1);
 var _fflush = createExportWrapper('fflush', 1);
 var _emscripten_stack_get_end = () => (_emscripten_stack_get_end = wasmExports['emscripten_stack_get_end'])();
 var _emscripten_stack_get_base = () => (_emscripten_stack_get_base = wasmExports['emscripten_stack_get_base'])();

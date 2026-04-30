@@ -33,6 +33,18 @@ void WebSocket::connectToHost(const HostAddress& address, std::uint16_t port, co
     m_backend->connectToHost(address, port, path);
 }
 
+#ifdef __EMSCRIPTEN__
+void WebSocket::connectToCurrentOrigin(const std::string& path)
+{
+    m_backend->connectToCurrentOrigin(path);
+}
+
+void WebSocket::connectToCurrentHost(std::uint16_t port, const std::string& path)
+{
+    m_backend->connectToCurrentHost(port, path);
+}
+#endif
+
 bool WebSocket::sendTextMessage(const std::string& message)
 {
     return m_backend->sendTextMessage(message);

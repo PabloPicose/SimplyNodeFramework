@@ -74,6 +74,9 @@ int main()
     wg::LineEdit le_host("Host", &window);
     le_host.setText("127.0.0.1");
     le_host.setPlaceholder("Host");
+#ifdef __EMSCRIPTEN__
+    le_host.setText(snf::WebSocket::currentOriginAddress().toString());
+#endif
     ip_layout.addWidget(&le_host, 1);
 
     wg::SpinBox le_port("Port", 3000, 32000, &window);
@@ -82,6 +85,11 @@ int main()
 
     wg::PushButton pb_connect("Connect");
     pb_connect.clicked.connect([&]() {
+#ifdef __EMSCRIPTEN__
+        const std::uint16_t port = static_cast<std::uint16_t>(le_port.value());
+        ws.connectToCurrentHost(port);
+        std::printf("Connecting to WebSocket on current browser host:%u...\n", port);
+#else
         snf::HostAddress host(le_host.text());
         std::uint16_t port = static_cast<std::uint16_t>(le_port.value());
         if (! host.isValid()) {
@@ -90,6 +98,7 @@ int main()
         }
         ws.connectToHost(host, port);
         std::printf("Connecting to ws://%s:%u...\n", host.toString().c_str(), port);
+#endif
     });
 
     ip_layout.addWidget(&pb_connect);

@@ -56,6 +56,38 @@ public:
      */
     void connectToHost(const HostAddress& address, std::uint16_t port, const std::string& path = "/");
 
+#ifdef __EMSCRIPTEN__
+    /**
+     * @brief Connects to the WebSocket endpoint at the browser page origin.
+     *
+     * Builds `ws://host:port/path` for pages loaded over HTTP and
+     * `wss://host:port/path` for pages loaded over HTTPS, using
+     * `window.location`. This is intended for applications where the same
+     * server that serves the WebAssembly page also exposes the WebSocket
+     * endpoint.
+     */
+    void connectToCurrentOrigin(const std::string& path = "/");
+
+    /**
+     * @brief Connects to a WebSocket endpoint on the browser page host and a custom port.
+     *
+     * This is useful when the WebAssembly page is served by an HTTP server but
+     * the WebSocket server listens on a sibling port in the same process. The
+     * host and security scheme are derived from `window.location`; @p port is
+     * used for the WebSocket endpoint.
+     */
+    void connectToCurrentHost(std::uint16_t port, const std::string& path = "/");
+
+    /** @brief Returns the current browser origin host, or an empty address outside a browser page. */
+    static HostAddress currentOriginAddress();
+
+    /** @brief Returns the current browser origin port, including 80/443 defaults when omitted. */
+    static std::uint16_t currentOriginPort();
+
+    /** @brief Returns true when the current browser page was loaded over HTTPS. */
+    static bool currentOriginIsSecure();
+#endif
+
     /** @brief Sends a UTF-8 text message. Returns `false` if the socket is not open. */
     bool sendTextMessage(const std::string& message);
 
