@@ -1,9 +1,12 @@
 #include <gtest/gtest.h>
 
+#include "ImGuiInteractionHarness.h"
 #include "SNFWidgets/TableView.h"
 #include <SNFCore/Application.h>
 #include <SNFCore/AbstractTableModel.h>
+#include <SNFCore/ModelIndex.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -80,6 +83,37 @@ public:
     snf::Application* app = nullptr;
 };
 
+ImVec2 tableCellCenter(int row, int column)
+{
+    return ImVec2(42.0f + static_cast<float>(column) * 360.0f,
+                  42.0f + static_cast<float>(row) * 22.0f);
+}
+
+template <typename TableT>
+void renderWarmup(snf::widgets::test::ImGuiInteractionHarness& harness, TableT& table)
+{
+    harness.beginFrame();
+    harness.render(table);
+    harness.endFrame();
+    harness.beginFrame();
+    harness.render(table);
+    harness.endFrame();
+}
+
+template <typename TableT>
+void clickTableAt(snf::widgets::test::ImGuiInteractionHarness& harness,
+                  TableT& table,
+                  const ImVec2& position,
+                  bool ctrlDown = false)
+{
+    harness.beginFrame(position, true, ctrlDown);
+    harness.render(table);
+    harness.endFrame();
+    harness.beginFrame(position, false, ctrlDown);
+    harness.render(table);
+    harness.endFrame();
+}
+
 }  // namespace
 
 TEST_F(TableViewFixture, construction)
@@ -90,8 +124,14 @@ TEST_F(TableViewFixture, construction)
     EXPECT_TRUE(view.showHorizontalHeader());
     EXPECT_TRUE(view.showGrid());
     EXPECT_TRUE(view.rowSelectionEnabled());
+    EXPECT_EQ(view.selectionBehavior(), snf::widgets::TableSelectionBehavior::Rows);
+    EXPECT_EQ(view.selectionMode(), snf::widgets::TableSelectionMode::Single);
     EXPECT_EQ(view.currentRow(), -1);
     EXPECT_EQ(view.currentColumn(), -1);
+    EXPECT_FALSE(view.currentIndex().isValid());
+    EXPECT_TRUE(view.selectedRows().empty());
+    EXPECT_TRUE(view.selectedColumns().empty());
+    EXPECT_TRUE(view.selectedIndexes().empty());
 }
 
 TEST_F(TableViewFixture, setModelAndClearModel)
@@ -211,25 +251,40 @@ TEST_F(TableViewFixture, validCellSelectionEmitsSignals)
     snf::widgets::TableView view;
     TestTableModel model({{"Ada", "Lovelace"}}, {"First", "Last"});
     int rowSignalCount = 0;
+    int columnSignalCount = 0;
     int cellSignalCount = 0;
+    int indexSignalCount = 0;
+    snf::ModelIndex changedIndex;
 
     view.setModel(&model);
     view.currentRowChanged.connect([&](int row) {
         ++rowSignalCount;
         EXPECT_EQ(row, 0);
     });
+    view.currentColumnChanged.connect([&](int column) {
+        ++columnSignalCount;
+        EXPECT_EQ(column, 1);
+    });
     view.currentCellChanged.connect([&](int row, int column) {
         ++cellSignalCount;
         EXPECT_EQ(row, 0);
         EXPECT_EQ(column, 1);
+    });
+    view.currentIndexChanged.connect([&](const snf::ModelIndex& index) {
+        ++indexSignalCount;
+        changedIndex = index;
     });
 
     view.setCurrentCell(0, 1);
 
     EXPECT_EQ(view.currentRow(), 0);
     EXPECT_EQ(view.currentColumn(), 1);
+    EXPECT_EQ(view.currentIndex(), model.index(0, 1));
     EXPECT_EQ(rowSignalCount, 1);
+    EXPECT_EQ(columnSignalCount, 1);
     EXPECT_EQ(cellSignalCount, 1);
+    EXPECT_EQ(indexSignalCount, 1);
+    EXPECT_EQ(changedIndex, model.index(0, 1));
 }
 
 TEST_F(TableViewFixture, invalidCellClearsSelection)
@@ -279,8 +334,119 @@ TEST_F(TableViewFixture, displayOptionsRoundTrip)
     view.setShowHorizontalHeader(false);
     view.setShowGrid(false);
     view.setRowSelectionEnabled(false);
+    view.setSelectionMode(snf::widgets::TableSelectionMode::Multiple);
+    view.setSelectionBehavior(snf::widgets::TableSelectionBehavior::Columns);
 
     EXPECT_FALSE(view.showHorizontalHeader());
     EXPECT_FALSE(view.showGrid());
     EXPECT_FALSE(view.rowSelectionEnabled());
+    EXPECT_EQ(view.selectionMode(), snf::widgets::TableSelectionMode::Multiple);
+    EXPECT_EQ(view.selectionBehavior(), snf::widgets::TableSelectionBehavior::Columns);
+}
+
+TEST_F(TableViewFixture, multipleRowSelectionExpandsToCellIndexes)
+{
+    snf::widgets::TableView view;
+    TestTableModel model({{"Ada", "Lovelace"}, {"Grace", "Hopper"}}, {"First", "Last"});
+    int selectionSignalCount = 0;
+
+    view.setModel(&model);
+    view.setSelectionMode(snf::widgets::TableSelectionMode::Multiple);
+    view.setSelectionBehavior(snf::widgets::TableSelectionBehavior::Rows);
+    view.selectionChanged.connect([&]() { ++selectionSignalCount; });
+
+    view.selectRow(0);
+    view.selectRow(1);
+
+    const std::vector<int> rows = view.selectedRows();
+    const std::vector<snf::ModelIndex> indexes = view.selectedIndexes();
+
+    EXPECT_EQ(rows, std::vector<int>({0, 1}));
+    ASSERT_EQ(indexes.size(), 4u);
+    EXPECT_EQ(indexes[0], model.index(0, 0));
+    EXPECT_EQ(indexes[1], model.index(0, 1));
+    EXPECT_EQ(indexes[2], model.index(1, 0));
+    EXPECT_EQ(indexes[3], model.index(1, 1));
+    EXPECT_EQ(selectionSignalCount, 2);
+}
+
+TEST_F(TableViewFixture, columnSelectionExpandsToCellIndexes)
+{
+    snf::widgets::TableView view;
+    TestTableModel model({{"Ada", "Lovelace"}, {"Grace", "Hopper"}}, {"First", "Last"});
+
+    view.setModel(&model);
+    view.setSelectionBehavior(snf::widgets::TableSelectionBehavior::Columns);
+    view.selectColumn(1);
+
+    EXPECT_EQ(view.selectedColumns(), std::vector<int>({1}));
+    ASSERT_EQ(view.selectedIndexes().size(), 2u);
+    EXPECT_EQ(view.selectedIndexes()[0], model.index(0, 1));
+    EXPECT_EQ(view.selectedIndexes()[1], model.index(1, 1));
+}
+
+TEST_F(TableViewFixture, selectionModeNoneKeepsCurrentButDoesNotSelect)
+{
+    snf::widgets::TableView view;
+    TestTableModel model({{"Ada", "Lovelace"}}, {"First", "Last"});
+    int selectionSignalCount = 0;
+
+    view.setModel(&model);
+    view.selectionChanged.connect([&]() { ++selectionSignalCount; });
+    view.setSelectionMode(snf::widgets::TableSelectionMode::None);
+    view.selectCell(0, 1);
+
+    EXPECT_EQ(view.currentIndex(), model.index(0, 1));
+    EXPECT_TRUE(view.selectedIndexes().empty());
+    EXPECT_EQ(selectionSignalCount, 0);
+}
+
+TEST_F(TableViewFixture, mouseClickSelectsCellAndEmitsModelIndex)
+{
+    snf::widgets::test::ImGuiInteractionHarness harness;
+    snf::widgets::test::TestWidget<snf::widgets::TableView> view;
+    TestTableModel model({{"Ada", "Lovelace"}, {"Grace", "Hopper"}}, {"First", "Last"});
+    int clickedCount = 0;
+    snf::ModelIndex clickedIndex;
+
+    view.setModel(&model);
+    view.setShowHorizontalHeader(false);
+    view.setSelectionBehavior(snf::widgets::TableSelectionBehavior::Cells);
+    view.indexClicked.connect([&](const snf::ModelIndex& index) {
+        ++clickedCount;
+        clickedIndex = index;
+    });
+
+    renderWarmup(harness, view);
+    clickTableAt(harness, view, tableCellCenter(0, 1));
+
+    EXPECT_EQ(clickedCount, 1);
+    EXPECT_EQ(clickedIndex, model.index(0, 1));
+    EXPECT_EQ(view.currentIndex(), model.index(0, 1));
+    EXPECT_EQ(view.selectedIndexes(), std::vector<snf::ModelIndex>({model.index(0, 1)}));
+}
+
+TEST_F(TableViewFixture, ctrlClickTogglesMultipleCellSelection)
+{
+    snf::widgets::test::ImGuiInteractionHarness harness;
+    snf::widgets::test::TestWidget<snf::widgets::TableView> view;
+    TestTableModel model({{"Ada", "Lovelace"}, {"Grace", "Hopper"}}, {"First", "Last"});
+    int selectionSignalCount = 0;
+
+    view.setModel(&model);
+    view.setShowHorizontalHeader(false);
+    view.setSelectionBehavior(snf::widgets::TableSelectionBehavior::Cells);
+    view.setSelectionMode(snf::widgets::TableSelectionMode::Multiple);
+    view.selectionChanged.connect([&]() { ++selectionSignalCount; });
+
+    renderWarmup(harness, view);
+    clickTableAt(harness, view, tableCellCenter(0, 1));
+    clickTableAt(harness, view, tableCellCenter(1, 1), true);
+
+    EXPECT_EQ(view.selectedIndexes(), std::vector<snf::ModelIndex>({model.index(0, 1), model.index(1, 1)}));
+
+    clickTableAt(harness, view, tableCellCenter(1, 1), true);
+
+    EXPECT_EQ(view.selectedIndexes(), std::vector<snf::ModelIndex>({model.index(0, 1)}));
+    EXPECT_EQ(selectionSignalCount, 3);
 }

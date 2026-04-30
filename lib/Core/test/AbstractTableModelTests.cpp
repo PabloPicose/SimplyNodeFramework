@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "SNFCore/AbstractTableModel.h"
+#include "SNFCore/ModelIndex.h"
 
 #include <string>
 #include <vector>
@@ -116,16 +117,33 @@ TEST(AbstractTableModelTests, rowAndColumnCount)
 TEST(AbstractTableModelTests, readsDataAndHeaders)
 {
     TestTableModel model({{"Ada", "Lovelace"}, {"Grace", "Hopper"}}, {"First", "Last"});
+    const snf::AbstractTableModel& base = model;
 
     EXPECT_EQ(model.data(0, 0), "Ada");
     EXPECT_EQ(model.data(1, 1), "Hopper");
+    EXPECT_EQ(base.data(model.index(1, 1)), "Hopper");
     EXPECT_EQ(model.headerData(0), "First");
     EXPECT_EQ(model.headerData(1), "Last");
+}
+
+TEST(AbstractTableModelTests, modelIndexTracksModelRowAndColumn)
+{
+    TestTableModel model({{"Ada", "Lovelace"}}, {"First", "Last"});
+
+    const snf::ModelIndex index = model.index(0, 1);
+
+    EXPECT_TRUE(index.isValid());
+    EXPECT_EQ(index.model(), &model);
+    EXPECT_EQ(index.row(), 0);
+    EXPECT_EQ(index.column(), 1);
+    EXPECT_FALSE(model.index(-1, 0).isValid());
+    EXPECT_FALSE(model.index(0, 8).isValid());
 }
 
 TEST(AbstractTableModelTests, invalidIndexesReturnEmptyStrings)
 {
     TestTableModel model({{"Ada", "Lovelace"}}, {"First", "Last"});
+    const snf::AbstractTableModel& base = model;
 
     EXPECT_EQ(model.data(-1, 0), "");
     EXPECT_EQ(model.data(0, -1), "");
@@ -133,6 +151,7 @@ TEST(AbstractTableModelTests, invalidIndexesReturnEmptyStrings)
     EXPECT_EQ(model.data(0, 2), "");
     EXPECT_EQ(model.headerData(-1), "");
     EXPECT_EQ(model.headerData(2), "");
+    EXPECT_EQ(base.data(snf::ModelIndex()), "");
 }
 
 TEST(AbstractTableModelTests, defaultOptionalApiIsReadOnly)
@@ -143,6 +162,8 @@ TEST(AbstractTableModelTests, defaultOptionalApiIsReadOnly)
     EXPECT_EQ(model.verticalHeaderData(0), "");
     EXPECT_FALSE(model.isEditable(0, 0));
     EXPECT_FALSE(model.setData(0, 0, "value"));
+    EXPECT_FALSE(model.isEditable(snf::ModelIndex()));
+    EXPECT_FALSE(model.setData(snf::ModelIndex(), "value"));
 }
 
 TEST(AbstractTableModelTests, setDataEmitsDataChangedWhenValueChanges)
@@ -163,6 +184,17 @@ TEST(AbstractTableModelTests, setDataEmitsDataChangedWhenValueChanges)
     EXPECT_EQ(count, 1);
     EXPECT_EQ(changedRow, 0);
     EXPECT_EQ(changedColumn, 1);
+}
+
+TEST(AbstractTableModelTests, setDataAcceptsModelIndex)
+{
+    TestTableModel model({{"Ada", "Lovelace"}}, {"First", "Last"});
+    snf::AbstractTableModel& base = model;
+    const snf::ModelIndex index = model.index(0, 1);
+
+    EXPECT_TRUE(base.isEditable(index));
+    EXPECT_TRUE(base.setData(index, "Byron"));
+    EXPECT_EQ(base.data(index), "Byron");
 }
 
 TEST(AbstractTableModelTests, setDataDoesNotEmitForSameOrInvalidValue)

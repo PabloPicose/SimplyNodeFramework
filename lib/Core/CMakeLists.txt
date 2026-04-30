@@ -25,6 +25,7 @@ target_sources(SNFCore
         "${SNFCORE_DIR}/Timer.cpp"
         "${SNFCORE_DIR}/EventLoop.cpp"
         "${SNFCORE_DIR}/Connection.cpp"
+        "${SNFCORE_DIR}/ModelIndex.cpp"
         "${SNFCORE_DIR}/AbstractTableModel.cpp"
         ${SNFCORE_POLLER_SRC}
         "${SNFCORE_DIR}/CommandLineOption.cpp"
@@ -40,6 +41,7 @@ target_sources(SNFCore
             "${SNFCORE_DIR}/Timer.h"
             "${SNFCORE_DIR}/EventLoop.h"
             "${SNFCORE_DIR}/Connection.h"
+            "${SNFCORE_DIR}/ModelIndex.h"
             "${SNFCORE_DIR}/AbstractTableModel.h"
             "${SNFCORE_DIR}/EpollPoller.h"
             "${SNFCORE_DIR}/CommandLineOption.h"

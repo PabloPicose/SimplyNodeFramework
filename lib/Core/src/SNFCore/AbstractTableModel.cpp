@@ -4,6 +4,21 @@ namespace snf {
 
 AbstractTableModel::~AbstractTableModel() = default;
 
+ModelIndex AbstractTableModel::index(int row, int column) const
+{
+    const ModelIndex result(row, column, this);
+    return result.isValid() ? result : ModelIndex();
+}
+
+std::string AbstractTableModel::data(const ModelIndex& index) const
+{
+    if (! index.isValid() || index.model() != this) {
+        return {};
+    }
+
+    return data(index.row(), index.column());
+}
+
 std::string AbstractTableModel::headerData(int /*section*/) const
 {
     return {};
@@ -19,9 +34,23 @@ bool AbstractTableModel::isEditable(int /*row*/, int /*column*/) const
     return false;
 }
 
+bool AbstractTableModel::isEditable(const ModelIndex& index) const
+{
+    return index.isValid() && index.model() == this && isEditable(index.row(), index.column());
+}
+
 bool AbstractTableModel::setData(int /*row*/, int /*column*/, const std::string& /*value*/)
 {
     return false;
+}
+
+bool AbstractTableModel::setData(const ModelIndex& index, const std::string& value)
+{
+    if (! index.isValid() || index.model() != this) {
+        return false;
+    }
+
+    return setData(index.row(), index.column(), value);
 }
 
 void AbstractTableModel::notifyDataChanged(int row, int column)

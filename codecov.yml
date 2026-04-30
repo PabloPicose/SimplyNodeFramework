@@ -19,3 +19,5 @@ ignore:
   - "build-coverage/**"
   - "**/CMakeFiles/**"
   - "**/_deps/**"
+  - "standalone/**"
+  - "**/examples/**"

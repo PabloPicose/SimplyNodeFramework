@@ -51,17 +51,20 @@ public:
         ImGui::DestroyContext(m_context);
     }
 
-    void beginFrame(const ImVec2& mousePos = offscreenMousePos(), bool mouseDown = false)
+    void beginFrame(const ImVec2& mousePos = offscreenMousePos(), bool mouseDown = false, bool ctrlDown = false)
     {
         ImGui::SetCurrentContext(m_context);
 
         ImGuiIO& io = ImGui::GetIO();
         io.MousePos = mousePos;
         io.MouseDown[0] = mouseDown;
+        io.KeyCtrl = ctrlDown;
         io.AddMousePosEvent(mousePos.x, mousePos.y);
         io.AddMouseButtonEvent(0, mouseDown);
+        io.AddKeyEvent(ImGuiKey_LeftCtrl, ctrlDown);
 
         ImGui::NewFrame();
+        ImGui::GetIO().KeyCtrl = ctrlDown;
 
         ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
         ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);

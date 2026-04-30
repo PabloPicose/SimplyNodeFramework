@@ -8,11 +8,36 @@
 
 #include "Widget.h"
 #include <SNFCore/Connection.h>
+#include <SNFCore/ModelIndex.h>
+
+#include <vector>
 
 namespace snf {
 
     class AbstractTableModel;
 namespace widgets {
+
+/**
+ * @enum TableSelectionBehavior
+ * @ingroup SNFWidgets
+ * @brief Describes which table unit is selected when a user interacts with a cell.
+ */
+enum class TableSelectionBehavior {
+    Rows,    ///< Selecting a cell selects its whole row.
+    Columns, ///< Selecting a cell selects its whole column.
+    Cells,   ///< Selecting a cell selects only that cell.
+};
+
+/**
+ * @enum TableSelectionMode
+ * @ingroup SNFWidgets
+ * @brief Describes how many items can be selected.
+ */
+enum class TableSelectionMode {
+    None,     ///< User and programmatic selection is disabled.
+    Single,   ///< A single row, column, or cell can be selected.
+    Multiple, ///< Multiple rows, columns, or cells can be selected.
+};
 
 /**
  * @class TableView
@@ -76,6 +101,18 @@ public:
     /** @brief Returns whether row-oriented selection highlighting is enabled. */
     bool rowSelectionEnabled() const;
 
+    /** @brief Sets whether selection applies to rows, columns, or cells. */
+    void setSelectionBehavior(TableSelectionBehavior behavior);
+
+    /** @brief Returns the current selection behavior. */
+    TableSelectionBehavior selectionBehavior() const;
+
+    /** @brief Sets whether none, one, or multiple items can be selected. */
+    void setSelectionMode(TableSelectionMode mode);
+
+    /** @brief Returns the current selection mode. */
+    TableSelectionMode selectionMode() const;
+
     /**
      * @brief Sets the current row.
      *
@@ -98,17 +135,56 @@ public:
     /** @brief Returns the current column, or @c -1 if no cell is selected. */
     int currentColumn() const;
 
+    /** @brief Returns the current cell index, or an invalid index if none is current. */
+    snf::ModelIndex currentIndex() const;
+
+    /** @brief Selects @p row according to the current selection mode. */
+    void selectRow(int row);
+
+    /** @brief Selects @p column according to the current selection mode. */
+    void selectColumn(int column);
+
+    /** @brief Selects @p row, @p column according to the current selection mode. */
+    void selectCell(int row, int column);
+
+    /** @brief Clears current and selected indexes. */
+    void clearSelection();
+
+    /** @brief Returns selected row numbers. */
+    std::vector<int> selectedRows() const;
+
+    /** @brief Returns selected column numbers. */
+    std::vector<int> selectedColumns() const;
+
+    /** @brief Returns selected cell indexes. Row/column selections are expanded to cells. */
+    std::vector<snf::ModelIndex> selectedIndexes() const;
+
     /** @brief Emitted when the current cell changes. Arguments are row, column. */
     Signal<int, int> currentCellChanged;
 
     /** @brief Emitted when the current row changes. Argument is row. */
     Signal<int> currentRowChanged;
 
+    /** @brief Emitted when the current column changes. Argument is column. */
+    Signal<int> currentColumnChanged;
+
+    /** @brief Emitted when the current cell index changes. */
+    Signal<snf::ModelIndex> currentIndexChanged;
+
+    /** @brief Emitted when the selected rows, columns, or cells change. */
+    Signal<> selectionChanged;
+
     /** @brief Emitted when the user clicks a cell. Arguments are row, column. */
     Signal<int, int> cellClicked;
 
     /** @brief Emitted when the user double-clicks a cell. Arguments are row, column. */
     Signal<int, int> cellDoubleClicked;
+
+    /** @brief Emitted when the user clicks a cell. Argument is the cell index. */
+    Signal<snf::ModelIndex> indexClicked;
+
+    /** @brief Emitted when the user double-clicks a cell. Argument is the cell index. */
+    Signal<snf::ModelIndex> indexDoubleClicked;
 
     /** @brief Emitted when the model pointer changes. Argument is the new model. */
     Signal<snf::AbstractTableModel*> modelChanged;
@@ -117,9 +193,30 @@ protected:
     void renderImGui() override;
 
 private:
+    struct SelectionKey {
+        int row = -1;
+        int column = -1;
+
+        friend bool operator==(const SelectionKey& lhs, const SelectionKey& rhs)
+        {
+            return lhs.row == rhs.row && lhs.column == rhs.column;
+        }
+    };
+
+    enum class SelectionOperation {
+        Replace,
+        Add,
+        Toggle,
+    };
+
     bool isValidRow(int row) const;
+    bool isValidColumn(int column) const;
     bool isValidCell(int row, int column) const;
-    void setSelection(int row, int column);
+    bool isValidSelectionKey(const SelectionKey& key) const;
+    bool containsSelectionKey(const SelectionKey& key) const;
+    SelectionKey keyForCell(int row, int column) const;
+    void updateCurrent(int row, int column);
+    void applySelection(const SelectionKey& key, SelectionOperation operation);
     void validateSelection();
     void connectModelSignals();
     void disconnectModelSignals();
@@ -127,9 +224,11 @@ private:
     snf::AbstractTableModel* m_model = nullptr;
     bool                     m_showHorizontalHeader = true;
     bool                     m_showGrid = true;
-    bool                     m_rowSelectionEnabled = true;
+    TableSelectionBehavior   m_selectionBehavior = TableSelectionBehavior::Rows;
+    TableSelectionMode       m_selectionMode = TableSelectionMode::Single;
     int                      m_currentRow = -1;
     int                      m_currentColumn = -1;
+    std::vector<SelectionKey> m_selection;
     Connection               m_modelResetConnection;
     Connection               m_dataChangedConnection;
 };
