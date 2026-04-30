@@ -39,12 +39,12 @@ std::string modelValueToString(const ModelValue& value);
  * @brief Base class for tabular data consumed by table views.
  *
  * `AbstractTableModel` separates table data from rendering. Views query row
- * and column counts, cell strings and header strings every frame; concrete
+ * and column counts, cell values and header strings every frame; concrete
  * models own the actual data.
  *
- * The first version intentionally uses `std::string` for cells and headers.
- * Editing is opt-in: reimplement `isEditable()` and `setData()` in a derived
- * model if needed. The default implementation is read-only.
+ * Editing is opt-in: reimplement `isEditable()`, `setData()` and the
+ * structural insert/remove functions in a derived model if needed. The default
+ * implementation is read-only and fixed-size.
  *
  * @code
  * class MyModel : public snf::AbstractTableModel {
@@ -121,22 +121,52 @@ public:
                          const ModelValue& value,
                          ModelDataRole role = ModelDataRole::Edit);
 
+    /**
+     * @brief Inserts @p count rows before @p row if the model supports it.
+     *
+     * Valid insertion positions are in the range `[0, rowCount()]`. Models
+     * that change their dimensions should emit `rowsInserted`.
+     */
+    virtual bool insertRows(int row, int count);
+
+    /**
+     * @brief Removes @p count rows starting at @p row if the model supports it.
+     *
+     * Models that change their dimensions should emit `rowsRemoved`.
+     */
+    virtual bool removeRows(int row, int count);
+
+    /**
+     * @brief Inserts @p count columns before @p column if the model supports it.
+     *
+     * Valid insertion positions are in the range `[0, columnCount()]`. Models
+     * that change their dimensions should emit `columnsInserted`.
+     */
+    virtual bool insertColumns(int column, int count);
+
+    /**
+     * @brief Removes @p count columns starting at @p column if the model supports it.
+     *
+     * Models that change their dimensions should emit `columnsRemoved`.
+     */
+    virtual bool removeColumns(int column, int count);
+
     /** @brief Emitted when a cell value changes. Arguments are row, column. */
     Signal<int, int> dataChanged;
 
     /** @brief Emitted when the model content or dimensions are reset. */
     Signal<> modelReset;
 
-    /** @brief Reserved for future row insertion support. Arguments are first, count. */
+    /** @brief Emitted after rows are inserted. Arguments are first, count. */
     Signal<int, int> rowsInserted;
 
-    /** @brief Reserved for future row removal support. Arguments are first, count. */
+    /** @brief Emitted after rows are removed. Arguments are first, count. */
     Signal<int, int> rowsRemoved;
 
-    /** @brief Reserved for future column insertion support. Arguments are first, count. */
+    /** @brief Emitted after columns are inserted. Arguments are first, count. */
     Signal<int, int> columnsInserted;
 
-    /** @brief Reserved for future column removal support. Arguments are first, count. */
+    /** @brief Emitted after columns are removed. Arguments are first, count. */
     Signal<int, int> columnsRemoved;
 
 protected:

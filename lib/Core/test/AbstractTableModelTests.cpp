@@ -67,6 +67,58 @@ public:
         return true;
     }
 
+    bool insertRows(int row, int count) override
+    {
+        if (row < 0 || row > rowCount() || count <= 0) {
+            return false;
+        }
+
+        m_rows.insert(m_rows.begin() + row,
+                      static_cast<std::size_t>(count),
+                      std::vector<std::string>(static_cast<std::size_t>(columnCount())));
+        notifyRowsInserted(row, count);
+        return true;
+    }
+
+    bool removeRows(int row, int count) override
+    {
+        if (row < 0 || count <= 0 || row + count > rowCount()) {
+            return false;
+        }
+
+        m_rows.erase(m_rows.begin() + row, m_rows.begin() + row + count);
+        notifyRowsRemoved(row, count);
+        return true;
+    }
+
+    bool insertColumns(int column, int count) override
+    {
+        if (column < 0 || column > columnCount() || count <= 0) {
+            return false;
+        }
+
+        m_headers.insert(m_headers.begin() + column, static_cast<std::size_t>(count), std::string());
+        for (auto& row : m_rows) {
+            row.insert(row.begin() + column, static_cast<std::size_t>(count), std::string());
+        }
+        notifyColumnsInserted(column, count);
+        return true;
+    }
+
+    bool removeColumns(int column, int count) override
+    {
+        if (column < 0 || count <= 0 || column + count > columnCount()) {
+            return false;
+        }
+
+        m_headers.erase(m_headers.begin() + column, m_headers.begin() + column + count);
+        for (auto& row : m_rows) {
+            row.erase(row.begin() + column, row.begin() + column + count);
+        }
+        notifyColumnsRemoved(column, count);
+        return true;
+    }
+
     void reset(std::vector<std::vector<std::string>> rows, std::vector<std::string> headers)
     {
         m_rows = std::move(rows);
@@ -198,6 +250,10 @@ TEST(AbstractTableModelTests, defaultOptionalApiIsReadOnly)
     EXPECT_FALSE(model.setData(0, 0, "value"));
     EXPECT_FALSE(model.isEditable(snf::ModelIndex()));
     EXPECT_FALSE(model.setData(snf::ModelIndex(), snf::ModelValue(std::string("value"))));
+    EXPECT_FALSE(model.insertRows(0, 1));
+    EXPECT_FALSE(model.removeRows(0, 1));
+    EXPECT_FALSE(model.insertColumns(0, 1));
+    EXPECT_FALSE(model.removeColumns(0, 1));
 }
 
 TEST(AbstractTableModelTests, modelValueConvertsToDisplayString)
@@ -263,6 +319,133 @@ TEST(AbstractTableModelTests, setDataDoesNotEmitForSameOrInvalidValue)
     EXPECT_FALSE(model.setData(0, 0, "Ada"));
     EXPECT_FALSE(model.setData(5, 0, "Nope"));
     EXPECT_EQ(count, 0);
+}
+
+TEST(AbstractTableModelTests, insertRowsAddsEmptyRowsAndEmits)
+{
+    TestTableModel model({{"Ada", "Lovelace"}, {"Grace", "Hopper"}}, {"First", "Last"});
+    int signalCount = 0;
+    int first = -1;
+    int count = -1;
+
+    model.rowsInserted.connect([&](int insertedFirst, int insertedCount) {
+        ++signalCount;
+        first = insertedFirst;
+        count = insertedCount;
+    });
+
+    EXPECT_TRUE(model.insertRows(1, 2));
+
+    EXPECT_EQ(model.rowCount(), 4);
+    EXPECT_EQ(model.columnCount(), 2);
+    EXPECT_EQ(model.data(0, 0), "Ada");
+    EXPECT_EQ(model.data(1, 0), "");
+    EXPECT_EQ(model.data(2, 1), "");
+    EXPECT_EQ(model.data(3, 0), "Grace");
+    EXPECT_EQ(signalCount, 1);
+    EXPECT_EQ(first, 1);
+    EXPECT_EQ(count, 2);
+}
+
+TEST(AbstractTableModelTests, removeRowsRemovesContiguousRowsAndEmits)
+{
+    TestTableModel model({{"Ada"}, {"Grace"}, {"Linus"}}, {"Name"});
+    int signalCount = 0;
+    int first = -1;
+    int count = -1;
+
+    model.rowsRemoved.connect([&](int removedFirst, int removedCount) {
+        ++signalCount;
+        first = removedFirst;
+        count = removedCount;
+    });
+
+    EXPECT_TRUE(model.removeRows(1, 1));
+
+    EXPECT_EQ(model.rowCount(), 2);
+    EXPECT_EQ(model.data(0, 0), "Ada");
+    EXPECT_EQ(model.data(1, 0), "Linus");
+    EXPECT_EQ(signalCount, 1);
+    EXPECT_EQ(first, 1);
+    EXPECT_EQ(count, 1);
+}
+
+TEST(AbstractTableModelTests, insertColumnsAddsEmptyCellsAndHeadersAndEmits)
+{
+    TestTableModel model({{"Ada", "Lovelace"}, {"Grace", "Hopper"}}, {"First", "Last"});
+    int signalCount = 0;
+    int first = -1;
+    int count = -1;
+
+    model.columnsInserted.connect([&](int insertedFirst, int insertedCount) {
+        ++signalCount;
+        first = insertedFirst;
+        count = insertedCount;
+    });
+
+    EXPECT_TRUE(model.insertColumns(1, 1));
+
+    EXPECT_EQ(model.columnCount(), 3);
+    EXPECT_EQ(model.headerData(1), "");
+    EXPECT_EQ(model.headerData(2), "Last");
+    EXPECT_EQ(model.data(0, 0), "Ada");
+    EXPECT_EQ(model.data(0, 1), "");
+    EXPECT_EQ(model.data(0, 2), "Lovelace");
+    EXPECT_EQ(model.data(1, 2), "Hopper");
+    EXPECT_EQ(signalCount, 1);
+    EXPECT_EQ(first, 1);
+    EXPECT_EQ(count, 1);
+}
+
+TEST(AbstractTableModelTests, removeColumnsRemovesCellsAndHeadersAndEmits)
+{
+    TestTableModel model({{"Ada", "Augusta", "Lovelace"}, {"Grace", "Brewster", "Hopper"}},
+                         {"First", "Middle", "Last"});
+    int signalCount = 0;
+    int first = -1;
+    int count = -1;
+
+    model.columnsRemoved.connect([&](int removedFirst, int removedCount) {
+        ++signalCount;
+        first = removedFirst;
+        count = removedCount;
+    });
+
+    EXPECT_TRUE(model.removeColumns(1, 1));
+
+    EXPECT_EQ(model.columnCount(), 2);
+    EXPECT_EQ(model.headerData(1), "Last");
+    EXPECT_EQ(model.data(0, 1), "Lovelace");
+    EXPECT_EQ(model.data(1, 1), "Hopper");
+    EXPECT_EQ(signalCount, 1);
+    EXPECT_EQ(first, 1);
+    EXPECT_EQ(count, 1);
+}
+
+TEST(AbstractTableModelTests, invalidStructuralChangesAreRejectedWithoutSignals)
+{
+    TestTableModel model({{"Ada", "Lovelace"}}, {"First", "Last"});
+    int signalCount = 0;
+    model.rowsInserted.connect([&](int, int) { ++signalCount; });
+    model.rowsRemoved.connect([&](int, int) { ++signalCount; });
+    model.columnsInserted.connect([&](int, int) { ++signalCount; });
+    model.columnsRemoved.connect([&](int, int) { ++signalCount; });
+
+    EXPECT_FALSE(model.insertRows(-1, 1));
+    EXPECT_FALSE(model.insertRows(2, 1));
+    EXPECT_FALSE(model.insertRows(0, 0));
+    EXPECT_FALSE(model.removeRows(0, 2));
+    EXPECT_FALSE(model.removeRows(0, 0));
+    EXPECT_FALSE(model.insertColumns(-1, 1));
+    EXPECT_FALSE(model.insertColumns(3, 1));
+    EXPECT_FALSE(model.insertColumns(0, 0));
+    EXPECT_FALSE(model.removeColumns(1, 2));
+    EXPECT_FALSE(model.removeColumns(0, 0));
+
+    EXPECT_EQ(model.rowCount(), 1);
+    EXPECT_EQ(model.columnCount(), 2);
+    EXPECT_EQ(model.data(0, 0), "Ada");
+    EXPECT_EQ(signalCount, 0);
 }
 
 TEST(AbstractTableModelTests, resetEmitsModelReset)

@@ -218,6 +218,10 @@ private:
     void updateCurrent(int row, int column);
     void applySelection(const SelectionKey& key, SelectionOperation operation);
     void validateSelection();
+    void handleRowsInserted(int first, int count);
+    void handleRowsRemoved(int first, int count);
+    void handleColumnsInserted(int first, int count);
+    void handleColumnsRemoved(int first, int count);
     void connectModelSignals();
     void disconnectModelSignals();
 
@@ -231,6 +235,10 @@ private:
     std::vector<SelectionKey> m_selection;
     Connection               m_modelResetConnection;
     Connection               m_dataChangedConnection;
+    Connection               m_rowsInsertedConnection;
+    Connection               m_rowsRemovedConnection;
+    Connection               m_columnsInsertedConnection;
+    Connection               m_columnsRemovedConnection;
 };
 
 }  // namespace widgets

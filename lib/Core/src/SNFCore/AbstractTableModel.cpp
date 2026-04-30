@@ -82,6 +82,26 @@ bool AbstractTableModel::setData(const ModelIndex& index, const ModelValue& valu
     return setData(index.row(), index.column(), modelValueToString(value));
 }
 
+bool AbstractTableModel::insertRows(int /*row*/, int /*count*/)
+{
+    return false;
+}
+
+bool AbstractTableModel::removeRows(int /*row*/, int /*count*/)
+{
+    return false;
+}
+
+bool AbstractTableModel::insertColumns(int /*column*/, int /*count*/)
+{
+    return false;
+}
+
+bool AbstractTableModel::removeColumns(int /*column*/, int /*count*/)
+{
+    return false;
+}
+
 void AbstractTableModel::notifyDataChanged(int row, int column)
 {
     dataChanged.emit(row, column);

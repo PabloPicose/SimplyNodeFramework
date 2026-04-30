@@ -426,6 +426,134 @@ void TableView::validateSelection()
     }
 }
 
+void TableView::handleRowsInserted(int first, int count)
+{
+    if (first < 0 || count <= 0) {
+        validateSelection();
+        return;
+    }
+
+    const std::vector<SelectionKey> previousSelection = m_selection;
+    const bool hasColumnSelection = std::any_of(m_selection.begin(), m_selection.end(), [](const SelectionKey& key) {
+        return key.row < 0 && key.column >= 0;
+    });
+    for (SelectionKey& key : m_selection) {
+        if (key.row >= first) {
+            key.row += count;
+        }
+    }
+
+    if (m_currentRow >= first) {
+        updateCurrent(m_currentRow + count, m_currentColumn);
+    }
+
+    if (m_selection != previousSelection || hasColumnSelection) {
+        selectionChanged.emit();
+    }
+    validateSelection();
+}
+
+void TableView::handleRowsRemoved(int first, int count)
+{
+    if (first < 0 || count <= 0) {
+        validateSelection();
+        return;
+    }
+
+    const int last = first + count - 1;
+    const std::vector<SelectionKey> previousSelection = m_selection;
+    const bool hasColumnSelection = std::any_of(m_selection.begin(), m_selection.end(), [](const SelectionKey& key) {
+        return key.row < 0 && key.column >= 0;
+    });
+    m_selection.erase(std::remove_if(m_selection.begin(),
+                                     m_selection.end(),
+                                     [first, last](const SelectionKey& key) {
+                                         return key.row >= first && key.row <= last;
+                                     }),
+                      m_selection.end());
+
+    for (SelectionKey& key : m_selection) {
+        if (key.row > last) {
+            key.row -= count;
+        }
+    }
+
+    if (m_currentRow >= first && m_currentRow <= last) {
+        updateCurrent(-1, -1);
+    } else if (m_currentRow > last) {
+        updateCurrent(m_currentRow - count, m_currentColumn);
+    }
+
+    if (m_selection != previousSelection || hasColumnSelection) {
+        selectionChanged.emit();
+    }
+    validateSelection();
+}
+
+void TableView::handleColumnsInserted(int first, int count)
+{
+    if (first < 0 || count <= 0) {
+        validateSelection();
+        return;
+    }
+
+    const std::vector<SelectionKey> previousSelection = m_selection;
+    const bool hasRowSelection = std::any_of(m_selection.begin(), m_selection.end(), [](const SelectionKey& key) {
+        return key.row >= 0 && key.column < 0;
+    });
+    for (SelectionKey& key : m_selection) {
+        if (key.column >= first) {
+            key.column += count;
+        }
+    }
+
+    if (m_currentColumn >= first) {
+        updateCurrent(m_currentRow, m_currentColumn + count);
+    }
+
+    if (m_selection != previousSelection || hasRowSelection) {
+        selectionChanged.emit();
+    }
+    validateSelection();
+}
+
+void TableView::handleColumnsRemoved(int first, int count)
+{
+    if (first < 0 || count <= 0) {
+        validateSelection();
+        return;
+    }
+
+    const int last = first + count - 1;
+    const std::vector<SelectionKey> previousSelection = m_selection;
+    const bool hasRowSelection = std::any_of(m_selection.begin(), m_selection.end(), [](const SelectionKey& key) {
+        return key.row >= 0 && key.column < 0;
+    });
+    m_selection.erase(std::remove_if(m_selection.begin(),
+                                     m_selection.end(),
+                                     [first, last](const SelectionKey& key) {
+                                         return key.column >= first && key.column <= last;
+                                     }),
+                      m_selection.end());
+
+    for (SelectionKey& key : m_selection) {
+        if (key.column > last) {
+            key.column -= count;
+        }
+    }
+
+    if (m_currentColumn >= first && m_currentColumn <= last) {
+        updateCurrent(-1, -1);
+    } else if (m_currentColumn > last) {
+        updateCurrent(m_currentRow, m_currentColumn - count);
+    }
+
+    if (m_selection != previousSelection || hasRowSelection) {
+        selectionChanged.emit();
+    }
+    validateSelection();
+}
+
 void TableView::connectModelSignals()
 {
     if (! m_model) {
@@ -434,12 +562,28 @@ void TableView::connectModelSignals()
 
     m_modelResetConnection = m_model->modelReset.connect([this]() { validateSelection(); });
     m_dataChangedConnection = m_model->dataChanged.connect([this](int, int) { validateSelection(); });
+    m_rowsInsertedConnection = m_model->rowsInserted.connect([this](int first, int count) {
+        handleRowsInserted(first, count);
+    });
+    m_rowsRemovedConnection = m_model->rowsRemoved.connect([this](int first, int count) {
+        handleRowsRemoved(first, count);
+    });
+    m_columnsInsertedConnection = m_model->columnsInserted.connect([this](int first, int count) {
+        handleColumnsInserted(first, count);
+    });
+    m_columnsRemovedConnection = m_model->columnsRemoved.connect([this](int first, int count) {
+        handleColumnsRemoved(first, count);
+    });
 }
 
 void TableView::disconnectModelSignals()
 {
     m_modelResetConnection.disconnect();
     m_dataChangedConnection.disconnect();
+    m_rowsInsertedConnection.disconnect();
+    m_rowsRemovedConnection.disconnect();
+    m_columnsInsertedConnection.disconnect();
+    m_columnsRemovedConnection.disconnect();
 }
 
 void TableView::renderImGui()
