@@ -3,6 +3,7 @@ add_executable(SNFWidgetsTests
     LabelTests.cpp
     PushButtonTests.cpp
     LayoutTests.cpp
+    TabsTests.cpp
     ScrollAreaTests.cpp
     SplitterTests.cpp
     WindowTests.cpp

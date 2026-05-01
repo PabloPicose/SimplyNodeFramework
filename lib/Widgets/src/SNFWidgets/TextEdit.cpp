@@ -2,6 +2,8 @@
 
 #include "imgui.h"
 
+#include <algorithm>
+
 namespace snf {
 namespace widgets {
 
@@ -44,6 +46,18 @@ std::string TextEdit::label() const
     return m_label;
 }
 
+Size TextEdit::sizeHint() const
+{
+    if (ImGui::GetCurrentContext() == nullptr) {
+        return {};
+    }
+
+    const float labelHeight = m_label.empty()
+        ? 0.0f
+        : ImGui::GetTextLineHeight() + ImGui::GetStyle().ItemSpacing.y;
+    return Size{0.0f, labelHeight + ImGui::GetFrameHeightWithSpacing() * 6.0f};
+}
+
 void TextEdit::syncBuffer()
 {
     const std::size_t needed = m_text.size() + k_initialCapacity;
@@ -56,6 +70,16 @@ void TextEdit::syncBuffer()
 
 void TextEdit::renderImGui()
 {
+    renderInput(-1.0f, 0.0f);
+}
+
+void TextEdit::renderImGuiConstrained(float width, float height)
+{
+    renderInput(width, height);
+}
+
+void TextEdit::renderInput(float width, float height)
+{
     // Grow the buffer when within 128 bytes of capacity.
     if (m_text.size() + 128 >= m_buffer.size()) {
         m_buffer.resize(m_buffer.size() + k_initialCapacity, '\0');
@@ -67,11 +91,19 @@ void TextEdit::renderImGui()
         ImGui::TextUnformatted(m_label.c_str());
     }
 
+    const float inputWidth = width > 0.0f ? width : -FLT_MIN;
+    float inputHeight = height > 0.0f ? height : 0.0f;
+    if (inputHeight > 0.0f && ! m_label.empty()) {
+        inputHeight = std::max(
+            0.0f,
+            inputHeight - ImGui::GetTextLineHeight() - ImGui::GetStyle().ItemSpacing.y);
+    }
+
     ImGui::InputTextMultiline(
         "##input",
         m_buffer.data(),
         m_buffer.size(),
-        ImVec2(-FLT_MIN, 0.0f));
+        ImVec2(inputWidth, inputHeight));
 
     ImGui::PopID();
 

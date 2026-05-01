@@ -82,6 +82,15 @@ private:
     test::InteractionRect m_lastItemRect;
 };
 
+class ConstrainedHBoxLayout final : public HBoxLayout
+{
+public:
+    void renderConstrainedForTest(float width, float height)
+    {
+        renderImGuiConstrained(width, height);
+    }
+};
+
 void renderLayout(test::ImGuiInteractionHarness& harness, test::TestWidget<HBoxLayout>& layout)
 {
     harness.beginFrame();
@@ -287,6 +296,54 @@ TEST_F(LayoutFixture, stretchedLineEditStillStartsFromItsMinimumWidth)
     const float hostWidth = host.lastInputRect().max.x - host.lastInputRect().min.x;
     EXPECT_GE(hostWidth, 128.0f);
     EXPECT_GT(connect.lastRect().min.x, host.lastInputRect().max.x);
+}
+
+TEST_F(LayoutFixture, nestedVerticalLayoutProvidesNaturalWidthToHorizontalLayout)
+{
+    test::ImGuiInteractionHarness harness;
+    test::TestWidget<HBoxLayout> root;
+    VBoxLayout sideBar;
+    RecordingButton newTab("New tab");
+    RecordingButton removeCurrent("Remove current");
+
+    sideBar.addWidget(&newTab);
+    sideBar.addWidget(&removeCurrent);
+    root.addStretch();
+    root.addWidget(&sideBar);
+
+    harness.beginFrame();
+    const Size sideHint = sideBar.sizeHint();
+    const Size rootHint = root.sizeHint();
+    ImGui::Dummy(ImVec2(1.0f, 1.0f));
+    harness.endFrame();
+
+    EXPECT_GE(sideHint.width, removeCurrent.sizeHint().width);
+    EXPECT_GE(rootHint.width, sideHint.width);
+
+    renderLayout(harness, root);
+
+    EXPECT_GT(newTab.lastRect().min.x, 650.0f);
+    EXPECT_NEAR(removeCurrent.lastRect().min.x, newTab.lastRect().min.x, 1.0f);
+    EXPECT_GT(removeCurrent.lastRect().min.y, newTab.lastRect().max.y);
+}
+
+TEST_F(LayoutFixture, constrainedHorizontalLayoutCanRenderNarrowerThanItsContents)
+{
+    test::ImGuiInteractionHarness harness;
+    ConstrainedHBoxLayout layout;
+    RecordingButton first("First");
+    RecordingButton second("Second");
+
+    layout.setSpacing(4.0f);
+    layout.addWidget(&first);
+    layout.addWidget(&second);
+
+    harness.beginFrame();
+    layout.renderConstrainedForTest(20.0f, 40.0f);
+    harness.endFrame();
+
+    EXPECT_GT(first.lastRect().max.x, first.lastRect().min.x);
+    EXPECT_GT(second.lastRect().max.x, second.lastRect().min.x);
 }
 
 TEST_F(LayoutFixture, containsWidgetFindsNestedLayoutItems)

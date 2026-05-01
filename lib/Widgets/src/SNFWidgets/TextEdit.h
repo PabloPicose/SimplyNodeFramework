@@ -71,8 +71,11 @@ public:
      */
     Signal<std::string> textChanged;
 
+    Size sizeHint() const override;
+
 protected:
     void renderImGui() override;
+    void renderImGuiConstrained(float width, float height) override;
 
 private:
     /** Minimum buffer capacity (grows automatically as needed). */
@@ -83,6 +86,7 @@ private:
      *        capacity for further typing.
      */
     void syncBuffer();
+    void renderInput(float width, float height);
 
     std::string        m_label;
     std::string        m_text;

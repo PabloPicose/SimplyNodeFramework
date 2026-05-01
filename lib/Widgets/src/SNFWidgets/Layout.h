@@ -66,6 +66,7 @@ protected:
     const std::vector<Item>& items() const;
     std::vector<Item> activeItems() const;
     void renderWidget(Widget* widget, float width = -1.0f, float height = -1.0f);
+    void renderImGuiConstrained(float width, float height) override;
 
 private:
     friend class Window;
@@ -84,6 +85,8 @@ class VBoxLayout : public Layout
 public:
     explicit VBoxLayout(snf::Node* parent = nullptr);
 
+    Size sizeHint() const override;
+
 protected:
     void renderImGui() override;
 };
@@ -97,6 +100,8 @@ class HBoxLayout : public Layout
 {
 public:
     explicit HBoxLayout(snf::Node* parent = nullptr);
+
+    Size sizeHint() const override;
 
 protected:
     void renderImGui() override;
@@ -118,6 +123,7 @@ public:
     std::string rowLabelAt(int index) const;
     Widget* rowWidgetAt(int index) const;
     int rowStretchAt(int index) const;
+    Size sizeHint() const override;
     bool containsWidget(const Widget* widget) const override;
 
 protected:

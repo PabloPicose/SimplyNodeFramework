@@ -23,6 +23,16 @@ float normalizedSpacingSize(float pixels)
 {
     return std::max(0.0f, pixels);
 }
+
+float defaultHorizontalSpacing()
+{
+    return ImGui::GetCurrentContext() ? ImGui::GetStyle().ItemSpacing.x : 0.0f;
+}
+
+float defaultVerticalSpacing()
+{
+    return ImGui::GetCurrentContext() ? ImGui::GetStyle().ItemSpacing.y : 0.0f;
+}
 }  // namespace
 
 Layout::Layout(snf::Node* parent) : Widget(parent) {}
@@ -208,7 +218,56 @@ void Layout::renderWidget(Widget* widget, float width, float height)
     ImGui::PopID();
 }
 
+void Layout::renderImGuiConstrained(float width, float height)
+{
+    const ImVec2 available = ImGui::GetContentRegionAvail();
+    const Size hint = sizeHint();
+
+    const float childWidth = std::max(0.0f, width > 0.0f ? width : available.x);
+    const float childHeight = std::max(0.0f, height > 0.0f ? height : hint.height);
+    if (childWidth <= 0.0f || childHeight <= 0.0f) {
+        renderImGui();
+        return;
+    }
+
+    const ImGuiWindowFlags childFlags = ImGuiWindowFlags_NoSavedSettings
+        | ImGuiWindowFlags_NoScrollbar
+        | ImGuiWindowFlags_NoScrollWithMouse;
+
+    ImGui::PushID(this);
+    if (ImGui::BeginChild("layout_bounds", ImVec2(childWidth, childHeight), ImGuiChildFlags_None, childFlags)) {
+        renderImGui();
+    }
+    ImGui::EndChild();
+    ImGui::PopID();
+}
+
 VBoxLayout::VBoxLayout(snf::Node* parent) : Layout(parent) {}
+
+Size VBoxLayout::sizeHint() const
+{
+    const auto active = activeItems();
+    if (active.empty()) {
+        return {};
+    }
+
+    const float effectiveSpacing = spacing() >= 0.0f ? spacing() : defaultVerticalSpacing();
+    float width = 0.0f;
+    float height = 0.0f;
+
+    for (const auto& item : active) {
+        if (item.type == LayoutItemType::Widget) {
+            const Size hint = item.widget ? item.widget->sizeHint() : Size{};
+            width = std::max(width, hint.width);
+            height += std::max(0.0f, hint.height);
+        } else if (item.type == LayoutItemType::FixedSpacer) {
+            height += item.fixedSize;
+        }
+    }
+
+    height += effectiveSpacing * static_cast<float>(active.size() > 1 ? active.size() - 1 : 0);
+    return Size{width, height};
+}
 
 void VBoxLayout::renderImGui()
 {
@@ -273,6 +332,31 @@ void VBoxLayout::renderImGui()
 
 HBoxLayout::HBoxLayout(snf::Node* parent) : Layout(parent) {}
 
+Size HBoxLayout::sizeHint() const
+{
+    const auto active = activeItems();
+    if (active.empty()) {
+        return {};
+    }
+
+    const float effectiveSpacing = spacing() >= 0.0f ? spacing() : defaultHorizontalSpacing();
+    float width = 0.0f;
+    float height = 0.0f;
+
+    for (const auto& item : active) {
+        if (item.type == LayoutItemType::Widget) {
+            const Size hint = item.widget ? item.widget->sizeHint() : Size{};
+            width += std::max(0.0f, hint.width);
+            height = std::max(height, hint.height);
+        } else if (item.type == LayoutItemType::FixedSpacer) {
+            width += item.fixedSize;
+        }
+    }
+
+    width += effectiveSpacing * static_cast<float>(active.size() > 1 ? active.size() - 1 : 0);
+    return Size{width, height};
+}
+
 void HBoxLayout::renderImGui()
 {
     const auto active = activeItems();
@@ -331,6 +415,7 @@ void HBoxLayout::renderImGui()
     }
 
     ImGui::SetCursorScreenPos(ImVec2(start.x, start.y + std::max(0.0f, layoutHeight)));
+    ImGui::Dummy(ImVec2(std::max(0.0f, availableWidth), 0.0f));
 
     ImGui::PopID();
 }
@@ -379,6 +464,34 @@ int FormLayout::rowStretchAt(int index) const
         return 0;
     }
     return m_rows[static_cast<std::size_t>(index)].stretch;
+}
+
+Size FormLayout::sizeHint() const
+{
+    if (m_rows.empty()) {
+        return {};
+    }
+
+    float labelWidth = 0.0f;
+    float fieldWidth = 0.0f;
+    float height = 0.0f;
+
+    const float rowSpacing = defaultVerticalSpacing();
+    const float columnSpacing = defaultHorizontalSpacing();
+    const float rowHeight = ImGui::GetCurrentContext() ? ImGui::GetFrameHeight() : 0.0f;
+
+    for (const auto& row : m_rows) {
+        if (ImGui::GetCurrentContext() && ! row.label.empty()) {
+            labelWidth = std::max(labelWidth, ImGui::CalcTextSize(row.label.c_str()).x);
+        }
+
+        const Size hint = row.widget ? row.widget->sizeHint() : Size{};
+        fieldWidth = std::max(fieldWidth, hint.width);
+        height += std::max(rowHeight, hint.height);
+    }
+
+    height += rowSpacing * static_cast<float>(m_rows.size() > 1 ? m_rows.size() - 1 : 0);
+    return Size{labelWidth + columnSpacing + fieldWidth, height};
 }
 
 bool FormLayout::containsWidget(const Widget* widget) const

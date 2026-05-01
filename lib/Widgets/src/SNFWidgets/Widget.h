@@ -129,6 +129,7 @@ private:
     friend class Layout;
     friend class ScrollArea;
     friend class Splitter;
+    friend class Tabs;
     friend class Window;
 
     bool m_enabled = true;

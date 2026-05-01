@@ -1,10 +1,45 @@
 #include <gtest/gtest.h>
+#include "ImGuiInteractionHarness.h"
 #include "SNFWidgets/TextEdit.h"
 #include <SNFCore/Application.h>
+
+#include "imgui.h"
 
 #include <string>
 
 using namespace snf::widgets;
+
+namespace {
+
+class RecordingTextEdit final : public TextEdit
+{
+public:
+    using TextEdit::TextEdit;
+
+    float lastWidth() const { return m_lastWidth; }
+    float lastHeight() const { return m_lastHeight; }
+
+    void renderConstrainedForTest(float width, float height)
+    {
+        renderImGuiConstrained(width, height);
+    }
+
+protected:
+    void renderImGuiConstrained(float width, float height) override
+    {
+        TextEdit::renderImGuiConstrained(width, height);
+        const ImVec2 min = ImGui::GetItemRectMin();
+        const ImVec2 max = ImGui::GetItemRectMax();
+        m_lastWidth = max.x - min.x;
+        m_lastHeight = max.y - min.y;
+    }
+
+private:
+    float m_lastWidth = 0.0f;
+    float m_lastHeight = 0.0f;
+};
+
+}  // namespace
 
 class TextEditFixture : public ::testing::Test
 {
@@ -82,4 +117,17 @@ TEST_F(TextEditFixture, setterDoesNotEmitSignal)
     edit.setText("abc\ndef");
     edit.clear();
     EXPECT_EQ(count, 0);
+}
+
+TEST_F(TextEditFixture, constrainedRenderUsesProvidedSize)
+{
+    snf::widgets::test::ImGuiInteractionHarness harness;
+    RecordingTextEdit edit;
+
+    harness.beginFrame();
+    edit.renderConstrainedForTest(320.0f, 180.0f);
+    harness.endFrame();
+
+    EXPECT_NEAR(edit.lastWidth(), 320.0f, 1.0f);
+    EXPECT_NEAR(edit.lastHeight(), 180.0f, 1.0f);
 }
