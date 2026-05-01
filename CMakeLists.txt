@@ -58,6 +58,7 @@ endif()
 
 # ── Library targets ───────────────────────────────────────────────────────────
 add_subdirectory(lib/Core)
+add_subdirectory(lib/Json)
 add_subdirectory(lib/Network)
 
 if(NOT SNF_WEB_ASSEMBLY)
@@ -141,6 +142,26 @@ install(
             "${CMAKE_CURRENT_BINARY_DIR}/SNFNetworkConfig.cmake"
             "${CMAKE_CURRENT_BINARY_DIR}/SNFNetworkConfigVersion.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFNetwork"
+    )
+
+# ── Package config: SNFJson ──────────────────────────────────────────────────
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SNFJsonConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/SNFJsonConfig.cmake"
+        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFJson"
+    )
+
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/SNFJsonConfigVersion.cmake"
+        VERSION "${PROJECT_VERSION}"
+        COMPATIBILITY SameMajorVersion
+    )
+
+    install(
+        FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/SNFJsonConfig.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/SNFJsonConfigVersion.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFJson"
     )
 
 if(NOT SNF_WEB_ASSEMBLY)

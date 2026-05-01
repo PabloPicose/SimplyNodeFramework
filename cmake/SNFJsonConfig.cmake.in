@@ -1,0 +1,12 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(SNFCore CONFIG REQUIRED)
+
+include("${CMAKE_CURRENT_LIST_DIR}/SNFJsonTargets.cmake")
+
+if (TARGET SNFJson AND NOT TARGET SNFJson::SNFJson)
+    add_library(SNFJson::SNFJson ALIAS SNFJson)
+endif()
+
+check_required_components(SNFJson)

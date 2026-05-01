@@ -344,7 +344,7 @@ Open `docs/html/index.html` in a browser.
 ## TODO list
 
 - [x] Ini parser
-- [ ] Json parser
+- [x] Json wrapper using nlohmann/json
 - [ ] Serial Port class
 - [ ] TLV Packet (Type-Length-Value), helper class to send packets through TCP/Unix socket
 - [x] WebSocket support
