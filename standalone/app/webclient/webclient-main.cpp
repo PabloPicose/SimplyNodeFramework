@@ -82,6 +82,7 @@ int main()
     ip_layout.addWidget(&le_host);
 
     wg::SpinBox le_port("Port", 3000, 32000, &window);
+    le_port.setButtonsVisible(false);
     le_port.setValue(30123);
     ip_layout.addWidget(&le_port, 1);
 

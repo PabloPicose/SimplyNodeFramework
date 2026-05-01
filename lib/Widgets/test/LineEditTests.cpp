@@ -80,6 +80,7 @@ TEST_F(LineEditFixture, constructionWithLabel)
     LineEdit edit("Name");
     EXPECT_EQ(edit.label(), "Name");
     EXPECT_EQ(edit.text(), "");
+    EXPECT_EQ(edit.textPlacement(), LineEdit::TextPlacement::Left);
 }
 
 TEST_F(LineEditFixture, setText)
@@ -150,7 +151,7 @@ TEST_F(LineEditFixture, textPlacementAndOverflowCanBeConfigured)
 {
     LineEdit edit;
 
-    EXPECT_EQ(edit.textPlacement(), LineEdit::TextPlacement::Hidden);
+    EXPECT_EQ(edit.textPlacement(), LineEdit::TextPlacement::Left);
     EXPECT_EQ(edit.textOverflow(), LineEdit::TextOverflow::Clip);
 
     edit.setTextPlacement(LineEdit::TextPlacement::Left);
@@ -164,6 +165,7 @@ TEST_F(LineEditFixture, hiddenCompanionTextLetsInputUseFullWidth)
 {
     test::ImGuiInteractionHarness harness;
     RecordingLineEdit edit("Name");
+    edit.setTextPlacement(LineEdit::TextPlacement::Hidden);
 
     renderLineEdit(harness, edit, 240.0f);
 
@@ -175,7 +177,6 @@ TEST_F(LineEditFixture, leftCompanionTextUsesOnlyNaturalWidth)
 {
     test::ImGuiInteractionHarness harness;
     RecordingLineEdit edit("Name");
-    edit.setTextPlacement(LineEdit::TextPlacement::Left);
 
     renderLineEdit(harness, edit, 240.0f);
 

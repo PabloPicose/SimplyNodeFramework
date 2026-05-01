@@ -69,7 +69,9 @@ public:
      * @brief Placement for the visible part of `label()`.
      *
      * The input itself always uses a hidden ImGui id. The label text is only
-     * rendered as side text when this placement is `Left` or `Right`.
+     * rendered as side text when this placement is `Left` or `Right`. Labels
+     * are shown on the left by default; use `Hidden` for an input without
+     * side text.
      */
     enum class TextPlacement {
         Hidden,
@@ -213,7 +215,7 @@ private:
     std::string        m_auxiliaryText;
     std::vector<char>  m_buffer;   ///< Mutable buffer passed to ImGui::InputText.
     LayoutPolicy       m_layoutPolicy = LayoutPolicy::InputExpands;
-    TextPlacement      m_textPlacement = TextPlacement::Hidden;
+    TextPlacement      m_textPlacement = TextPlacement::Left;
     TextOverflow       m_textOverflow = TextOverflow::Clip;
     float              m_minimumInputWidth = 0.0f;
     float              m_preferredInputWidth = 0.0f;
