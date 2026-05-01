@@ -127,6 +127,7 @@ protected:
 private:
     friend class ApplicationNode;
     friend class Layout;
+    friend class ScrollArea;
     friend class Splitter;
     friend class Window;
 
