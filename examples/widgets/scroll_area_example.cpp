@@ -29,7 +29,7 @@ public:
 
     int columnCount() const override
     {
-        return 4;
+        return 6;
     }
 
     std::string data(int row, int column) const override
@@ -42,11 +42,15 @@ public:
         case 0:
             return m_prefix + "-" + std::to_string(row + 1);
         case 1:
-            return "Row " + std::to_string(row + 1);
+            return "Long row label " + std::to_string(row + 1);
         case 2:
             return std::to_string((row + 1) * 7);
         case 3:
             return row % 3 == 0 ? "Queued" : "Ready";
+        case 4:
+            return "This column makes horizontal scrolling visible";
+        case 5:
+            return "Extra data " + std::to_string(1000 + row);
         default:
             return {};
         }
@@ -59,6 +63,8 @@ public:
         case 1: return "Name";
         case 2: return "Value";
         case 3: return "State";
+        case 4: return "Description";
+        case 5: return "Extra";
         default: return {};
         }
     }
@@ -86,7 +92,7 @@ int main()
 
     auto* splitter = new wg::Splitter(wg::Splitter::Orientation::Horizontal, window);
     splitter->setInitialRatio(0.5f);
-    splitter->setMinimumSizes(260.0f, 260.0f);
+    splitter->setMinimumSizes(80.0f, 80.0f);
     mainLayout->addWidget(splitter, 1);
 
     auto* leftPanel = new wg::VBoxLayout(window);
@@ -102,6 +108,7 @@ int main()
     auto* leftTable = new wg::TableView(window);
     leftTable->setModel(&leftModel);
     leftTable->setSelectionBehavior(wg::TableSelectionBehavior::Rows);
+    leftTable->setStretchLastColumn(true);
     leftPanel->addWidget(leftTable, 1);
 
     auto* rightPanel = new wg::VBoxLayout(window);
@@ -115,6 +122,7 @@ int main()
     rightPanel->addWidget(rightSlider);
 
     auto* scrollArea = new wg::ScrollArea(window);
+    scrollArea->setWidgetResizable(true);
     scrollArea->setVerticalScrollBarPolicy(wg::ScrollArea::ScrollBarPolicy::AsNeeded);
     scrollArea->setHorizontalScrollBarPolicy(wg::ScrollArea::ScrollBarPolicy::AsNeeded);
     rightPanel->addWidget(scrollArea, 1);
@@ -122,7 +130,31 @@ int main()
     auto* rightTable = new wg::TableView(window);
     rightTable->setModel(&rightModel);
     rightTable->setSelectionBehavior(wg::TableSelectionBehavior::Rows);
+    rightTable->setStretchLastColumn(true);
     scrollArea->setWidget(rightTable);
+
+    auto* isolatedWindow = new wg::Window("ScrollArea + TableView only", webApp);
+    isolatedWindow->setInitialSize(540.0f, 420.0f);
+    isolatedWindow->setInitialPosition(1040.0f, 28.0f);
+    isolatedWindow->setResizable(true);
+
+    auto* isolatedLayout = new wg::VBoxLayout(isolatedWindow);
+    isolatedWindow->setLayout(isolatedLayout);
+
+    auto* isolatedTitle = new wg::Label("Standalone TableView inside ScrollArea", isolatedWindow);
+    isolatedLayout->addWidget(isolatedTitle);
+
+    auto* isolatedScrollArea = new wg::ScrollArea(isolatedWindow);
+    isolatedScrollArea->setWidgetResizable(true);
+    isolatedScrollArea->setVerticalScrollBarPolicy(wg::ScrollArea::ScrollBarPolicy::AsNeeded);
+    isolatedScrollArea->setHorizontalScrollBarPolicy(wg::ScrollArea::ScrollBarPolicy::AsNeeded);
+    isolatedLayout->addWidget(isolatedScrollArea, 1);
+
+    auto* isolatedTable = new wg::TableView(isolatedWindow);
+    isolatedTable->setStretchLastColumn(true);
+    isolatedTable->setModel(&rightModel);
+    isolatedTable->setSelectionBehavior(wg::TableSelectionBehavior::Rows);
+    isolatedScrollArea->setWidget(isolatedTable);
 
     webApp->run();
     delete webApp;

@@ -63,11 +63,7 @@ ScrollArea::ScrollBarPolicy ScrollArea::horizontalScrollBarPolicy() const
 
 Size ScrollArea::sizeHint() const
 {
-    const Widget* content = widget();
-    if (! content) {
-        return {};
-    }
-    return content->sizeHint();
+    return {};
 }
 
 int ScrollArea::scrollWindowFlags() const
@@ -93,22 +89,81 @@ int ScrollArea::scrollWindowFlags() const
     return flags;
 }
 
-void ScrollArea::renderContent(float viewportWidth, float viewportHeight)
+ScrollArea::ContentMetrics ScrollArea::contentMetricsForViewport(float viewportWidth, float viewportHeight) const
+{
+    const Widget* content = widget();
+    viewportWidth = std::max(0.0f, viewportWidth);
+    viewportHeight = std::max(0.0f, viewportHeight);
+
+    if (! content) {
+        return ContentMetrics{viewportWidth, viewportHeight};
+    }
+
+    const Size hint = content->sizeHint();
+    const float scrollbarSize = ImGui::GetStyle().ScrollbarSize;
+    const bool horizontalScrollPossible = m_horizontalPolicy != ScrollBarPolicy::AlwaysOff;
+    const bool verticalScrollPossible = m_verticalPolicy != ScrollBarPolicy::AlwaysOff;
+    const bool horizontalScrollForced = m_horizontalPolicy == ScrollBarPolicy::AlwaysOn;
+    const bool verticalScrollForced = m_verticalPolicy == ScrollBarPolicy::AlwaysOn;
+
+    auto desiredWidth = [this, &hint](float availableWidth) {
+        return m_widgetResizable
+            ? std::max(availableWidth, hint.width)
+            : (hint.width > 0.0f ? hint.width : availableWidth);
+    };
+    auto desiredHeight = [this, &hint](float availableHeight) {
+        return m_widgetResizable
+            ? std::max(availableHeight, hint.height)
+            : (hint.height > 0.0f ? hint.height : availableHeight);
+    };
+
+    float availableWidth = viewportWidth;
+    float availableHeight = viewportHeight;
+    float width = desiredWidth(availableWidth);
+    float height = desiredHeight(availableHeight);
+    bool horizontalScroll = horizontalScrollForced || (horizontalScrollPossible && width > availableWidth);
+    bool verticalScroll = verticalScrollForced || (verticalScrollPossible && height > availableHeight);
+
+    if (horizontalScroll) {
+        availableHeight = std::max(0.0f, viewportHeight - scrollbarSize);
+    }
+    if (verticalScroll) {
+        availableWidth = std::max(0.0f, viewportWidth - scrollbarSize);
+    }
+
+    width = desiredWidth(availableWidth);
+    height = desiredHeight(availableHeight);
+    horizontalScroll = horizontalScrollForced || (horizontalScrollPossible && width > availableWidth);
+    verticalScroll = verticalScrollForced || (verticalScrollPossible && height > availableHeight);
+
+    if (horizontalScroll && availableHeight == viewportHeight) {
+        availableHeight = std::max(0.0f, viewportHeight - scrollbarSize);
+        height = desiredHeight(availableHeight);
+    }
+    if (verticalScroll && availableWidth == viewportWidth) {
+        availableWidth = std::max(0.0f, viewportWidth - scrollbarSize);
+        width = desiredWidth(availableWidth);
+    }
+
+    return ContentMetrics{std::max(0.0f, width), std::max(0.0f, height)};
+}
+
+void ScrollArea::renderContent(float contentWidth, float contentHeight)
 {
     Widget* content = widget();
     if (! content) {
         return;
     }
 
-    const Size hint = content->sizeHint();
-    const float width = m_widgetResizable
-        ? std::max(viewportWidth, hint.width)
-        : (hint.width > 0.0f ? hint.width : viewportWidth);
-    const float height = m_widgetResizable
-        ? std::max(viewportHeight, hint.height)
-        : (hint.height > 0.0f ? hint.height : -1.0f);
+    contentWidth = std::max(0.0f, contentWidth);
+    contentHeight = std::max(0.0f, contentHeight);
 
-    content->renderWidgetConstrained(width, height);
+    if (m_widgetResizable && contentHeight > 0.0f) {
+        contentHeight = std::max(0.0f, contentHeight - ImGui::GetStyle().ItemSpacing.y);
+    }
+
+    content->renderWidgetConstrained(contentWidth, contentHeight);
+
 }
 
 void ScrollArea::renderWithAvailableSize(float width, float height)
@@ -122,12 +177,15 @@ void ScrollArea::renderWithAvailableSize(float width, float height)
 
     width = std::max(0.0f, width);
     height = std::max(0.0f, height);
+    const ContentMetrics content = contentMetricsForViewport(width, height);
+    const float explicitContentWidth = m_horizontalPolicy == ScrollBarPolicy::AlwaysOff ? 0.0f : content.width;
+    const float explicitContentHeight = 0.0f;
 
     ImGui::PushID(this);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::SetNextWindowContentSize(ImVec2(explicitContentWidth, explicitContentHeight));
     if (ImGui::BeginChild("viewport", ImVec2(width, height), ImGuiChildFlags_None, scrollWindowFlags())) {
-        const ImVec2 viewport = ImGui::GetContentRegionAvail();
-        renderContent(std::max(0.0f, viewport.x), std::max(0.0f, viewport.y));
+        renderContent(content.width, content.height);
     }
     ImGui::EndChild();
     ImGui::PopStyleVar();

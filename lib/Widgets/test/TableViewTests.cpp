@@ -547,15 +547,36 @@ TEST_F(TableViewFixture, displayOptionsRoundTrip)
 
     view.setShowHorizontalHeader(false);
     view.setShowGrid(false);
+    view.setStretchLastColumn(true);
     view.setRowSelectionEnabled(false);
     view.setSelectionMode(snf::widgets::TableSelectionMode::Multiple);
     view.setSelectionBehavior(snf::widgets::TableSelectionBehavior::Columns);
 
     EXPECT_FALSE(view.showHorizontalHeader());
     EXPECT_FALSE(view.showGrid());
+    EXPECT_TRUE(view.stretchLastColumn());
     EXPECT_FALSE(view.rowSelectionEnabled());
     EXPECT_EQ(view.selectionMode(), snf::widgets::TableSelectionMode::Multiple);
     EXPECT_EQ(view.selectionBehavior(), snf::widgets::TableSelectionBehavior::Columns);
+}
+
+TEST_F(TableViewFixture, sizeHintReflectsRowsAndColumns)
+{
+    snf::widgets::test::ImGuiInteractionHarness harness;
+    snf::widgets::TableView view;
+    TestTableModel model(
+        {{"Ada", "Lovelace", "Analytical Engine"}, {"Grace", "Hopper", "Compiler"}},
+        {"First", "Last", "Notes"});
+
+    view.setModel(&model);
+
+    harness.beginFrame();
+    const snf::widgets::Size hint = view.sizeHint();
+    ImGui::Dummy(ImVec2(1.0f, 1.0f));
+    harness.endFrame();
+
+    EXPECT_GE(hint.width, 360.0f);
+    EXPECT_GT(hint.height, 40.0f);
 }
 
 TEST_F(TableViewFixture, multipleRowSelectionExpandsToCellIndexes)

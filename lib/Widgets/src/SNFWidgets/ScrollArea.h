@@ -48,9 +48,16 @@ protected:
     void renderImGuiConstrained(float width, float height) override;
 
 private:
+    struct ContentMetrics
+    {
+        float width = 0.0f;
+        float height = 0.0f;
+    };
+
     void renderWithAvailableSize(float width, float height);
-    void renderContent(float viewportWidth, float viewportHeight);
+    void renderContent(float contentWidth, float contentHeight);
     int scrollWindowFlags() const;
+    ContentMetrics contentMetricsForViewport(float viewportWidth, float viewportHeight) const;
 
     snf::NodePtr<Widget> m_widget{nullptr};
     ScrollBarPolicy m_verticalPolicy = ScrollBarPolicy::AsNeeded;

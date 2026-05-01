@@ -16,6 +16,16 @@ int safeCount(int count)
 {
     return std::max(0, count);
 }
+
+constexpr float k_minimumColumnWidth = 120.0f;
+
+float tableBorderWidth(bool showGrid, int columns)
+{
+    if (! showGrid || columns <= 0) {
+        return 0.0f;
+    }
+    return static_cast<float>(columns + 1);
+}
 }  // namespace
 
 TableView::TableView(snf::Node* parent)
@@ -69,6 +79,16 @@ void TableView::setShowGrid(bool enabled)
 bool TableView::showGrid() const
 {
     return m_showGrid;
+}
+
+void TableView::setStretchLastColumn(bool enabled)
+{
+    m_stretchLastColumn = enabled;
+}
+
+bool TableView::stretchLastColumn() const
+{
+    return m_stretchLastColumn;
 }
 
 void TableView::setRowSelectionEnabled(bool enabled)
@@ -586,7 +606,60 @@ void TableView::disconnectModelSignals()
     m_columnsRemovedConnection.disconnect();
 }
 
-void TableView::renderImGui()
+Size TableView::sizeHint() const
+{
+    if (! m_model || ImGui::GetCurrentContext() == nullptr) {
+        return {};
+    }
+
+    const int rows = safeCount(m_model->rowCount());
+    const int columns = safeCount(m_model->columnCount());
+    if (columns == 0) {
+        return {};
+    }
+
+    float width = 0.0f;
+    for (const float columnWidth : naturalColumnWidths()) {
+        width += columnWidth;
+    }
+    width += tableBorderWidth(m_showGrid, columns);
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float rowHeight = ImGui::GetTextLineHeight() + style.CellPadding.y * 2.0f;
+    const float headerHeight = m_showHorizontalHeader ? rowHeight : 0.0f;
+    const int rowBands = rows + (m_showHorizontalHeader ? 1 : 0);
+    const float height = headerHeight
+        + rowHeight * static_cast<float>(rows)
+        + (m_showGrid ? static_cast<float>(rowBands + 1) : 0.0f);
+    return Size{width, height};
+}
+
+std::vector<float> TableView::naturalColumnWidths() const
+{
+    std::vector<float> widths;
+    if (! m_model || ImGui::GetCurrentContext() == nullptr) {
+        return widths;
+    }
+
+    const int rows = safeCount(m_model->rowCount());
+    const int columns = safeCount(m_model->columnCount());
+    const ImGuiStyle& style = ImGui::GetStyle();
+    widths.reserve(static_cast<std::size_t>(columns));
+
+    for (int column = 0; column < columns; ++column) {
+        float columnWidth = ImGui::CalcTextSize(m_model->headerData(column).c_str()).x;
+        for (int row = 0; row < rows; ++row) {
+            const snf::ModelIndex index = m_model->index(row, column);
+            const std::string cell = snf::modelValueToString(m_model->data(index));
+            columnWidth = std::max(columnWidth, ImGui::CalcTextSize(cell.c_str()).x);
+        }
+        widths.push_back(std::max(k_minimumColumnWidth, columnWidth + style.CellPadding.x * 2.0f));
+    }
+
+    return widths;
+}
+
+void TableView::renderTable(float width, float height)
 {
     if (! m_model) {
         return;
@@ -598,16 +671,38 @@ void TableView::renderImGui()
         return;
     }
 
-    ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp;
+    const bool constrainedWidth = width > 0.0f;
+    ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable;
+    flags |= constrainedWidth ? ImGuiTableFlags_SizingFixedFit : ImGuiTableFlags_SizingStretchProp;
     if (m_showGrid) {
         flags |= ImGuiTableFlags_Borders;
     }
 
+    const std::vector<float> columnWidths = naturalColumnWidths();
+    float naturalWidth = tableBorderWidth(m_showGrid, columns);
+    for (const float columnWidth : columnWidths) {
+        naturalWidth += columnWidth;
+    }
+
+    const ImVec2 outerSize(
+        constrainedWidth ? width : 0.0f,
+        height > 0.0f ? height : 0.0f);
+
     ImGui::PushID(this);
-    if (ImGui::BeginTable("TableView", columns, flags)) {
+    if (ImGui::BeginTable("TableView", columns, flags, outerSize)) {
+        const bool stretchLastColumn = m_stretchLastColumn && constrainedWidth && width > naturalWidth;
         for (int column = 0; column < columns; ++column) {
             const std::string header = m_model->headerData(column);
-            ImGui::TableSetupColumn(header.c_str());
+            if (constrainedWidth) {
+                if (stretchLastColumn && column == columns - 1) {
+                    ImGui::TableSetupColumn(header.c_str(), ImGuiTableColumnFlags_WidthStretch, 1.0f);
+                } else {
+                    const float columnWidth = columnWidths[static_cast<std::size_t>(column)];
+                    ImGui::TableSetupColumn(header.c_str(), ImGuiTableColumnFlags_WidthFixed, columnWidth);
+                }
+            } else {
+                ImGui::TableSetupColumn(header.c_str());
+            }
         }
 
         if (m_showHorizontalHeader) {
@@ -651,6 +746,16 @@ void TableView::renderImGui()
         ImGui::EndTable();
     }
     ImGui::PopID();
+}
+
+void TableView::renderImGui()
+{
+    renderTable(-1.0f, -1.0f);
+}
+
+void TableView::renderImGuiConstrained(float width, float height)
+{
+    renderTable(width, height);
 }
 
 }  // namespace widgets

@@ -95,6 +95,12 @@ public:
     /** @brief Returns whether the table grid is rendered. */
     bool showGrid() const;
 
+    /** @brief Expands the last column to consume remaining table width when possible. */
+    void setStretchLastColumn(bool enabled);
+
+    /** @brief Returns whether the last column stretches to fill remaining width. */
+    bool stretchLastColumn() const;
+
     /** @brief Enables or disables row-oriented selection highlighting. */
     void setRowSelectionEnabled(bool enabled);
 
@@ -189,8 +195,11 @@ public:
     /** @brief Emitted when the model pointer changes. Argument is the new model. */
     Signal<snf::AbstractTableModel*> modelChanged;
 
+    Size sizeHint() const override;
+
 protected:
     void renderImGui() override;
+    void renderImGuiConstrained(float width, float height) override;
 
 private:
     struct SelectionKey {
@@ -224,10 +233,13 @@ private:
     void handleColumnsRemoved(int first, int count);
     void connectModelSignals();
     void disconnectModelSignals();
+    void renderTable(float width, float height);
+    std::vector<float> naturalColumnWidths() const;
 
     snf::AbstractTableModel* m_model = nullptr;
     bool                     m_showHorizontalHeader = true;
     bool                     m_showGrid = true;
+    bool                     m_stretchLastColumn = false;
     TableSelectionBehavior   m_selectionBehavior = TableSelectionBehavior::Rows;
     TableSelectionMode       m_selectionMode = TableSelectionMode::Single;
     int                      m_currentRow = -1;
