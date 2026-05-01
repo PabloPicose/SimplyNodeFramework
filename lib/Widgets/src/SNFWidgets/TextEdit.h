@@ -29,7 +29,7 @@ namespace widgets {
  * emit signals.
  *
  * @code
- * snf::widgets::TextEdit edit("##notes", &win);
+ * snf::widgets::TextEdit edit(&win);
  * edit.setText("Line 1\nLine 2");
  *
  * edit.textChanged.connect([](const std::string& t) {
@@ -40,11 +40,14 @@ namespace widgets {
 class TextEdit : public Widget
 {
 public:
+    /** @brief Constructs a TextEdit with no visible label. */
+    explicit TextEdit(snf::Node* parent = nullptr);
+
     /**
-     * @param label  ImGui label (use "##id" for a hidden label).
+     * @param label  Optional visible label shown above the input area.
      * @param parent Parent node (a Window or another container Widget).
      */
-    explicit TextEdit(const std::string& label = std::string(), snf::Node* parent = nullptr);
+    explicit TextEdit(const std::string& label, snf::Node* parent = nullptr);
 
     /** @brief Sets the text content (does not emit `textChanged`). */
     void setText(const std::string& text);

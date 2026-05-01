@@ -158,10 +158,8 @@ bool Layout::containsWidget(const Widget* widget) const
             return true;
         }
 
-        if (const auto* nestedLayout = dynamic_cast<const Layout*>(itemWidget)) {
-            if (nestedLayout->containsWidget(widget)) {
-                return true;
-            }
+        if (itemWidget->containsWidget(widget)) {
+            return true;
         }
     }
 
@@ -399,10 +397,8 @@ bool FormLayout::containsWidget(const Widget* widget) const
             return true;
         }
 
-        if (const auto* nestedLayout = dynamic_cast<const Layout*>(rowWidget)) {
-            if (nestedLayout->containsWidget(widget)) {
-                return true;
-            }
+        if (rowWidget->containsWidget(widget)) {
+            return true;
         }
     }
 

@@ -24,10 +24,13 @@ Node::~Node()
         auto& toDelete = m_parent->m_childrenToDelete;
         toDelete.erase(std::remove(toDelete.begin(), toDelete.end(), this), toDelete.end());
     }
-    for (auto child : m_children) {
+    // Move children out before deleting: each child's destructor removes
+    // itself from m_parent->m_children, so iterating the member directly
+    // would be undefined behaviour (iterator invalidation).
+    auto children = std::move(m_children);
+    for (auto* child : children) {
         delete child;
     }
-    m_children.clear();
 
     if (m_ownerEventLoop) {
         m_ownerEventLoop->removeNode(this);

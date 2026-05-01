@@ -63,6 +63,7 @@ public:
     float handleSize() const;
 
     Size sizeHint() const override;
+    bool containsWidget(const Widget* widget) const override;
 
 protected:
     void renderImGui() override;

@@ -5,6 +5,12 @@
 namespace snf {
 namespace widgets {
 
+TextEdit::TextEdit(snf::Node* parent)
+    : Widget(parent)
+{
+    syncBuffer();
+}
+
 TextEdit::TextEdit(const std::string& label, snf::Node* parent)
     : Widget(parent), m_label(label)
 {
@@ -55,11 +61,19 @@ void TextEdit::renderImGui()
         m_buffer.resize(m_buffer.size() + k_initialCapacity, '\0');
     }
 
+    ImGui::PushID(this);
+
+    if (! m_label.empty()) {
+        ImGui::TextUnformatted(m_label.c_str());
+    }
+
     ImGui::InputTextMultiline(
-        m_label.c_str(),
+        "##input",
         m_buffer.data(),
         m_buffer.size(),
         ImVec2(-FLT_MIN, 0.0f));
+
+    ImGui::PopID();
 
     const std::string newText(m_buffer.data());
     if (newText != m_text) {

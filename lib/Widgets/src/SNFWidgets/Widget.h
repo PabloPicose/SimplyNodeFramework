@@ -78,6 +78,16 @@ public:
      */
     virtual Size sizeHint() const;
 
+    /**
+     * @brief Returns whether this widget logically contains @p widget.
+     *
+     * Container widgets (Layout, Splitter) override this to report whether
+     * a given widget is managed by their rendering tree. Used by Window to
+     * avoid rendering a widget twice when it is already rendered through a
+     * layout or splitter.
+     */
+    virtual bool containsWidget(const Widget* widget) const;
+
 protected:
     /**
      * @brief Called by the framework inside an active Dear ImGui frame.

@@ -185,6 +185,30 @@ Size Splitter::sizeHint() const
         primaryHint.height + secondaryHint.height + handle};
 }
 
+bool Splitter::containsWidget(const Widget* widget) const
+{
+    if (! widget) {
+        return false;
+    }
+
+    Widget* primary = primaryWidget();
+    Widget* secondary = secondaryWidget();
+
+    if (primary == widget || secondary == widget) {
+        return true;
+    }
+
+    if (primary && primary->containsWidget(widget)) {
+        return true;
+    }
+
+    if (secondary && secondary->containsWidget(widget)) {
+        return true;
+    }
+
+    return false;
+}
+
 void Splitter::setPaneWidget(snf::NodePtr<Widget>& pane, Widget* widget)
 {
     if (! widget || widget == this) {
@@ -334,6 +358,7 @@ void Splitter::renderWithAvailableSize(float width, float height)
     renderPane("secondary", secondaryWidget(), secondarySizeVec.x, secondarySizeVec.y);
 
     ImGui::SetCursorScreenPos(ImVec2(start.x, start.y + height));
+    ImGui::Dummy(ImVec2(width, 0.0f));
     ImGui::PopID();
 }
 

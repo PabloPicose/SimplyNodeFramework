@@ -45,6 +45,11 @@ Size Widget::sizeHint() const
     return {};
 }
 
+bool Widget::containsWidget(const Widget* /*widget*/) const
+{
+    return false;
+}
+
 void Widget::renderWidget()
 {
     const bool disabled = ! isEffectivelyEnabled();

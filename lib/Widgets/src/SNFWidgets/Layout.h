@@ -49,7 +49,7 @@ public:
     Widget* widgetAt(int index) const;
     int stretchAt(int index) const;
     float fixedSpacingAt(int index) const;
-    virtual bool containsWidget(const Widget* widget) const;
+    bool containsWidget(const Widget* widget) const override;
 
     void setSpacing(float spacing);
     float spacing() const;
