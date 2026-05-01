@@ -117,6 +117,7 @@ protected:
 private:
     friend class ApplicationNode;
     friend class Layout;
+    friend class Splitter;
     friend class Window;
 
     bool m_enabled = true;
