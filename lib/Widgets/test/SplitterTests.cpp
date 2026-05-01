@@ -3,13 +3,17 @@
 #include "ImGuiInteractionHarness.h"
 #include "SNFWidgets/Layout.h"
 #include "SNFWidgets/PushButton.h"
+#include "SNFWidgets/ScrollArea.h"
 #include "SNFWidgets/Splitter.h"
+#include "SNFWidgets/TableView.h"
 
+#include <SNFCore/AbstractTableModel.h>
 #include <SNFCore/Application.h>
 
 #include "imgui.h"
 
 #include <algorithm>
+#include <iostream>
 
 using namespace snf::widgets;
 
@@ -63,6 +67,50 @@ private:
     float m_hintWidth = 50.0f;
     float m_hintHeight = 24.0f;
     int m_renderCount = 0;
+};
+
+class WideTableModel final : public snf::AbstractTableModel
+{
+public:
+    int rowCount() const override { return 4; }
+    int columnCount() const override { return 6; }
+
+    std::string data(int row, int column) const override
+    {
+        return "R" + std::to_string(row + 1) + " wide column " + std::to_string(column + 1);
+    }
+
+    std::string headerData(int section) const override
+    {
+        return "Column " + std::to_string(section + 1);
+    }
+};
+
+class RecordingTableView final : public TableView
+{
+public:
+    using TableView::TableView;
+
+    float lastWidth() const { return m_lastWidth; }
+    float lastHeight() const { return m_lastHeight; }
+    float lastScrollMaxX() const { return m_lastScrollMaxX; }
+    float lastScrollMaxY() const { return m_lastScrollMaxY; }
+
+protected:
+    void renderImGuiConstrained(float width, float height) override
+    {
+        m_lastWidth = width;
+        m_lastHeight = height;
+        TableView::renderImGuiConstrained(width, height);
+        m_lastScrollMaxX = ImGui::GetScrollMaxX();
+        m_lastScrollMaxY = ImGui::GetScrollMaxY();
+    }
+
+private:
+    float m_lastWidth = 0.0f;
+    float m_lastHeight = 0.0f;
+    float m_lastScrollMaxX = 0.0f;
+    float m_lastScrollMaxY = 0.0f;
 };
 
 void renderSplitter(test::ImGuiInteractionHarness& harness, TestSplitter& splitter, float width, float height)
@@ -238,6 +286,37 @@ TEST_F(SplitterFixture, impossibleMinimumSizesStillAvoidNegativeGeometry)
     EXPECT_GE(primary.lastWidth(), 0.0f);
     EXPECT_GE(secondary.lastWidth(), 0.0f);
     EXPECT_NEAR(primary.lastWidth() + secondary.lastWidth(), 200.0f, 1.0f);
+}
+
+TEST_F(SplitterFixture, nestedScrollAreaStillShowsHorizontalScrollWhenPaneNarrows)
+{
+    test::ImGuiInteractionHarness harness;
+    TestSplitter splitter;
+    RecordingPane leftPane;
+    VBoxLayout rightPane;
+    ScrollArea area;
+    WideTableModel model;
+    RecordingTableView table;
+
+    splitter.setPrimaryWidget(&leftPane);
+    splitter.setSecondaryWidget(&rightPane);
+    splitter.setMinimumSizes(80.0f, 80.0f);
+    splitter.setRatio(0.85f);
+
+    area.setWidgetResizable(true);
+    area.setHorizontalScrollBarPolicy(ScrollArea::ScrollBarPolicy::AsNeeded);
+    area.setVerticalScrollBarPolicy(ScrollArea::ScrollBarPolicy::AsNeeded);
+    rightPane.addWidget(&area, 1);
+
+    table.setModel(&model);
+    table.setStretchLastColumn(true);
+    area.setWidget(&table);
+
+    renderSplitter(harness, splitter, 420.0f, 220.0f);
+    renderSplitter(harness, splitter, 420.0f, 220.0f);
+
+    EXPECT_GT(table.lastScrollMaxX(), 0.0f);
+    EXPECT_FLOAT_EQ(table.lastScrollMaxY(), 0.0f);
 }
 
 TEST_F(SplitterFixture, draggingHorizontalHandleUpdatesRatio)

@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
+#include "ImGuiInteractionHarness.h"
 #include "SNFWidgets/Slider.h"
 #include <SNFCore/Application.h>
+
+#include "imgui.h"
 
 using namespace snf::widgets;
 
@@ -83,4 +86,20 @@ TEST_F(SliderFixture, setterDoesNotEmitSignal)
     sld.valueChanged.connect([&](int) { ++count; });
     sld.setValue(50);
     EXPECT_EQ(count, 0);
+}
+
+TEST_F(SliderFixture, sizeHintUsesFrameHeight)
+{
+    snf::widgets::test::ImGuiInteractionHarness harness;
+    Slider sld("s", 0, 100);
+
+    harness.beginFrame();
+    const float frameHeight = ImGui::GetFrameHeight();
+    const Size hint = sld.sizeHint();
+    ImGui::Dummy(ImVec2(1.0f, 1.0f));
+    harness.endFrame();
+
+    EXPECT_FLOAT_EQ(hint.width, 0.0f);
+    EXPECT_GT(hint.height, 0.0f);
+    EXPECT_NEAR(hint.height, frameHeight, 0.5f);
 }

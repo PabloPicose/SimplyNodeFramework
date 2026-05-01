@@ -86,6 +86,8 @@ public:
      */
     Signal<int> valueChanged;
 
+    Size sizeHint() const override;
+
 protected:
     void renderImGui() override;
 

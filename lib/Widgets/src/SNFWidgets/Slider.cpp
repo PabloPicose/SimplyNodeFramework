@@ -61,6 +61,15 @@ int Slider::maximum() const
     return m_maximum;
 }
 
+Size Slider::sizeHint() const
+{
+    if (ImGui::GetCurrentContext() == nullptr) {
+        return {};
+    }
+
+    return Size{0.0f, ImGui::GetFrameHeight()};
+}
+
 void Slider::renderImGui()
 {
     const int prev = m_value;
