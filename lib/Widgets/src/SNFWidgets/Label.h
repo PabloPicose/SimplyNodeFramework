@@ -42,6 +42,8 @@ public:
     /** @brief Returns the current displayed text. */
     std::string text() const;
 
+    Size sizeHint() const override;
+
 protected:
     void renderImGui() override;
 

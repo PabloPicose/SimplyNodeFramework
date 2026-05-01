@@ -20,6 +20,19 @@ std::string PushButton::label() const
     return m_label;
 }
 
+Size PushButton::sizeHint() const
+{
+    if (ImGui::GetCurrentContext() == nullptr) {
+        return {};
+    }
+
+    const ImVec2 textSize = ImGui::CalcTextSize(m_label.c_str(), nullptr, true);
+    const ImGuiStyle& style = ImGui::GetStyle();
+    return Size{
+        textSize.x + style.FramePadding.x * 2.0f,
+        textSize.y + style.FramePadding.y * 2.0f};
+}
+
 void PushButton::renderImGui()
 {
     if (ImGui::Button(m_label.c_str())) {

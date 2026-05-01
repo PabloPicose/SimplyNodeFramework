@@ -11,6 +11,12 @@
 namespace snf {
 namespace widgets {
 
+struct Size
+{
+    float width = 0.0f;
+    float height = 0.0f;
+};
+
 /**
  * @class Widget
  * @ingroup SNFWidgets
@@ -63,6 +69,14 @@ public:
      * @brief Returns whether this widget and all widget ancestors are enabled.
      */
     bool isEffectivelyEnabled() const;
+
+    /**
+     * @brief Returns the preferred size used by layout containers.
+     *
+     * Widgets that cannot know their natural size without rendering may return
+     * zero for either dimension. Layouts treat that as an unconstrained axis.
+     */
+    virtual Size sizeHint() const;
 
 protected:
     /**

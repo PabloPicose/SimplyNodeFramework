@@ -5,7 +5,6 @@
 #include <SNFWebSocket/WebSocket.h>
 #include <SNFWidgets/ApplicationNode.h>
 #include <SNFWidgets/CheckBox.h>
-#include <SNFWidgets/ImGuiDemoWindow.h>
 #include <SNFWidgets/Layout.h>
 #include <SNFWidgets/LineEdit.h>
 #include <SNFWidgets/ProgressBar.h>
@@ -63,7 +62,10 @@ int main()
 
     // ── Widget tree ───────────────────────────────────────────────────────────
     wg::Window window("Hello from SNFWidgets", &webApp);
-    // window.setFullSize(true);
+    window.setFullSize(true);
+    window.setFullSizeHidesTitleBar(true);
+    window.setCollapsible(false);
+    window.setResizable(false);
 
     wg::VBoxLayout main_layout(&window);
     window.setLayout(&main_layout);
@@ -77,7 +79,7 @@ int main()
 #ifdef __EMSCRIPTEN__
     le_host.setText(snf::WebSocket::currentOriginAddress().toString());
 #endif
-    ip_layout.addWidget(&le_host, 1);
+    ip_layout.addWidget(&le_host);
 
     wg::SpinBox le_port("Port", 3000, 32000, &window);
     le_port.setValue(30123);
@@ -114,8 +116,6 @@ int main()
 
     rb_connected.link(&rb_disconnected);
     rb_disconnected.setSelected(true);
-
-    wg::ImGuiDemoWindow demo(&webApp);
 
     ws.connected.connect([&]() {
         std::printf("WebSocket connected!\n");

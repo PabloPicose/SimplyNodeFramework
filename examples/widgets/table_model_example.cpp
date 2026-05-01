@@ -153,21 +153,22 @@ int main()
     auto* form = new wg::FormLayout(window);
     mainLayout->addWidget(form);
 
-    auto* firstNameEdit = new wg::LineEdit("##first_name", window);
-    auto* lastNameEdit = new wg::LineEdit("##last_name", window);
-    auto* noteEdit = new wg::LineEdit("##note", window);
+    auto* firstNameEdit = new wg::LineEdit(window);
+    auto* lastNameEdit = new wg::LineEdit(window);
+    auto* noteEdit = new wg::LineEdit(window);
     form->addRow("First name", firstNameEdit);
     form->addRow("Last name", lastNameEdit);
     form->addRow("Note", noteEdit);
 
     auto* editButtons = new wg::HBoxLayout(window);
+    editButtons->addStretch();
     mainLayout->addWidget(editButtons);
 
     auto* editButton = new wg::PushButton("Edit", window);
-    editButtons->addWidget(editButton, 1);
+    editButtons->addWidget(editButton);
 
     auto* cancelButton = new wg::PushButton("Cancel", window);
-    editButtons->addWidget(cancelButton, 1);
+    editButtons->addWidget(cancelButton);
 
     wg::DataWidgetMapper mapper;
     mapper.setModel(&model);

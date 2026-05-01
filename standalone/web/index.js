@@ -5209,7 +5209,7 @@ function checkIncomingModuleAPI() {
   ignoredModuleProp('fetchSettings');
 }
 var ASM_CONSTS = {
-  293004: ($0) => { return Module.glfwGetWindow(UTF8ToString($0)); }
+  177156: ($0) => { return Module.glfwGetWindow(UTF8ToString($0)); }
 };
 function snf_browser_origin_host() { if (typeof window === 'undefined' || !window.location) { return 0; } var host = window.location.hostname || ""; if (host.length >= 2 && host[0] === '[' && host[host.length - 1] === ']') { host = host.substring(1, host.length - 1); } return stringToNewUTF8(host); }
 function snf_browser_origin_port() { if (typeof window === 'undefined' || !window.location) { return 0; } var port = window.location.port || ""; if (port) { return parseInt(port, 10) || 0; } if (window.location.protocol === 'https:') { return 443; } if (window.location.protocol === 'http:') { return 80; } return 0; }

@@ -43,6 +43,8 @@ public:
     /** @brief Returns the current button label. */
     std::string label() const;
 
+    Size sizeHint() const override;
+
     /** @brief Emitted each frame that the button is pressed. */
     Signal<> clicked;
 

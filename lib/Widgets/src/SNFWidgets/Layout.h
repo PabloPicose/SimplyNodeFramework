@@ -29,15 +29,26 @@ namespace widgets {
 class Layout : public Widget
 {
 public:
+    enum class LayoutItemType
+    {
+        Widget,
+        FixedSpacer,
+        StretchSpacer
+    };
+
     explicit Layout(snf::Node* parent = nullptr);
 
     void addWidget(Widget* widget, int stretch = 0);
+    void addSpacing(float pixels);
+    void addStretch(int factor = 1);
     void removeWidget(Widget* widget);
     void setStretch(Widget* widget, int stretch);
 
     int count() const;
+    LayoutItemType itemTypeAt(int index) const;
     Widget* widgetAt(int index) const;
     int stretchAt(int index) const;
+    float fixedSpacingAt(int index) const;
     virtual bool containsWidget(const Widget* widget) const;
 
     void setSpacing(float spacing);
@@ -46,8 +57,10 @@ public:
 protected:
     struct Item
     {
-        snf::NodePtr<Widget> widget;
+        LayoutItemType type = LayoutItemType::Widget;
+        snf::NodePtr<Widget> widget{nullptr};
         int stretch = 0;
+        float fixedSize = 0.0f;
     };
 
     const std::vector<Item>& items() const;

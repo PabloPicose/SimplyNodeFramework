@@ -40,6 +40,11 @@ bool Widget::isEffectivelyEnabled() const
     return true;
 }
 
+Size Widget::sizeHint() const
+{
+    return {};
+}
+
 void Widget::renderWidget()
 {
     const bool disabled = ! isEffectivelyEnabled();

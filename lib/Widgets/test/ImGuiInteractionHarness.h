@@ -21,7 +21,7 @@ public:
 
     void renderForTest()
     {
-        this->renderWidget();
+        this->Widget::renderWidget();
     }
 };
 

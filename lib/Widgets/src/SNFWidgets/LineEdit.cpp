@@ -9,6 +9,8 @@ namespace snf {
 namespace widgets {
 
 namespace {
+constexpr float k_defaultInputWidth = 128.0f;
+
 std::string visibleLabel(const std::string& label)
 {
     const std::size_t marker = label.find("##");
@@ -23,6 +25,12 @@ float clampedWidth(float width)
     return std::max(0.0f, width);
 }
 }  // namespace
+
+LineEdit::LineEdit(snf::Node* parent)
+    : Widget(parent)
+{
+    syncBuffer();
+}
 
 LineEdit::LineEdit(const std::string& label, snf::Node* parent)
     : Widget(parent), m_label(label)
@@ -137,6 +145,28 @@ float LineEdit::companionTextWidth() const
     return m_companionTextWidth;
 }
 
+Size LineEdit::sizeHint() const
+{
+    if (ImGui::GetCurrentContext() == nullptr) {
+        return {};
+    }
+
+    const std::string labelText = visibleLabel(m_label);
+    const bool hasLabel = ! labelText.empty() && m_textPlacement != TextPlacement::Hidden;
+    const bool hasAuxiliary = ! m_auxiliaryText.empty();
+    const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
+
+    float width = std::max(m_preferredInputWidth, effectiveMinimumInputWidth());
+    if (hasLabel) {
+        width += ImGui::CalcTextSize(labelText.c_str()).x + spacing;
+    }
+    if (hasAuxiliary) {
+        width += ImGui::CalcTextSize(m_auxiliaryText.c_str()).x + spacing;
+    }
+
+    return Size{width, ImGui::GetFrameHeight()};
+}
+
 void LineEdit::syncBuffer()
 {
     // Ensure capacity = text size + max(spare, k_initialCapacity).
@@ -196,6 +226,11 @@ bool LineEdit::renderInputText(float width)
     return returned;
 }
 
+float LineEdit::effectiveMinimumInputWidth() const
+{
+    return m_minimumInputWidth > 0.0f ? m_minimumInputWidth : k_defaultInputWidth;
+}
+
 bool LineEdit::renderCompanionText(const std::string& text, float width) const
 {
     if (text.empty() || width <= 0.0f) {
@@ -221,7 +256,6 @@ bool LineEdit::renderCompanionText(const std::string& text, float width) const
         text.c_str() + text.size(),
         0.0f,
         &clip);
-    ImGui::Dummy(ImVec2(width, frameHeight));
     return true;
 }
 
@@ -248,48 +282,48 @@ void LineEdit::renderWithAvailableWidth(float width)
         {hasAuxiliary ? &m_auxiliaryText : nullptr, false, hasAuxiliary ? ImGui::CalcTextSize(m_auxiliaryText.c_str()).x : 0.0f, 0.0f},
     }};
 
-    const int textPartCount = static_cast<int>((hasLabel ? 1 : 0) + (hasAuxiliary ? 1 : 0));
     const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
-    const float textGaps = spacing * static_cast<float>(std::max(0, textPartCount - 1));
-    const float inputGap = textPartCount > 0 ? spacing : 0.0f;
-    float naturalTextWidth = textGaps;
+    int textPartCount = 0;
+    float naturalTextWidth = 0.0f;
     for (const auto& part : parts) {
         if (part.text) {
+            ++textPartCount;
             naturalTextWidth += part.naturalWidth;
         }
     }
 
     const float available = width > 0.0f ? width : ImGui::GetContentRegionAvail().x;
     const bool hasAvailableWidth = available > 0.0f;
-    const float minimumInput = std::max(1.0f, m_minimumInputWidth);
-    float textWidth = naturalTextWidth;
+    const float minimumInput = std::max(1.0f, effectiveMinimumInputWidth());
+    const float inputGaps = spacing * static_cast<float>(textPartCount);
+    float textBudget = naturalTextWidth;
     float inputWidth = m_preferredInputWidth > 0.0f ? m_preferredInputWidth : 0.0f;
 
     if (hasAvailableWidth) {
         const float fixedTextWidth = m_companionTextWidth > 0.0f ? m_companionTextWidth : naturalTextWidth;
         switch (m_layoutPolicy) {
         case LayoutPolicy::TextPriority:
-            textWidth = std::min(naturalTextWidth, available);
-            inputWidth = std::max(1.0f, available - textWidth - inputGap);
+            textBudget = std::min(naturalTextWidth, std::max(0.0f, available - minimumInput - inputGaps));
+            inputWidth = std::max(minimumInput, available - textBudget - inputGaps);
             break;
         case LayoutPolicy::InputPriority:
             inputWidth = m_preferredInputWidth > 0.0f ? m_preferredInputWidth : available;
             inputWidth = std::min(available, std::max(minimumInput, inputWidth));
-            textWidth = std::max(0.0f, available - inputWidth - inputGap);
+            textBudget = std::min(naturalTextWidth, std::max(0.0f, available - inputWidth - inputGaps));
             break;
         case LayoutPolicy::FixedTextWidth:
-            textWidth = std::min(fixedTextWidth, available);
-            inputWidth = std::max(1.0f, available - textWidth - inputGap);
+            textBudget = std::min(fixedTextWidth, std::max(0.0f, available - minimumInput - inputGaps));
+            inputWidth = std::max(minimumInput, available - textBudget - inputGaps);
             break;
         case LayoutPolicy::InputExpands:
             if (m_preferredInputWidth > 0.0f) {
                 inputWidth = std::min(available, std::max(minimumInput, m_preferredInputWidth));
-                textWidth = std::max(0.0f, available - inputWidth - inputGap);
+                textBudget = std::min(naturalTextWidth, std::max(0.0f, available - inputWidth - inputGaps));
             } else {
-                inputWidth = std::max(minimumInput, available - naturalTextWidth - inputGap);
+                textBudget = std::min(naturalTextWidth, std::max(0.0f, available - minimumInput - inputGaps));
+                inputWidth = std::max(minimumInput, available - textBudget - inputGaps);
                 inputWidth = std::min(inputWidth, available);
-                textWidth = std::max(0.0f, available - inputWidth - inputGap);
-                textWidth = std::min(textWidth, naturalTextWidth);
+                textBudget = std::min(naturalTextWidth, std::max(0.0f, available - inputWidth - inputGaps));
             }
             break;
         }
@@ -297,43 +331,43 @@ void LineEdit::renderWithAvailableWidth(float width)
         inputWidth = 0.0f;
     }
 
-    float remainingTextWidth = textWidth;
+    float remainingTextWidth = textBudget;
     for (auto& part : parts) {
         if (! part.text) {
             continue;
         }
-        const float reservedGap = remainingTextWidth > 0.0f ? spacing : 0.0f;
         part.allocatedWidth = std::min(part.naturalWidth, std::max(0.0f, remainingTextWidth));
-        remainingTextWidth = std::max(0.0f, remainingTextWidth - part.allocatedWidth - reservedGap);
+        remainingTextWidth = std::max(0.0f, remainingTextWidth - part.allocatedWidth);
     }
 
-    bool renderedAny = false;
-    auto sameLineIfNeeded = [&]() {
-        if (renderedAny) {
-            ImGui::SameLine(0.0f, spacing);
-        }
-    };
-
+    const ImVec2 start = ImGui::GetCursorScreenPos();
+    const float frameHeight = ImGui::GetFrameHeight();
+    float x = start.x;
     for (const auto& part : parts) {
         if (part.text && part.beforeInput) {
-            sameLineIfNeeded();
-            renderedAny = renderCompanionText(*part.text, part.allocatedWidth) || renderedAny;
+            renderCompanionText(*part.text, part.allocatedWidth);
+            x += part.allocatedWidth + spacing;
         }
     }
 
-    sameLineIfNeeded();
+    ImGui::SetCursorScreenPos(ImVec2(x, start.y));
     renderInputText(inputWidth);
-    renderedAny = true;
+    x += inputWidth;
 
     if (labelRight) {
-        sameLineIfNeeded();
-        renderedAny = renderCompanionText(labelText, parts[0].allocatedWidth) || renderedAny;
+        x += spacing;
+        ImGui::SetCursorScreenPos(ImVec2(x, start.y));
+        renderCompanionText(labelText, parts[0].allocatedWidth);
+        x += parts[0].allocatedWidth;
     }
 
     if (hasAuxiliary) {
-        sameLineIfNeeded();
+        x += spacing;
+        ImGui::SetCursorScreenPos(ImVec2(x, start.y));
         renderCompanionText(m_auxiliaryText, parts[1].allocatedWidth);
     }
+
+    ImGui::SetCursorScreenPos(ImVec2(start.x, start.y + frameHeight));
 
     ImGui::PopID();
 }

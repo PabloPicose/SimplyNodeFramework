@@ -33,7 +33,7 @@ namespace widgets {
  * the input (detected via ImGui's InputText return value).
  *
  * @code
- * snf::widgets::LineEdit edit("##name", &win);
+ * snf::widgets::LineEdit edit(&win);
  * edit.setText("default");
  *
  * edit.textChanged.connect([](const std::string& t) {
@@ -68,8 +68,8 @@ public:
      * @enum TextPlacement
      * @brief Placement for the visible part of `label()`.
      *
-     * ImGui id suffixes such as `"Name##id"` remain supported; only the
-     * visible `"Name"` part participates in layout.
+     * The input itself always uses a hidden ImGui id. The label text is only
+     * rendered as side text when this placement is `Left` or `Right`.
      */
     enum class TextPlacement {
         Hidden,
@@ -86,11 +86,15 @@ public:
         Hide,
     };
 
+    /** @brief Creates an empty line edit. */
+    explicit LineEdit(snf::Node* parent = nullptr);
+
     /**
-     * @param label  ImGui label (use "##id" for a hidden label).
+     * @param label  Optional side text. Hidden by default; call
+     *               `setTextPlacement()` to render it.
      * @param parent Parent node (a Window or another container Widget).
      */
-    explicit LineEdit(const std::string& label = std::string(), snf::Node* parent = nullptr);
+    explicit LineEdit(const std::string& label, snf::Node* parent = nullptr);
 
     /** @brief Sets the text content (does not emit `textChanged`). */
     void setText(const std::string& text);
@@ -101,7 +105,7 @@ public:
     /** @brief Clears the text content (does not emit `textChanged`). */
     void clear();
 
-    /** @brief Sets the ImGui label shown next to the input field. */
+    /** @brief Sets optional side text for the input field. */
     void setLabel(const std::string& label);
 
     /** @brief Returns the current label. */
@@ -113,7 +117,7 @@ public:
     /** @brief Returns the placeholder text. */
     std::string placeholder() const;
 
-    /** @brief Sets auxiliary text rendered next to the editable field. */
+    /** @brief Sets auxiliary text rendered to the right of the editable field. */
     void setAuxiliaryText(const std::string& text);
 
     /** @brief Returns the auxiliary text. */
@@ -141,7 +145,7 @@ public:
      * @brief Sets the minimum editable-field width in pixels.
      *
      * Values below zero are clamped to zero. A zero minimum lets the layout
-     * shrink the input as far as ImGui can still render safely.
+     * use the widget's built-in default minimum.
      */
     void setMinimumInputWidth(float width);
 
@@ -183,6 +187,8 @@ public:
      */
     Signal<std::string> editingFinished;
 
+    Size sizeHint() const override;
+
 protected:
     void renderImGui() override;
     void renderImGuiConstrained(float width, float height) override;
@@ -199,6 +205,7 @@ private:
     void renderWithAvailableWidth(float width);
     bool renderInputText(float width);
     bool renderCompanionText(const std::string& text, float width) const;
+    float effectiveMinimumInputWidth() const;
 
     std::string        m_label;
     std::string        m_text;
@@ -206,7 +213,7 @@ private:
     std::string        m_auxiliaryText;
     std::vector<char>  m_buffer;   ///< Mutable buffer passed to ImGui::InputText.
     LayoutPolicy       m_layoutPolicy = LayoutPolicy::InputExpands;
-    TextPlacement      m_textPlacement = TextPlacement::Right;
+    TextPlacement      m_textPlacement = TextPlacement::Hidden;
     TextOverflow       m_textOverflow = TextOverflow::Clip;
     float              m_minimumInputWidth = 0.0f;
     float              m_preferredInputWidth = 0.0f;

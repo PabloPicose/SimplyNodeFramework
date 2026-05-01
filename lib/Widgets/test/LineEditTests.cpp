@@ -1,10 +1,52 @@
 #include <gtest/gtest.h>
+#include "SNFWidgets/Label.h"
 #include "SNFWidgets/LineEdit.h"
+#include "ImGuiInteractionHarness.h"
 #include <SNFCore/Application.h>
+
+#include "imgui.h"
 
 #include <string>
 
 using namespace snf::widgets;
+
+namespace {
+
+class RecordingLineEdit final : public LineEdit
+{
+public:
+    using LineEdit::LineEdit;
+
+    const test::InteractionRect& lastInputRect() const { return m_lastInputRect; }
+
+    void renderConstrainedForTest(float width)
+    {
+        renderImGuiConstrained(width, -1.0f);
+    }
+
+protected:
+    void renderImGuiConstrained(float width, float height) override
+    {
+        LineEdit::renderImGuiConstrained(width, height);
+        m_lastInputRect = test::InteractionRect{
+            ImGui::GetItemRectMin(),
+            ImGui::GetItemRectMax(),
+            ImGui::IsItemHovered(),
+            ImGui::IsItemActive()};
+    }
+
+private:
+    test::InteractionRect m_lastInputRect;
+};
+
+void renderLineEdit(test::ImGuiInteractionHarness& harness, RecordingLineEdit& edit, float width)
+{
+    harness.beginFrame();
+    edit.renderConstrainedForTest(width);
+    harness.endFrame();
+}
+
+}  // namespace
 
 class LineEditFixture : public ::testing::Test
 {
@@ -21,10 +63,22 @@ TEST_F(LineEditFixture, defaultConstruction)
     EXPECT_EQ(edit.label(), "");
 }
 
+TEST_F(LineEditFixture, constructionWithParentOnly)
+{
+    auto* parent = new Label("Parent");
+    auto* edit = new LineEdit(parent);
+
+    EXPECT_EQ(edit->parent(), parent);
+    EXPECT_EQ(edit->text(), "");
+    EXPECT_EQ(edit->label(), "");
+
+    delete parent;
+}
+
 TEST_F(LineEditFixture, constructionWithLabel)
 {
-    LineEdit edit("Name##1");
-    EXPECT_EQ(edit.label(), "Name##1");
+    LineEdit edit("Name");
+    EXPECT_EQ(edit.label(), "Name");
     EXPECT_EQ(edit.text(), "");
 }
 
@@ -96,7 +150,7 @@ TEST_F(LineEditFixture, textPlacementAndOverflowCanBeConfigured)
 {
     LineEdit edit;
 
-    EXPECT_EQ(edit.textPlacement(), LineEdit::TextPlacement::Right);
+    EXPECT_EQ(edit.textPlacement(), LineEdit::TextPlacement::Hidden);
     EXPECT_EQ(edit.textOverflow(), LineEdit::TextOverflow::Clip);
 
     edit.setTextPlacement(LineEdit::TextPlacement::Left);
@@ -104,6 +158,41 @@ TEST_F(LineEditFixture, textPlacementAndOverflowCanBeConfigured)
 
     EXPECT_EQ(edit.textPlacement(), LineEdit::TextPlacement::Left);
     EXPECT_EQ(edit.textOverflow(), LineEdit::TextOverflow::Hide);
+}
+
+TEST_F(LineEditFixture, hiddenCompanionTextLetsInputUseFullWidth)
+{
+    test::ImGuiInteractionHarness harness;
+    RecordingLineEdit edit("Name");
+
+    renderLineEdit(harness, edit, 240.0f);
+
+    EXPECT_NEAR(edit.lastInputRect().min.x, 32.0f, 1.0f);
+    EXPECT_NEAR(edit.lastInputRect().max.x - edit.lastInputRect().min.x, 240.0f, 1.0f);
+}
+
+TEST_F(LineEditFixture, leftCompanionTextUsesOnlyNaturalWidth)
+{
+    test::ImGuiInteractionHarness harness;
+    RecordingLineEdit edit("Name");
+    edit.setTextPlacement(LineEdit::TextPlacement::Left);
+
+    renderLineEdit(harness, edit, 240.0f);
+
+    EXPECT_GT(edit.lastInputRect().min.x, 32.0f);
+    EXPECT_LT(edit.lastInputRect().max.x, 32.0f + 240.0f + 1.0f);
+}
+
+TEST_F(LineEditFixture, rightCompanionTextKeepsInputBeforeLabel)
+{
+    test::ImGuiInteractionHarness harness;
+    RecordingLineEdit edit("Name");
+    edit.setTextPlacement(LineEdit::TextPlacement::Right);
+
+    renderLineEdit(harness, edit, 240.0f);
+
+    EXPECT_NEAR(edit.lastInputRect().min.x, 32.0f, 1.0f);
+    EXPECT_LT(edit.lastInputRect().max.x, 32.0f + 240.0f);
 }
 
 TEST_F(LineEditFixture, inputAndCompanionWidthsAreClamped)
@@ -125,6 +214,20 @@ TEST_F(LineEditFixture, inputAndCompanionWidthsAreClamped)
     EXPECT_FLOAT_EQ(edit.minimumInputWidth(), 64.0f);
     EXPECT_FLOAT_EQ(edit.preferredInputWidth(), 160.0f);
     EXPECT_FLOAT_EQ(edit.companionTextWidth(), 80.0f);
+}
+
+TEST_F(LineEditFixture, sizeHintHasDefaultInputWidth)
+{
+    test::ImGuiInteractionHarness harness;
+    LineEdit edit;
+
+    harness.beginFrame();
+    const Size hint = edit.sizeHint();
+    ImGui::Dummy(ImVec2(1.0f, 1.0f));
+    harness.endFrame();
+
+    EXPECT_GE(hint.width, 128.0f);
+    EXPECT_GT(hint.height, 0.0f);
 }
 
 TEST_F(LineEditFixture, emptyAndLongTextKeepLayoutConfiguration)

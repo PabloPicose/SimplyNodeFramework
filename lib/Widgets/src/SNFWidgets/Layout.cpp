@@ -13,6 +13,16 @@ int normalizedStretch(int stretch)
 {
     return std::max(0, stretch);
 }
+
+int normalizedStretchItemFactor(int stretch)
+{
+    return std::max(1, stretch);
+}
+
+float normalizedSpacingSize(float pixels)
+{
+    return std::max(0.0f, pixels);
+}
 }  // namespace
 
 Layout::Layout(snf::Node* parent) : Widget(parent) {}
@@ -24,7 +34,7 @@ void Layout::addWidget(Widget* widget, int stretch)
     }
 
     for (auto& item : m_items) {
-        if (item.widget == widget) {
+        if (item.type == Layout::LayoutItemType::Widget && item.widget == widget) {
             item.stretch = normalizedStretch(stretch);
             if (! widget->parent()) {
                 widget->setParent(this);
@@ -37,7 +47,27 @@ void Layout::addWidget(Widget* widget, int stretch)
         widget->setParent(this);
     }
 
-    m_items.push_back({snf::NodePtr<Widget>(widget), normalizedStretch(stretch)});
+    Item item;
+    item.type = LayoutItemType::Widget;
+    item.widget = snf::NodePtr<Widget>(widget);
+    item.stretch = normalizedStretch(stretch);
+    m_items.push_back(item);
+}
+
+void Layout::addSpacing(float pixels)
+{
+    Item item;
+    item.type = LayoutItemType::FixedSpacer;
+    item.fixedSize = normalizedSpacingSize(pixels);
+    m_items.push_back(item);
+}
+
+void Layout::addStretch(int factor)
+{
+    Item item;
+    item.type = LayoutItemType::StretchSpacer;
+    item.stretch = normalizedStretchItemFactor(factor);
+    m_items.push_back(item);
 }
 
 void Layout::removeWidget(Widget* widget)
@@ -46,14 +76,16 @@ void Layout::removeWidget(Widget* widget)
         std::remove_if(
             m_items.begin(),
             m_items.end(),
-            [widget](const Item& item) { return item.widget == widget; }),
+            [widget](const Item& item) {
+                return item.type == Layout::LayoutItemType::Widget && item.widget == widget;
+            }),
         m_items.end());
 }
 
 void Layout::setStretch(Widget* widget, int stretch)
 {
     for (auto& item : m_items) {
-        if (item.widget == widget) {
+        if (item.type == LayoutItemType::Widget && item.widget == widget) {
             item.stretch = normalizedStretch(stretch);
             return;
         }
@@ -65,13 +97,26 @@ int Layout::count() const
     return static_cast<int>(m_items.size());
 }
 
+Layout::LayoutItemType Layout::itemTypeAt(int index) const
+{
+    if (index < 0 || index >= static_cast<int>(m_items.size())) {
+        return LayoutItemType::Widget;
+    }
+    return m_items[static_cast<std::size_t>(index)].type;
+}
+
 Widget* Layout::widgetAt(int index) const
 {
     if (index < 0 || index >= static_cast<int>(m_items.size())) {
         return nullptr;
     }
 
-    const auto& widget = m_items[static_cast<std::size_t>(index)].widget;
+    const auto& item = m_items[static_cast<std::size_t>(index)];
+    if (item.type != LayoutItemType::Widget) {
+        return nullptr;
+    }
+
+    const auto& widget = item.widget;
     return widget ? widget.get() : nullptr;
 }
 
@@ -83,6 +128,16 @@ int Layout::stretchAt(int index) const
     return m_items[static_cast<std::size_t>(index)].stretch;
 }
 
+float Layout::fixedSpacingAt(int index) const
+{
+    if (index < 0 || index >= static_cast<int>(m_items.size())) {
+        return 0.0f;
+    }
+
+    const auto& item = m_items[static_cast<std::size_t>(index)];
+    return item.type == LayoutItemType::FixedSpacer ? item.fixedSize : 0.0f;
+}
+
 bool Layout::containsWidget(const Widget* widget) const
 {
     if (! widget) {
@@ -90,6 +145,10 @@ bool Layout::containsWidget(const Widget* widget) const
     }
 
     for (const auto& item : m_items) {
+        if (item.type != LayoutItemType::Widget) {
+            continue;
+        }
+
         if (! item.widget) {
             continue;
         }
@@ -130,7 +189,9 @@ std::vector<Layout::Item> Layout::activeItems() const
     active.reserve(m_items.size());
 
     for (const auto& item : m_items) {
-        if (item.widget && ! item.widget.isMarkedToDelete()) {
+        if (item.type != LayoutItemType::Widget) {
+            active.push_back(item);
+        } else if (item.widget && ! item.widget.isMarkedToDelete()) {
             active.push_back(item);
         }
     }
@@ -166,19 +227,42 @@ void VBoxLayout::renderImGui()
     }
 
     int totalStretch = 0;
+    float fixedHeight = 0.0f;
     for (const auto& item : active) {
-        totalStretch += item.stretch;
+        if (item.type == LayoutItemType::Widget) {
+            fixedHeight += item.widget ? item.widget->sizeHint().height : 0.0f;
+            totalStretch += item.stretch;
+        } else if (item.type == LayoutItemType::FixedSpacer) {
+            fixedHeight += item.fixedSize;
+        } else if (item.type == LayoutItemType::StretchSpacer) {
+            totalStretch += item.stretch;
+        }
     }
 
     const float availableHeight = ImGui::GetContentRegionAvail().y;
     const float spacingHeight = effectiveSpacing * static_cast<float>(active.size() > 1 ? active.size() - 1 : 0);
-    const float stretchHeight = std::max(0.0f, availableHeight - spacingHeight);
+    const float stretchHeight = std::max(0.0f, availableHeight - fixedHeight - spacingHeight);
 
     for (const auto& item : active) {
+        if (item.type == LayoutItemType::FixedSpacer) {
+            ImGui::Dummy(ImVec2(0.0f, item.fixedSize));
+            continue;
+        }
+
+        if (item.type == LayoutItemType::StretchSpacer) {
+            const float height = totalStretch > 0
+                ? stretchHeight * static_cast<float>(item.stretch) / static_cast<float>(totalStretch)
+                : 0.0f;
+            ImGui::Dummy(ImVec2(0.0f, height));
+            continue;
+        }
+
         Widget* widget = item.widget.get();
-        const float height = (totalStretch > 0 && item.stretch > 0)
+        const Size hint = widget ? widget->sizeHint() : Size{};
+        const float extraHeight = (totalStretch > 0 && item.stretch > 0)
             ? stretchHeight * static_cast<float>(item.stretch) / static_cast<float>(totalStretch)
-            : -1.0f;
+            : 0.0f;
+        const float height = hint.height > 0.0f || extraHeight > 0.0f ? hint.height + extraHeight : -1.0f;
         renderWidget(widget, -1.0f, height);
     }
 
@@ -201,44 +285,54 @@ void HBoxLayout::renderImGui()
     ImGui::PushID(this);
 
     const float effectiveSpacing = spacing() >= 0.0f ? spacing() : ImGui::GetStyle().ItemSpacing.x;
-    if (spacing() >= 0.0f) {
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(spacing(), ImGui::GetStyle().ItemSpacing.y));
+    const ImVec2 start = ImGui::GetCursorScreenPos();
+    const float availableWidth = ImGui::GetContentRegionAvail().x;
+
+    float fixedWidth = 0.0f;
+    float maxHintHeight = 0.0f;
+    int totalStretch = 0;
+    for (const auto& item : active) {
+        if (item.type == LayoutItemType::Widget) {
+            Widget* widget = item.widget.get();
+            const Size hint = widget ? widget->sizeHint() : Size{};
+            fixedWidth += std::max(0.0f, hint.width);
+            maxHintHeight = std::max(maxHintHeight, hint.height);
+            totalStretch += item.stretch;
+        } else if (item.type == LayoutItemType::FixedSpacer) {
+            fixedWidth += item.fixedSize;
+        } else if (item.type == LayoutItemType::StretchSpacer) {
+            totalStretch += item.stretch;
+        }
     }
 
-    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(effectiveSpacing * 0.5f, 0.0f));
+    const float totalSpacing = effectiveSpacing * static_cast<float>(active.size() > 1 ? active.size() - 1 : 0);
+    const float remainingWidth = std::max(0.0f, availableWidth - fixedWidth - totalSpacing);
+    const float layoutHeight = maxHintHeight > 0.0f ? maxHintHeight : ImGui::GetFrameHeight();
 
-    const ImGuiTableFlags flags =
-        ImGuiTableFlags_SizingStretchProp |
-        ImGuiTableFlags_NoSavedSettings |
-        ImGuiTableFlags_NoPadOuterX;
-
-    if (ImGui::BeginTable("HBoxLayout", static_cast<int>(active.size()), flags)) {
-        for (std::size_t i = 0; i < active.size(); ++i) {
-            const auto& item = active[i];
-            const ImGuiTableColumnFlags columnFlags = item.stretch > 0
-                ? ImGuiTableColumnFlags_WidthStretch
-                : ImGuiTableColumnFlags_WidthFixed;
-            const float widthOrWeight = item.stretch > 0 ? static_cast<float>(item.stretch) : 0.0f;
-            const std::string columnId = "Column" + std::to_string(i);
-            ImGui::TableSetupColumn(columnId.c_str(), columnFlags, widthOrWeight);
+    float x = start.x;
+    for (const auto& item : active) {
+        float itemWidth = 0.0f;
+        if (item.type == LayoutItemType::Widget) {
+            Widget* widget = item.widget.get();
+            const Size hint = widget ? widget->sizeHint() : Size{};
+            const float extraWidth = (totalStretch > 0 && item.stretch > 0)
+                ? remainingWidth * static_cast<float>(item.stretch) / static_cast<float>(totalStretch)
+                : 0.0f;
+            itemWidth = std::max(0.0f, hint.width) + extraWidth;
+            ImGui::SetCursorScreenPos(ImVec2(x, start.y));
+            renderWidget(widget, itemWidth > 0.0f ? itemWidth : -1.0f, -1.0f);
+        } else if (item.type == LayoutItemType::FixedSpacer) {
+            itemWidth = item.fixedSize;
+        } else if (item.type == LayoutItemType::StretchSpacer) {
+            itemWidth = totalStretch > 0
+                ? remainingWidth * static_cast<float>(item.stretch) / static_cast<float>(totalStretch)
+                : 0.0f;
         }
 
-        ImGui::TableNextRow();
-        for (std::size_t i = 0; i < active.size(); ++i) {
-            ImGui::TableSetColumnIndex(static_cast<int>(i));
-            const auto& item = active[i];
-            const float width = item.stretch > 0 ? ImGui::GetContentRegionAvail().x : -1.0f;
-            renderWidget(item.widget.get(), width);
-        }
-
-        ImGui::EndTable();
+        x += itemWidth + effectiveSpacing;
     }
 
-    ImGui::PopStyleVar();
-
-    if (spacing() >= 0.0f) {
-        ImGui::PopStyleVar();
-    }
+    ImGui::SetCursorScreenPos(ImVec2(start.x, start.y + std::max(0.0f, layoutHeight)));
 
     ImGui::PopID();
 }
@@ -326,7 +420,7 @@ void FormLayout::renderImGui()
     const ImGuiTableFlags flags =
         ImGuiTableFlags_SizingStretchProp |
         ImGuiTableFlags_NoSavedSettings |
-        ImGuiTableFlags_PadOuterX;
+        ImGuiTableFlags_NoPadOuterX;
 
     if (ImGui::BeginTable("FormLayout", 2, flags)) {
         ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthFixed);

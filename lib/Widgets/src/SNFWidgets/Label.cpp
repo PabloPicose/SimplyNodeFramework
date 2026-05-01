@@ -20,6 +20,16 @@ std::string Label::text() const
     return m_text;
 }
 
+Size Label::sizeHint() const
+{
+    if (ImGui::GetCurrentContext() == nullptr) {
+        return {};
+    }
+
+    const ImVec2 textSize = ImGui::CalcTextSize(m_text.c_str(), nullptr, false);
+    return Size{textSize.x, textSize.y};
+}
+
 void Label::renderImGui()
 {
     // Use %s to avoid interpreting m_text as a format string.
