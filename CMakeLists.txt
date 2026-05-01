@@ -99,7 +99,7 @@ if(SNF_WEB_ASSEMBLY AND SNF_ENABLE_WEB_TESTS)
     target_link_options(SNFWebAssemblySmokeTests PRIVATE
         -sENVIRONMENT=node
         -sEXIT_RUNTIME=1
-        -sNO_FILESYSTEM=1
+        -sFORCE_FILESYSTEM=1
     )
     add_test(NAME SNFWebAssemblySmokeTests COMMAND SNFWebAssemblySmokeTests)
 endif()

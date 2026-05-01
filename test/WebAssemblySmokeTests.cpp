@@ -1,5 +1,7 @@
 #include <SNFCore/Application.h>
+#include <SNFCore/File.h>
 #include <SNFCore/EventLoop.h>
+#include <SNFCore/TempFile.h>
 #include <SNFCore/Timer.h>
 #include <SNFNetwork/HostAddress.h>
 #include <SNFWebSocket/WebSocket.h>
@@ -79,6 +81,42 @@ void testHostAddress()
            "WebAssembly HostAddress does not use native DNS resolution for hostnames");
     expect(addresses.empty(), "WebAssembly hostname resolve does not return native socket candidates");
     expect(error.find("WebAssembly") != std::string::npos, "WebAssembly hostname resolve error is explicit");
+}
+
+void testFileApiSurface()
+{
+    const std::string path = "/snf_wasm_file_test.bin";
+    File::remove(path);
+
+    expect(! File::exists(path), "WebAssembly File starts with a missing virtual path");
+    expect(File::writeAll(path, ByteArray(std::string("wasm"))), "WebAssembly File writes virtual FS data");
+
+    const auto staticContent = File::readAll(path);
+    expect(staticContent.has_value(), "WebAssembly File reads virtual FS data");
+    expect(staticContent.has_value() && staticContent->size() == 4, "WebAssembly File read size is correct");
+
+    {
+        Application app(0, nullptr);
+        File file(path);
+        expect(file.open(File::OpenMode::ReadOnly), "WebAssembly File opens virtual FS path");
+        const auto content = file.readAll();
+        expect(content.has_value(), "WebAssembly File instance reads virtual FS data");
+        expect(content.has_value() && content->size() == 4, "WebAssembly File instance read size is correct");
+    }
+
+    {
+        Application app(0, nullptr);
+        TempFile tempFile;
+        expect(tempFile.open(), "WebAssembly TempFile opens under virtual /tmp");
+        expect(! tempFile.filePath().empty(), "WebAssembly TempFile path is not empty");
+        expect(File::exists(tempFile.filePath()), "WebAssembly TempFile exists in virtual FS");
+        expect(tempFile.write(ByteArray(std::string("tmp"))), "WebAssembly TempFile writes data");
+        expect(tempFile.flush(), "WebAssembly TempFile flushes data");
+        const auto content = tempFile.readAll();
+        expect(content.has_value() && content->size() == 3, "WebAssembly TempFile reads data");
+    }
+
+    expect(File::remove(path), "WebAssembly File removes virtual FS data");
 }
 
 void testWebSocketApiSurface()
@@ -165,6 +203,7 @@ int main()
 {
     testEventLoopPendingWork();
     testHostAddress();
+    testFileApiSurface();
     testWebSocketApiSurface();
 
     if (failures != 0) {

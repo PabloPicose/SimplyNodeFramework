@@ -5,6 +5,8 @@ add_executable(SNFCoreTests
     CommandLineParserTests.cpp
     IniParserTests.cpp
     AbstractTableModelTests.cpp
+    FileTests.cpp
+    TempFileTests.cpp
 )
 
 target_link_libraries(SNFCoreTests

@@ -350,6 +350,7 @@ Open `docs/html/index.html` in a browser.
 - [x] WebSocket support
 - [x] HTTP server
 - [x] HTTP Request/Response parser
+- [ ] Embed assets/data into the binary (e.g. for serving static files in an HTTP server)
 - [ ] HTTP request handler (e.g. for REST APIs)
 - [ ] ALSA audio support
 

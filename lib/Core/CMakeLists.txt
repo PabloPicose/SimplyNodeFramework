@@ -27,6 +27,8 @@ target_sources(SNFCore
         "${SNFCORE_DIR}/Connection.cpp"
         "${SNFCORE_DIR}/ModelIndex.cpp"
         "${SNFCORE_DIR}/AbstractTableModel.cpp"
+        "${SNFCORE_DIR}/File.cpp"
+        "${SNFCORE_DIR}/TempFile.cpp"
         ${SNFCORE_POLLER_SRC}
         "${SNFCORE_DIR}/CommandLineOption.cpp"
         "${SNFCORE_DIR}/CommandLineParser.cpp"
@@ -43,6 +45,9 @@ target_sources(SNFCore
             "${SNFCORE_DIR}/Connection.h"
             "${SNFCORE_DIR}/ModelIndex.h"
             "${SNFCORE_DIR}/AbstractTableModel.h"
+            "${SNFCORE_DIR}/ByteArray.h"
+            "${SNFCORE_DIR}/File.h"
+            "${SNFCORE_DIR}/TempFile.h"
             "${SNFCORE_DIR}/EpollPoller.h"
             "${SNFCORE_DIR}/CommandLineOption.h"
             "${SNFCORE_DIR}/CommandLineParser.h"
