@@ -18,6 +18,7 @@
 
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace wg = snf::widgets;
@@ -52,6 +53,28 @@ public:
             return {};
         }
         return m_rows[static_cast<std::size_t>(row)][static_cast<std::size_t>(column)];
+    }
+
+    snf::ModelValue data(const snf::ModelIndex& index, snf::ModelDataRole role = snf::ModelDataRole::Display) const override
+    {
+        if (! index.isValid() || index.model() != this) {
+            return std::monostate{};
+        }
+
+        if (role == snf::ModelDataRole::Decoration && index.column() == 1) {
+            const std::string state = data(index.row(), index.column());
+            if (state == "Online") {
+                return snf::ModelColor{0.12f, 0.38f, 0.18f, 0.85f};
+            }
+            if (state == "Offline") {
+                return snf::ModelColor{0.42f, 0.12f, 0.12f, 0.85f};
+            }
+            if (state == "Warning") {
+                return snf::ModelColor{0.48f, 0.36f, 0.08f, 0.85f};
+            }
+        }
+
+        return snf::AbstractTableModel::data(index, role);
     }
 
     std::string headerData(int section) const override

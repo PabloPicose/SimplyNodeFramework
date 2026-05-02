@@ -18,6 +18,8 @@ std::string modelValueToString(const ModelValue& value)
                 return current ? "true" : "false";
             } else if constexpr (std::is_same_v<ValueT, std::string>) {
                 return current;
+            } else if constexpr (std::is_same_v<ValueT, ModelColor>) {
+                return {};
             } else if constexpr (std::is_same_v<ValueT, double>) {
                 std::ostringstream stream;
                 stream << current;
@@ -37,11 +39,15 @@ ModelIndex AbstractTableModel::index(int row, int column) const
 
 ModelValue AbstractTableModel::data(const ModelIndex& index, ModelDataRole role) const
 {
-    if (role != ModelDataRole::Display && role != ModelDataRole::Edit) {
+    if (! index.isValid() || index.model() != this) {
         return std::monostate{};
     }
 
-    if (! index.isValid() || index.model() != this) {
+    if (role == ModelDataRole::Decoration) {
+        return std::monostate{};
+    }
+
+    if (role != ModelDataRole::Display && role != ModelDataRole::Edit) {
         return std::monostate{};
     }
 

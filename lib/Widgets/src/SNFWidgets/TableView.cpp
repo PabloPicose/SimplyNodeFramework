@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <iterator>
 #include <string>
+#include <variant>
 
 #include <SNFCore/AbstractTableModel.h>
 
@@ -25,6 +26,25 @@ float tableBorderWidth(bool showGrid, int columns)
         return 0.0f;
     }
     return static_cast<float>(columns + 1);
+}
+
+float normalizedColorComponent(float component)
+{
+    return std::clamp(component, 0.0f, 1.0f);
+}
+
+bool colorFromModelValue(const snf::ModelValue& value, ImU32& color)
+{
+    if (! std::holds_alternative<snf::ModelColor>(value)) {
+        return false;
+    }
+
+    const snf::ModelColor& modelColor = std::get<snf::ModelColor>(value);
+    color = ImGui::GetColorU32(ImVec4(normalizedColorComponent(modelColor.red),
+                                      normalizedColorComponent(modelColor.green),
+                                      normalizedColorComponent(modelColor.blue),
+                                      normalizedColorComponent(modelColor.alpha)));
+    return true;
 }
 }  // namespace
 
@@ -717,6 +737,10 @@ void TableView::renderTable(float width, float height)
                 const snf::ModelIndex index = m_model->index(row, column);
                 const std::string cell = snf::modelValueToString(m_model->data(index));
                 const bool selected = containsSelectionKey(keyForCell(row, column));
+                ImU32 decorationColor = 0;
+                if (colorFromModelValue(m_model->data(index, snf::ModelDataRole::Decoration), decorationColor)) {
+                    ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, decorationColor);
+                }
 
                 ImGui::PushID(row);
                 ImGui::PushID(column);

@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -119,6 +120,45 @@ private:
 
     std::vector<std::vector<std::string>> m_rows;
     std::vector<std::string>              m_headers;
+};
+
+class DecorationTableModel final : public snf::AbstractTableModel
+{
+public:
+    int rowCount() const override { return 2; }
+    int columnCount() const override { return 2; }
+
+    std::string data(int row, int column) const override
+    {
+        return std::string("cell ") + std::to_string(row) + "," + std::to_string(column);
+    }
+
+    std::string headerData(int section) const override
+    {
+        return section == 0 ? "A" : "B";
+    }
+
+    snf::ModelValue data(const snf::ModelIndex& index, snf::ModelDataRole role = snf::ModelDataRole::Display) const override
+    {
+        if (! index.isValid() || index.model() != this) {
+            return std::monostate{};
+        }
+
+        if (role == snf::ModelDataRole::Decoration) {
+            ++m_decorationRequests;
+            if (index.row() == 0 && index.column() == 1) {
+                return snf::ModelColor{0.2f, 0.7f, 0.3f, 1.0f};
+            }
+            return std::monostate{};
+        }
+
+        return snf::AbstractTableModel::data(index, role);
+    }
+
+    int decorationRequestCount() const { return m_decorationRequests; }
+
+private:
+    mutable int m_decorationRequests = 0;
 };
 
 class TableViewFixture : public ::testing::Test
@@ -577,6 +617,21 @@ TEST_F(TableViewFixture, sizeHintReflectsRowsAndColumns)
 
     EXPECT_GE(hint.width, 360.0f);
     EXPECT_GT(hint.height, 40.0f);
+}
+
+TEST_F(TableViewFixture, renderQueriesDecorationRoleForCells)
+{
+    snf::widgets::test::ImGuiInteractionHarness harness;
+    snf::widgets::test::TestWidget<snf::widgets::TableView> view;
+    DecorationTableModel model;
+
+    view.setModel(&model);
+
+    harness.beginFrame();
+    harness.render(view);
+    harness.endFrame();
+
+    EXPECT_EQ(model.decorationRequestCount(), model.rowCount() * model.columnCount());
 }
 
 TEST_F(TableViewFixture, multipleRowSelectionExpandsToCellIndexes)

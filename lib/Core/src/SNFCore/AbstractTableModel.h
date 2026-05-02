@@ -21,14 +21,43 @@ namespace snf {
  * @brief Describes the purpose for data requested from a model index.
  */
 enum class ModelDataRole {
-    Display, ///< Human-readable value for views.
-    Edit,    ///< Editable value used by editors.
+    Display,    ///< Human-readable value for views.
+    Edit,       ///< Editable value used by editors.
+    Decoration, ///< Optional visual decoration value for views.
+};
+
+/**
+ * @struct ModelColor
+ * @ingroup SNFCore
+ * @brief RGBA color value used by decoration roles.
+ *
+ * Components are expected in the `[0, 1]` range. Views may clamp values when
+ * converting to their backend color representation.
+ */
+struct ModelColor {
+    float red = 0.0f;
+    float green = 0.0f;
+    float blue = 0.0f;
+    float alpha = 1.0f;
+
+    friend bool operator==(const ModelColor& lhs, const ModelColor& rhs)
+    {
+        return lhs.red == rhs.red
+            && lhs.green == rhs.green
+            && lhs.blue == rhs.blue
+            && lhs.alpha == rhs.alpha;
+    }
+
+    friend bool operator!=(const ModelColor& lhs, const ModelColor& rhs)
+    {
+        return ! (lhs == rhs);
+    }
 };
 
 /**
  * @brief Type-safe model value used by table models.
  */
-using ModelValue = std::variant<std::monostate, bool, int, std::int64_t, double, std::string>;
+using ModelValue = std::variant<std::monostate, bool, int, std::int64_t, double, std::string, ModelColor>;
 
 /** @brief Converts a ModelValue into display text. */
 std::string modelValueToString(const ModelValue& value);

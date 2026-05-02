@@ -180,6 +180,27 @@ public:
     }
 };
 
+class DecoratedTableModel : public snf::AbstractTableModel
+{
+public:
+    int rowCount() const override { return 1; }
+    int columnCount() const override { return 1; }
+    std::string data(int, int) const override { return "warning"; }
+
+    snf::ModelValue data(const snf::ModelIndex& index, snf::ModelDataRole role = snf::ModelDataRole::Display) const override
+    {
+        if (! index.isValid() || index.model() != this) {
+            return std::monostate{};
+        }
+
+        if (role == snf::ModelDataRole::Decoration) {
+            return snf::ModelColor{1.0f, 0.4f, 0.0f, 0.8f};
+        }
+
+        return snf::AbstractTableModel::data(index, role);
+    }
+};
+
 }  // namespace
 
 TEST(AbstractTableModelTests, emptyModel)
@@ -265,6 +286,7 @@ TEST(AbstractTableModelTests, modelValueConvertsToDisplayString)
     EXPECT_EQ(snf::modelValueToString(std::int64_t{9000000000LL}), "9000000000");
     EXPECT_EQ(snf::modelValueToString(2.5), "2.5");
     EXPECT_EQ(snf::modelValueToString(std::string("text")), "text");
+    EXPECT_EQ(snf::modelValueToString(snf::ModelColor{1.0f, 0.0f, 0.0f, 1.0f}), "");
 }
 
 TEST(AbstractTableModelTests, modelCanReturnTypedValues)
@@ -277,6 +299,17 @@ TEST(AbstractTableModelTests, modelCanReturnTypedValues)
     EXPECT_EQ(std::get<double>(base.data(model.index(0, 2))), 2.5);
     EXPECT_EQ(std::get<std::string>(base.data(model.index(0, 3))), "text");
     EXPECT_TRUE(std::holds_alternative<std::monostate>(base.data(model.index(0, 3), snf::ModelDataRole::Edit)));
+}
+
+TEST(AbstractTableModelTests, decorationRoleCanReturnModelColor)
+{
+    DecoratedTableModel model;
+    const snf::ModelIndex index = model.index(0, 0);
+    const snf::ModelValue value = model.data(index, snf::ModelDataRole::Decoration);
+
+    ASSERT_TRUE(std::holds_alternative<snf::ModelColor>(value));
+    EXPECT_EQ(std::get<snf::ModelColor>(value), (snf::ModelColor{1.0f, 0.4f, 0.0f, 0.8f}));
+    EXPECT_EQ(snf::modelValueToString(value), "");
 }
 
 TEST(AbstractTableModelTests, setDataEmitsDataChangedWhenValueChanges)
