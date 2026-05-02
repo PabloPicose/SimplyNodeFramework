@@ -25,6 +25,9 @@ target_sources(SNFCore
         "${SNFCORE_DIR}/Timer.cpp"
         "${SNFCORE_DIR}/EventLoop.cpp"
         "${SNFCORE_DIR}/Connection.cpp"
+        "${SNFCORE_DIR}/AsyncTask.cpp"
+        "${SNFCORE_DIR}/ThreadPool.cpp"
+        "${SNFCORE_DIR}/EnqueuedAsyncTask.cpp"
         "${SNFCORE_DIR}/ModelIndex.cpp"
         "${SNFCORE_DIR}/AbstractTableModel.cpp"
         "${SNFCORE_DIR}/File.cpp"
@@ -43,6 +46,9 @@ target_sources(SNFCore
             "${SNFCORE_DIR}/Timer.h"
             "${SNFCORE_DIR}/EventLoop.h"
             "${SNFCORE_DIR}/Connection.h"
+            "${SNFCORE_DIR}/AsyncTask.h"
+            "${SNFCORE_DIR}/ThreadPool.h"
+            "${SNFCORE_DIR}/EnqueuedAsyncTask.h"
             "${SNFCORE_DIR}/ModelIndex.h"
             "${SNFCORE_DIR}/AbstractTableModel.h"
             "${SNFCORE_DIR}/ByteArray.h"
@@ -62,6 +68,11 @@ if(SNF_WEB_ASSEMBLY)
 endif()
 
 # If using GCC < 9, we need to link against stdc++fs to get filesystem support.
+target_link_libraries(SNFCore
+    PUBLIC
+        Threads::Threads
+)
+
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" 
    AND 
    CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9)
@@ -69,7 +80,6 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
     target_link_libraries(SNFCore
         PUBLIC
             stdc++fs
-            Threads::Threads
     )
 
 endif()

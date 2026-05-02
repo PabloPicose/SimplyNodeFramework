@@ -20,6 +20,7 @@ namespace snf {
 class Node;
 class EventLoop;
 class CommandLineParser;
+class ThreadPool;
 
 /**
  * @class Application
@@ -171,6 +172,9 @@ public:
      */
     bool allEventLoopsIdle() const;
 
+    /** @brief Returns the Application-owned global ThreadPool. */
+    ThreadPool* threadPool() const;
+
 private:
     void pushRootNodeDeleteLater(Node* node);
 
@@ -211,6 +215,7 @@ private:
     std::string m_version;
 
     std::unique_ptr<CommandLineParser> m_commandLineParser;
+    std::unique_ptr<ThreadPool> m_threadPool;
 
     int m_argc = 0;
 

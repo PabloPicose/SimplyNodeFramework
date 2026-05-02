@@ -12,6 +12,7 @@
 #include "EventLoop.h"
 #include "Node.h"
 #include "NodePtr.h"
+#include "ThreadPool.h"
 
 namespace snf {
 
@@ -26,10 +27,12 @@ Application::Application(int argc, char** argv) : m_threadId(std::this_thread::g
     }
     // Eagerly create the main-thread EventLoop so it is always available.
     getOrCreateCurrentThreadEventLoop();
+    m_threadPool = std::make_unique<ThreadPool>();
 }
 
 Application::~Application()
 {
+    m_threadPool.reset();
     // Clearing the event-loops map destroys each EventLoop, whose destructor
     // deletes its root nodes (and their subtrees) in the correct owner thread.
     m_eventLoops.clear();
@@ -246,6 +249,11 @@ bool Application::allEventLoopsIdle() const
         }
     }
     return true;
+}
+
+ThreadPool* Application::threadPool() const
+{
+    return m_threadPool.get();
 }
 
 }  // namespace snf
