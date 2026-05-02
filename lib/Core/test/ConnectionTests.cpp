@@ -275,3 +275,69 @@ TEST_F(ConnectionFixture, multipleSlotsAllowPartialDisconnect)
     EXPECT_EQ(left, 5);
     EXPECT_EQ(right, 7);
 }
+
+TEST_F(ConnectionFixture, queuedConnectionFollowsReceiverAfterMoveToThread)
+{
+    // Phase 1: receiver lives on the main thread.
+    // The Application constructor already creates the main-thread EventLoop.
+    const std::thread::id mainThreadId = std::this_thread::get_id();
+
+    auto* receiver = new ValueReceiver();
+    NodePtr<ValueReceiver> receiverPtr(receiver);
+
+    Signal<int> signal;
+    signal.connect(receiverPtr, &ValueReceiver::onValue, ConnectionType::Queued);
+
+    // The emit posts a task to the main EventLoop; app->run() drains it.
+    // ValueReceiver::onValue posts loop->stop() so run() returns after the
+    // first invocation.
+    signal.emit(42);
+    app->run();
+
+    EXPECT_EQ(receiver->receivedValue, 42);
+    EXPECT_EQ(receiver->callbackThread, mainThreadId);
+    EXPECT_EQ(receiver->invocations, 1);
+
+    // Phase 2: migrate receiver to a worker thread and re-emit.
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool workerReady = false;
+    std::thread::id workerThreadId;
+
+    std::thread worker([&]() {
+        EventLoop* workerLoop = app->getOrCreateCurrentThreadEventLoop();
+        ASSERT_NE(workerLoop, nullptr);
+
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            workerThreadId = std::this_thread::get_id();
+            workerReady = true;
+        }
+        cv.notify_one();
+
+        // Safety net: stop the loop if the signal never arrives.
+        Timer keepAlive;
+        keepAlive.setSingleShot(true);
+        keepAlive.start(2s);
+
+        workerLoop->run();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&] { return workerReady; });
+    }
+
+    // Called from the owner (main) thread → migration is synchronous.
+    ASSERT_TRUE(receiver->moveToThread(workerThreadId));
+
+    // Queued delivery now targets the worker EventLoop.
+    signal.emit(99);
+
+    worker.join();
+
+    ASSERT_TRUE(receiverPtr);
+    EXPECT_EQ(receiver->receivedValue, 99);
+    EXPECT_EQ(receiver->callbackThread, workerThreadId);
+    EXPECT_EQ(receiver->invocations, 2);
+}
