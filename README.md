@@ -359,6 +359,10 @@ Open `docs/html/index.html` in a browser.
 - [ ] ItemDelegate: for rendering items in a view (e.g. buttons, checkboxes, etc.)
 - [ ] Validator: for validating user input in widgets (e.g. regex, range, etc.)
 
+# Database
+- [ ] SQLite wrapper
+- [ ] MySQL wrapper
+
 ### TLV
 This is how I see the spec of the posible TLV packet:
 `[magic:4][flags:1][type:2][payload_len:4][payload:N]`

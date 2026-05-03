@@ -21,6 +21,9 @@ option(SNF_ENABLE_STANDALONE "Build the in-tree standalone examples" ${PROJECT_I
 option(SNF_EXPERIMENTAL
     "Build experimental SNF modules such as AsyncTask and AsyncTaskSequence"
     OFF)
+option(SNF_ENABLE_SQLITE
+    "Enable SQLite support in SNFDatabase"
+    ON)
 
 # Safety checks: mismatching toolchain / option causes a clear configure error.
 if(EMSCRIPTEN AND NOT SNF_WEB_ASSEMBLY)
@@ -62,6 +65,7 @@ endif()
 # ── Library targets ───────────────────────────────────────────────────────────
 add_subdirectory(lib/Core)
 add_subdirectory(lib/Json)
+add_subdirectory(lib/Database)
 add_subdirectory(lib/Network)
 if(SNF_EXPERIMENTAL AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/experimental/CMakeLists.txt")
     add_subdirectory(lib/experimental)
@@ -168,6 +172,26 @@ install(
             "${CMAKE_CURRENT_BINARY_DIR}/SNFJsonConfig.cmake"
             "${CMAKE_CURRENT_BINARY_DIR}/SNFJsonConfigVersion.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFJson"
+    )
+
+# ── Package config: SNFDatabase ─────────────────────────────────────────────
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SNFDatabaseConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/SNFDatabaseConfig.cmake"
+        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFDatabase"
+    )
+
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/SNFDatabaseConfigVersion.cmake"
+        VERSION "${PROJECT_VERSION}"
+        COMPATIBILITY SameMajorVersion
+    )
+
+    install(
+        FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/SNFDatabaseConfig.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/SNFDatabaseConfigVersion.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFDatabase"
     )
 
 if(NOT SNF_WEB_ASSEMBLY)

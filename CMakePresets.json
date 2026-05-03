@@ -50,6 +50,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "SNF_WEB_ASSEMBLY": true,
+        "SNF_ENABLE_SQLITE": false,
         "SNF_ENABLE_TESTS": false
       }
     },
@@ -62,6 +63,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "SNF_WEB_ASSEMBLY": true,
+        "SNF_ENABLE_SQLITE": false,
         "SNF_ENABLE_TESTS": false
       }
     }
