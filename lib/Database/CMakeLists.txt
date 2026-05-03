@@ -8,11 +8,13 @@ add_library(SNFDatabase STATIC)
 set(SNFDATABASE_SOURCES
     "${SNFDATABASE_DIR}/SqlDatabase.cpp"
     "${SNFDATABASE_DIR}/SqlQuery.cpp"
+    "${SNFDATABASE_DIR}/SqlTableModel.cpp"
 )
 
 set(SNFDATABASE_HEADERS
     "${SNFDATABASE_DIR}/SqlDatabase.h"
     "${SNFDATABASE_DIR}/SqlQuery.h"
+    "${SNFDATABASE_DIR}/SqlTableModel.h"
 )
 
 if(SNF_ENABLE_SQLITE)

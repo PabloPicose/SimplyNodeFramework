@@ -8,10 +8,9 @@
 
 #include <SNFCore/Connection.h>
 #include <SNFCore/ModelIndex.h>
+#include <SNFCore/Variant.h>
 
-#include <cstdint>
 #include <string>
-#include <variant>
 
 namespace snf {
 
@@ -25,42 +24,6 @@ enum class ModelDataRole {
     Edit,       ///< Editable value used by editors.
     Decoration, ///< Optional visual decoration value for views.
 };
-
-/**
- * @struct ModelColor
- * @ingroup SNFCore
- * @brief RGBA color value used by decoration roles.
- *
- * Components are expected in the `[0, 1]` range. Views may clamp values when
- * converting to their backend color representation.
- */
-struct ModelColor {
-    float red = 0.0f;
-    float green = 0.0f;
-    float blue = 0.0f;
-    float alpha = 1.0f;
-
-    friend bool operator==(const ModelColor& lhs, const ModelColor& rhs)
-    {
-        return lhs.red == rhs.red
-            && lhs.green == rhs.green
-            && lhs.blue == rhs.blue
-            && lhs.alpha == rhs.alpha;
-    }
-
-    friend bool operator!=(const ModelColor& lhs, const ModelColor& rhs)
-    {
-        return ! (lhs == rhs);
-    }
-};
-
-/**
- * @brief Type-safe model value used by table models.
- */
-using ModelValue = std::variant<std::monostate, bool, int, std::int64_t, double, std::string, ModelColor>;
-
-/** @brief Converts a ModelValue into display text. */
-std::string modelValueToString(const ModelValue& value);
 
 /**
  * @class AbstractTableModel
@@ -111,7 +74,7 @@ public:
     virtual std::string data(int row, int column) const = 0;
 
     /** @brief Returns the value for @p index and @p role. */
-    virtual ModelValue data(const ModelIndex& index, ModelDataRole role = ModelDataRole::Display) const;
+    virtual Variant data(const ModelIndex& index, ModelDataRole role = ModelDataRole::Display) const;
 
     /**
      * @brief Returns the horizontal header string for @p section.
@@ -147,7 +110,7 @@ public:
 
     /** @brief Updates @p index if the model supports editing. */
     virtual bool setData(const ModelIndex& index,
-                         const ModelValue& value,
+                         const Variant& value,
                          ModelDataRole role = ModelDataRole::Edit);
 
     /**

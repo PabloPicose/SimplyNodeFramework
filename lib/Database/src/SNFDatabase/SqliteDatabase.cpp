@@ -123,6 +123,33 @@ public:
         return text != nullptr ? std::string(reinterpret_cast<const char*>(text)) : std::string();
     }
 
+    Variant typedValue(int column) const override
+    {
+        if (! validColumn(m_statement, column)) {
+            return {};
+        }
+
+        const int sqliteType = sqlite3_column_type(m_statement, column);
+        switch (sqliteType) {
+            case SQLITE_NULL:
+                return {};
+            case SQLITE_INTEGER:
+                return static_cast<std::int64_t>(sqlite3_column_int64(m_statement, column));
+            case SQLITE_FLOAT:
+                return sqlite3_column_double(m_statement, column);
+            case SQLITE_TEXT: {
+                const auto* text = sqlite3_column_text(m_statement, column);
+                return text != nullptr ? std::string(reinterpret_cast<const char*>(text)) : std::string();
+            }
+            case SQLITE_BLOB:
+            default: {
+                // Represent blobs and unknown types as their text representation.
+                const auto* text = sqlite3_column_text(m_statement, column);
+                return text != nullptr ? std::string(reinterpret_cast<const char*>(text)) : std::string();
+            }
+        }
+    }
+
     bool isNull(int column) const override
     {
         if (! validColumn(m_statement, column)) {

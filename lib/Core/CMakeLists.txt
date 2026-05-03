@@ -29,6 +29,7 @@ target_sources(SNFCore
         "${SNFCORE_DIR}/ThreadPool.cpp"
         "${SNFCORE_DIR}/ModelIndex.cpp"
         "${SNFCORE_DIR}/AbstractTableModel.cpp"
+        "${SNFCORE_DIR}/Variant.cpp"
         "${SNFCORE_DIR}/File.cpp"
         "${SNFCORE_DIR}/TempFile.cpp"
         ${SNFCORE_POLLER_SRC}
@@ -49,6 +50,7 @@ target_sources(SNFCore
             "${SNFCORE_DIR}/ThreadPool.h"
             "${SNFCORE_DIR}/ModelIndex.h"
             "${SNFCORE_DIR}/AbstractTableModel.h"
+            "${SNFCORE_DIR}/Variant.h"
             "${SNFCORE_DIR}/ByteArray.h"
             "${SNFCORE_DIR}/File.h"
             "${SNFCORE_DIR}/TempFile.h"

@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <string>
-#include <variant>
 
 namespace snf {
 namespace widgets {
@@ -135,16 +134,16 @@ bool DataWidgetMapper::submit()
 
         attempted = true;
         const std::string next = mapping.widget->text();
-        snf::ModelValue currentValue = m_model->data(index, mapping.role);
-        if (std::holds_alternative<std::monostate>(currentValue) && mapping.role != snf::ModelDataRole::Display) {
+        snf::Variant currentValue = m_model->data(index, mapping.role);
+        if (currentValue.isNull() && mapping.role != snf::ModelDataRole::Display) {
             currentValue = m_model->data(index, snf::ModelDataRole::Display);
         }
-        const std::string current = snf::modelValueToString(currentValue);
+        const std::string current = currentValue.toString();
         if (next == current) {
             continue;
         }
 
-        if (! m_model->setData(index, snf::ModelValue(next), snf::ModelDataRole::Edit)) {
+        if (! m_model->setData(index, snf::Variant(next), snf::ModelDataRole::Edit)) {
             ok = false;
         }
     }
@@ -187,11 +186,11 @@ void DataWidgetMapper::refreshMapping(const Mapping& mapping)
     }
 
     const snf::ModelIndex index = m_model->index(m_currentRow, mapping.column);
-    snf::ModelValue value = m_model->data(index, mapping.role);
-    if (std::holds_alternative<std::monostate>(value) && mapping.role != snf::ModelDataRole::Display) {
+    snf::Variant value = m_model->data(index, mapping.role);
+    if (value.isNull() && mapping.role != snf::ModelDataRole::Display) {
         value = m_model->data(index, snf::ModelDataRole::Display);
     }
-    mapping.widget->setText(snf::modelValueToString(value));
+    mapping.widget->setText(value.toString());
 }
 
 void DataWidgetMapper::setCurrentRowInternal(int row, bool refreshWidgets)

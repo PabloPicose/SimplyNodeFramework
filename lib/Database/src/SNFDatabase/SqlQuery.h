@@ -8,6 +8,8 @@
 
 #include "SNFDatabase/SqlDatabase.h"
 
+#include <SNFCore/Variant.h>
+
 #include <memory>
 #include <string>
 
@@ -25,6 +27,7 @@ public:
     virtual int columnCount() const = 0;
     virtual std::string columnName(int column) const = 0;
     virtual std::string value(int column) const = 0;
+    virtual Variant typedValue(int column) const = 0;
     virtual bool isNull(int column) const = 0;
 
     virtual SqlDatabase::DatabaseError lastError() const noexcept = 0;
@@ -55,6 +58,7 @@ public:
     int columnCount() const;
     std::string columnName(int column) const;
     std::string value(int column) const;
+    Variant typedValue(int column) const;
     bool isNull(int column) const;
 
     SqlDatabase::DatabaseError lastError() const noexcept;

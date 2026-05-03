@@ -138,10 +138,10 @@ public:
         return section == 0 ? "A" : "B";
     }
 
-    snf::ModelValue data(const snf::ModelIndex& index, snf::ModelDataRole role = snf::ModelDataRole::Display) const override
+    snf::Variant data(const snf::ModelIndex& index, snf::ModelDataRole role = snf::ModelDataRole::Display) const override
     {
         if (! index.isValid() || index.model() != this) {
-            return std::monostate{};
+            return {};
         }
 
         if (role == snf::ModelDataRole::Decoration) {
@@ -149,7 +149,7 @@ public:
             if (index.row() == 0 && index.column() == 1) {
                 return snf::ModelColor{0.2f, 0.7f, 0.3f, 1.0f};
             }
-            return std::monostate{};
+            return {};
         }
 
         return snf::AbstractTableModel::data(index, role);

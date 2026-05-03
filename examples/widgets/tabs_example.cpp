@@ -55,10 +55,10 @@ public:
         return m_rows[static_cast<std::size_t>(row)][static_cast<std::size_t>(column)];
     }
 
-    snf::ModelValue data(const snf::ModelIndex& index, snf::ModelDataRole role = snf::ModelDataRole::Display) const override
+    snf::Variant data(const snf::ModelIndex& index, snf::ModelDataRole role = snf::ModelDataRole::Display) const override
     {
         if (! index.isValid() || index.model() != this) {
-            return std::monostate{};
+            return {};
         }
 
         if (role == snf::ModelDataRole::Decoration && index.column() == 1) {

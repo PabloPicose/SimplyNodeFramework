@@ -74,6 +74,11 @@ std::string SqlQuery::value(int column) const
     return m_driver ? m_driver->value(column) : std::string();
 }
 
+Variant SqlQuery::typedValue(int column) const
+{
+    return m_driver ? m_driver->typedValue(column) : Variant{};
+}
+
 bool SqlQuery::isNull(int column) const
 {
     return m_driver ? m_driver->isNull(column) : true;

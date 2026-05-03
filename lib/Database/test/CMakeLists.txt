@@ -1,5 +1,6 @@
 add_executable(SNFDatabaseTests
     "${CMAKE_CURRENT_SOURCE_DIR}/SqliteDatabaseTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/SqlTableModelTests.cpp"
 )
 
 target_link_libraries(SNFDatabaseTests

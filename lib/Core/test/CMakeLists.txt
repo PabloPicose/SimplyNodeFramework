@@ -5,6 +5,7 @@ add_executable(SNFCoreTests
     CommandLineParserTests.cpp
     IniParserTests.cpp
     AbstractTableModelTests.cpp
+    VariantTests.cpp
     RunnableTests.cpp
     ThreadPoolTests.cpp
     FileTests.cpp

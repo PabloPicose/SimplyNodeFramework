@@ -2,10 +2,10 @@
 
 #include "SNFCore/AbstractTableModel.h"
 #include "SNFCore/ModelIndex.h"
+#include "SNFCore/Variant.h"
 
 #include <cstdint>
 #include <string>
-#include <variant>
 #include <vector>
 
 namespace {
@@ -156,26 +156,26 @@ public:
 
     std::string data(int row, int column) const override
     {
-        return snf::modelValueToString(data(index(row, column)));
+        return data(index(row, column)).toString();
     }
 
-    snf::ModelValue data(const snf::ModelIndex& index, snf::ModelDataRole role = snf::ModelDataRole::Display) const override
+    snf::Variant data(const snf::ModelIndex& index, snf::ModelDataRole role = snf::ModelDataRole::Display) const override
     {
         if (! index.isValid() || index.model() != this || role != snf::ModelDataRole::Display) {
-            return std::monostate{};
+            return {};
         }
 
         switch (index.column()) {
         case 0:
             return true;
         case 1:
-            return 42;
+            return std::int64_t{42};
         case 2:
             return 2.5;
         case 3:
             return std::string("text");
         default:
-            return std::monostate{};
+            return {};
         }
     }
 };
@@ -187,10 +187,10 @@ public:
     int columnCount() const override { return 1; }
     std::string data(int, int) const override { return "warning"; }
 
-    snf::ModelValue data(const snf::ModelIndex& index, snf::ModelDataRole role = snf::ModelDataRole::Display) const override
+    snf::Variant data(const snf::ModelIndex& index, snf::ModelDataRole role = snf::ModelDataRole::Display) const override
     {
         if (! index.isValid() || index.model() != this) {
-            return std::monostate{};
+            return {};
         }
 
         if (role == snf::ModelDataRole::Decoration) {
@@ -228,7 +228,7 @@ TEST(AbstractTableModelTests, readsDataAndHeaders)
 
     EXPECT_EQ(model.data(0, 0), "Ada");
     EXPECT_EQ(model.data(1, 1), "Hopper");
-    EXPECT_EQ(snf::modelValueToString(base.data(model.index(1, 1))), "Hopper");
+    EXPECT_EQ(base.data(model.index(1, 1)).toString(), "Hopper");
     EXPECT_EQ(model.headerData(0), "First");
     EXPECT_EQ(model.headerData(1), "Last");
 }
@@ -258,7 +258,7 @@ TEST(AbstractTableModelTests, invalidIndexesReturnEmptyStrings)
     EXPECT_EQ(model.data(0, 2), "");
     EXPECT_EQ(model.headerData(-1), "");
     EXPECT_EQ(model.headerData(2), "");
-    EXPECT_TRUE(std::holds_alternative<std::monostate>(base.data(snf::ModelIndex())));
+    EXPECT_TRUE(base.data(snf::ModelIndex()).isNull());
 }
 
 TEST(AbstractTableModelTests, defaultOptionalApiIsReadOnly)
@@ -270,23 +270,23 @@ TEST(AbstractTableModelTests, defaultOptionalApiIsReadOnly)
     EXPECT_FALSE(model.isEditable(0, 0));
     EXPECT_FALSE(model.setData(0, 0, "value"));
     EXPECT_FALSE(model.isEditable(snf::ModelIndex()));
-    EXPECT_FALSE(model.setData(snf::ModelIndex(), snf::ModelValue(std::string("value"))));
+    EXPECT_FALSE(model.setData(snf::ModelIndex(), snf::Variant(std::string("value"))));
     EXPECT_FALSE(model.insertRows(0, 1));
     EXPECT_FALSE(model.removeRows(0, 1));
     EXPECT_FALSE(model.insertColumns(0, 1));
     EXPECT_FALSE(model.removeColumns(0, 1));
 }
 
-TEST(AbstractTableModelTests, modelValueConvertsToDisplayString)
+TEST(AbstractTableModelTests, variantConvertsToDisplayString)
 {
-    EXPECT_EQ(snf::modelValueToString(std::monostate{}), "");
-    EXPECT_EQ(snf::modelValueToString(true), "true");
-    EXPECT_EQ(snf::modelValueToString(false), "false");
-    EXPECT_EQ(snf::modelValueToString(42), "42");
-    EXPECT_EQ(snf::modelValueToString(std::int64_t{9000000000LL}), "9000000000");
-    EXPECT_EQ(snf::modelValueToString(2.5), "2.5");
-    EXPECT_EQ(snf::modelValueToString(std::string("text")), "text");
-    EXPECT_EQ(snf::modelValueToString(snf::ModelColor{1.0f, 0.0f, 0.0f, 1.0f}), "");
+    EXPECT_EQ(snf::Variant{}.toString(), "");
+    EXPECT_EQ(snf::Variant(true).toString(), "true");
+    EXPECT_EQ(snf::Variant(false).toString(), "false");
+    EXPECT_EQ(snf::Variant(42).toString(), "42");
+    EXPECT_EQ(snf::Variant(std::int64_t{9000000000LL}).toString(), "9000000000");
+    EXPECT_EQ(snf::Variant(2.5).toString(), "2.5");
+    EXPECT_EQ(snf::Variant(std::string("text")).toString(), "text");
+    EXPECT_EQ(snf::Variant(snf::ModelColor{1.0f, 0.0f, 0.0f, 1.0f}).toString(), "");
 }
 
 TEST(AbstractTableModelTests, modelCanReturnTypedValues)
@@ -294,22 +294,22 @@ TEST(AbstractTableModelTests, modelCanReturnTypedValues)
     VariantTableModel model;
     const snf::AbstractTableModel& base = model;
 
-    EXPECT_EQ(std::get<bool>(base.data(model.index(0, 0))), true);
-    EXPECT_EQ(std::get<int>(base.data(model.index(0, 1))), 42);
-    EXPECT_EQ(std::get<double>(base.data(model.index(0, 2))), 2.5);
-    EXPECT_EQ(std::get<std::string>(base.data(model.index(0, 3))), "text");
-    EXPECT_TRUE(std::holds_alternative<std::monostate>(base.data(model.index(0, 3), snf::ModelDataRole::Edit)));
+    EXPECT_TRUE(base.data(model.index(0, 0)).toBool());
+    EXPECT_EQ(base.data(model.index(0, 1)).toInt64(), 42);
+    EXPECT_EQ(base.data(model.index(0, 2)).toDouble(), 2.5);
+    EXPECT_EQ(base.data(model.index(0, 3)).toString(), "text");
+    EXPECT_TRUE(base.data(model.index(0, 3), snf::ModelDataRole::Edit).isNull());
 }
 
 TEST(AbstractTableModelTests, decorationRoleCanReturnModelColor)
 {
     DecoratedTableModel model;
     const snf::ModelIndex index = model.index(0, 0);
-    const snf::ModelValue value = model.data(index, snf::ModelDataRole::Decoration);
+    const snf::Variant value = model.data(index, snf::ModelDataRole::Decoration);
 
-    ASSERT_TRUE(std::holds_alternative<snf::ModelColor>(value));
-    EXPECT_EQ(std::get<snf::ModelColor>(value), (snf::ModelColor{1.0f, 0.4f, 0.0f, 0.8f}));
-    EXPECT_EQ(snf::modelValueToString(value), "");
+    ASSERT_TRUE(value.holds<snf::ModelColor>());
+    EXPECT_EQ(value.toColor(), (snf::ModelColor{1.0f, 0.4f, 0.0f, 0.8f}));
+    EXPECT_EQ(value.toString(), "");
 }
 
 TEST(AbstractTableModelTests, setDataEmitsDataChangedWhenValueChanges)
@@ -339,8 +339,8 @@ TEST(AbstractTableModelTests, setDataAcceptsModelIndex)
     const snf::ModelIndex index = model.index(0, 1);
 
     EXPECT_TRUE(base.isEditable(index));
-    EXPECT_TRUE(base.setData(index, snf::ModelValue(std::string("Byron"))));
-    EXPECT_EQ(snf::modelValueToString(base.data(index)), "Byron");
+    EXPECT_TRUE(base.setData(index, snf::Variant(std::string("Byron"))));
+    EXPECT_EQ(base.data(index).toString(), "Byron");
 }
 
 TEST(AbstractTableModelTests, setDataDoesNotEmitForSameOrInvalidValue)

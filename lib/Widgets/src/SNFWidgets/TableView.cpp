@@ -33,13 +33,13 @@ float normalizedColorComponent(float component)
     return std::clamp(component, 0.0f, 1.0f);
 }
 
-bool colorFromModelValue(const snf::ModelValue& value, ImU32& color)
+bool colorFromModelValue(const snf::Variant& value, ImU32& color)
 {
-    if (! std::holds_alternative<snf::ModelColor>(value)) {
+    if (! value.holds<snf::ModelColor>()) {
         return false;
     }
 
-    const snf::ModelColor& modelColor = std::get<snf::ModelColor>(value);
+    const snf::ModelColor& modelColor = value.toColor();
     color = ImGui::GetColorU32(ImVec4(normalizedColorComponent(modelColor.red),
                                       normalizedColorComponent(modelColor.green),
                                       normalizedColorComponent(modelColor.blue),
@@ -670,7 +670,7 @@ std::vector<float> TableView::naturalColumnWidths() const
         float columnWidth = ImGui::CalcTextSize(m_model->headerData(column).c_str()).x;
         for (int row = 0; row < rows; ++row) {
             const snf::ModelIndex index = m_model->index(row, column);
-            const std::string cell = snf::modelValueToString(m_model->data(index));
+            const std::string cell = m_model->data(index).toString();
             columnWidth = std::max(columnWidth, ImGui::CalcTextSize(cell.c_str()).x);
         }
         widths.push_back(std::max(k_minimumColumnWidth, columnWidth + style.CellPadding.x * 2.0f));
@@ -735,7 +735,7 @@ void TableView::renderTable(float width, float height)
                 ImGui::TableSetColumnIndex(column);
 
                 const snf::ModelIndex index = m_model->index(row, column);
-                const std::string cell = snf::modelValueToString(m_model->data(index));
+                const std::string cell = m_model->data(index).toString();
                 const bool selected = containsSelectionKey(keyForCell(row, column));
                 ImU32 decorationColor = 0;
                 if (colorFromModelValue(m_model->data(index, snf::ModelDataRole::Decoration), decorationColor)) {
