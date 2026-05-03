@@ -1,4 +1,4 @@
-#include "SNFCore/EnqueuedAsyncTask.h"
+#include "SNFExperimental/AsyncTaskSequence.h"
 
 #include <algorithm>
 #include <functional>
@@ -8,40 +8,44 @@
 namespace snf {
 namespace {
 
-class GraphTask final : public AsyncTask
+class SequenceRunnable final : public Runnable
 {
 public:
-    GraphTask(std::shared_ptr<AsyncTask> task, std::function<void()> onFinished)
-        : m_task(std::move(task)), m_onFinished(std::move(onFinished))
+    SequenceRunnable(std::shared_ptr<AsyncTask> task,
+                     AsyncTaskContext input,
+                     std::function<void(AsyncTaskContext)> onFinished)
+        : m_task(std::move(task)), m_input(std::move(input)), m_onFinished(std::move(onFinished))
     {
     }
 
 protected:
     void run() override
     {
+        AsyncTaskContext output;
         if (m_task) {
-            m_task->execute();
+            output = m_task->execute(m_input);
         }
         if (m_onFinished) {
-            m_onFinished();
+            m_onFinished(std::move(output));
         }
     }
 
 private:
     std::shared_ptr<AsyncTask> m_task;
-    std::function<void()> m_onFinished;
+    AsyncTaskContext m_input;
+    std::function<void(AsyncTaskContext)> m_onFinished;
 };
 
 }  // namespace
 
-EnqueuedAsyncTask::EnqueuedAsyncTask() = default;
+AsyncTaskSequence::AsyncTaskSequence() = default;
 
-EnqueuedAsyncTask::~EnqueuedAsyncTask()
+AsyncTaskSequence::~AsyncTaskSequence()
 {
     wait();
 }
 
-EnqueuedAsyncTask::TaskId EnqueuedAsyncTask::addTask(std::shared_ptr<AsyncTask> task)
+AsyncTaskSequence::TaskId AsyncTaskSequence::addTask(std::shared_ptr<AsyncTask> task)
 {
     if (! task) {
         return invalidTaskId;
@@ -57,7 +61,7 @@ EnqueuedAsyncTask::TaskId EnqueuedAsyncTask::addTask(std::shared_ptr<AsyncTask> 
     return id;
 }
 
-bool EnqueuedAsyncTask::addDependency(TaskId dependency, TaskId dependent)
+bool AsyncTaskSequence::addDependency(TaskId dependency, TaskId dependent)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_running || ! isValidTaskId(dependency) || ! isValidTaskId(dependent) || dependency == dependent) {
@@ -74,18 +78,18 @@ bool EnqueuedAsyncTask::addDependency(TaskId dependency, TaskId dependent)
     return true;
 }
 
-bool EnqueuedAsyncTask::hasValidSingleExit() const
+bool AsyncTaskSequence::hasValidGraph() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    return hasValidSingleExitLocked();
+    return hasValidGraphLocked();
 }
 
-bool EnqueuedAsyncTask::start(ThreadPool* pool)
+bool AsyncTaskSequence::start(ThreadPool* pool)
 {
     std::vector<TaskId> readyTasks;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        if (m_running || ! pool || ! hasValidSingleExitLocked()) {
+        if (m_running || ! pool || ! hasValidGraphLocked()) {
             return false;
         }
 
@@ -100,6 +104,7 @@ bool EnqueuedAsyncTask::start(ThreadPool* pool)
             node.pendingDependencies = node.dependencies.size();
             node.scheduled = false;
             node.done = false;
+            node.output = AsyncTaskContext();
             if (node.pendingDependencies == 0) {
                 node.scheduled = true;
                 readyTasks.push_back(id);
@@ -113,65 +118,61 @@ bool EnqueuedAsyncTask::start(ThreadPool* pool)
     return true;
 }
 
-void EnqueuedAsyncTask::wait()
+void AsyncTaskSequence::wait()
 {
     std::unique_lock<std::mutex> lock(m_mutex);
     m_done.wait(lock, [this]() { return ! m_running; });
 }
 
-bool EnqueuedAsyncTask::isRunning() const
+bool AsyncTaskSequence::isRunning() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_running;
 }
 
-bool EnqueuedAsyncTask::isFinished() const
+bool AsyncTaskSequence::isFinished() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_finished;
 }
 
-std::size_t EnqueuedAsyncTask::taskCount() const
+std::size_t AsyncTaskSequence::taskCount() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_tasks.size();
 }
 
-std::size_t EnqueuedAsyncTask::finishedTaskCount() const
+std::size_t AsyncTaskSequence::finishedTaskCount() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_finishedTasks;
 }
 
-bool EnqueuedAsyncTask::isValidTaskId(TaskId id) const
+AsyncTaskContext AsyncTaskSequence::output(TaskId taskId) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return isValidTaskId(taskId) ? m_tasks[taskId].output : AsyncTaskContext();
+}
+
+bool AsyncTaskSequence::isValidTaskId(TaskId id) const
 {
     return id < m_tasks.size();
 }
 
-bool EnqueuedAsyncTask::hasValidSingleExitLocked() const
+bool AsyncTaskSequence::hasValidGraphLocked() const
 {
     if (m_tasks.empty()) {
         return false;
     }
 
-    TaskId exitTask = invalidTaskId;
-    std::size_t exitCount = 0;
     std::vector<std::size_t> incoming(m_tasks.size(), 0);
     for (TaskId id = 0; id < m_tasks.size(); ++id) {
-        if (m_tasks[id].dependents.empty()) {
-            exitTask = id;
-            ++exitCount;
-        }
         for (const TaskId dependent : m_tasks[id].dependents) {
             if (dependent >= m_tasks.size()) {
                 return false;
             }
             ++incoming[dependent];
         }
-    }
-
-    if (exitCount != 1 || exitTask == invalidTaskId) {
-        return false;
     }
 
     std::queue<TaskId> ready;
@@ -195,44 +196,29 @@ bool EnqueuedAsyncTask::hasValidSingleExitLocked() const
         }
     }
 
-    if (visited != m_tasks.size()) {
-        return false;
-    }
-
-    for (TaskId start = 0; start < m_tasks.size(); ++start) {
-        std::vector<bool> seen(m_tasks.size(), false);
-        std::queue<TaskId> pending;
-        pending.push(start);
-        seen[start] = true;
-        bool reachesExit = false;
-
-        while (! pending.empty()) {
-            const TaskId id = pending.front();
-            pending.pop();
-            if (id == exitTask) {
-                reachesExit = true;
-                break;
-            }
-
-            for (const TaskId dependent : m_tasks[id].dependents) {
-                if (! seen[dependent]) {
-                    seen[dependent] = true;
-                    pending.push(dependent);
-                }
-            }
-        }
-
-        if (! reachesExit) {
-            return false;
-        }
-    }
-
-    return true;
+    return visited == m_tasks.size();
 }
 
-void EnqueuedAsyncTask::scheduleTask(TaskId id)
+AsyncTaskContext AsyncTaskSequence::buildInputForTaskLocked(TaskId id) const
+{
+    AsyncTaskContext input;
+    if (! isValidTaskId(id)) {
+        return input;
+    }
+
+    for (const TaskId dependency : m_tasks[id].dependencies) {
+        const AsyncTaskContext& dependencyOutput = m_tasks[dependency].output;
+        input.setDependencyOutput(dependency, dependencyOutput);
+        input.mergeFrom(dependencyOutput);
+    }
+
+    return input;
+}
+
+void AsyncTaskSequence::scheduleTask(TaskId id)
 {
     std::shared_ptr<AsyncTask> task;
+    AsyncTaskContext input;
     ThreadPool* pool = nullptr;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -240,15 +226,21 @@ void EnqueuedAsyncTask::scheduleTask(TaskId id)
             return;
         }
         task = m_tasks[id].task;
+        input = buildInputForTaskLocked(id);
         pool = m_pool;
     }
 
-    if (! pool || ! pool->start(std::make_shared<GraphTask>(std::move(task), [this, id]() { onTaskFinished(id); }))) {
-        onTaskFinished(id);
+    auto runnable = std::make_shared<SequenceRunnable>(
+        std::move(task),
+        std::move(input),
+        [this, id](AsyncTaskContext output) { onTaskFinished(id, std::move(output)); });
+
+    if (! pool || ! pool->start(std::move(runnable))) {
+        onTaskFinished(id, AsyncTaskContext());
     }
 }
 
-void EnqueuedAsyncTask::onTaskFinished(TaskId id)
+void AsyncTaskSequence::onTaskFinished(TaskId id, AsyncTaskContext output)
 {
     std::vector<TaskId> readyTasks;
     bool graphFinished = false;
@@ -258,6 +250,7 @@ void EnqueuedAsyncTask::onTaskFinished(TaskId id)
             return;
         }
 
+        m_tasks[id].output = std::move(output);
         m_tasks[id].done = true;
         ++m_finishedTasks;
         --m_remainingTasks;

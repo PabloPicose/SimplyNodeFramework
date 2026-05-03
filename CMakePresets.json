@@ -6,7 +6,8 @@
       "hidden": true,
       "generator": "Ninja",
       "cacheVariables": {
-        "CMAKE_EXPORT_COMPILE_COMMANDS": true
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+        "SNF_EXPERIMENTAL": false
       }
     },
     {
@@ -29,6 +30,15 @@
         "CMAKE_BUILD_TYPE": "Release",
         "SNF_ENABLE_TESTS": true,
         "SNF_WEB_ASSEMBLY": false
+      }
+    },
+    {
+      "name": "native-debug-experimental",
+      "displayName": "Native Debug Experimental",
+      "inherits": "native-debug",
+      "binaryDir": "${sourceDir}/build/debug-experimental",
+      "cacheVariables": {
+        "SNF_EXPERIMENTAL": true
       }
     },
     {
@@ -66,6 +76,10 @@
       "configurePreset": "native-release"
     },
     {
+      "name": "native-debug-experimental",
+      "configurePreset": "native-debug-experimental"
+    },
+    {
       "name": "web-debug",
       "configurePreset": "web-debug"
     },
@@ -85,6 +99,13 @@
     {
       "name": "native-release",
       "configurePreset": "native-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "native-debug-experimental",
+      "configurePreset": "native-debug-experimental",
       "output": {
         "outputOnFailure": true
       }

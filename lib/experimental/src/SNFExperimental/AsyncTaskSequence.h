@@ -1,14 +1,14 @@
 #pragma once
 
 /**
- * @file EnqueuedAsyncTask.h
+ * @file AsyncTaskSequence.h
  * @brief Dependency graph scheduler for AsyncTask instances.
- * @ingroup SNFCore
+ * @ingroup SNFExperimental
  */
 
-#include <SNFCore/AsyncTask.h>
 #include <SNFCore/Connection.h>
 #include <SNFCore/ThreadPool.h>
+#include <SNFExperimental/AsyncTask.h>
 
 #include <condition_variable>
 #include <cstddef>
@@ -19,39 +19,33 @@
 namespace snf {
 
 /**
- * @class EnqueuedAsyncTask
- * @ingroup SNFCore
- * @brief Runs a directed acyclic graph of AsyncTask instances on a ThreadPool.
+ * @class AsyncTaskSequence
+ * @ingroup SNFExperimental
+ * @brief Runs a directed acyclic graph of AsyncTask nodes on a ThreadPool.
  *
  * Dependencies are expressed as "dependency must finish before dependent".
- * The graph is valid only when it is acyclic and every path reaches one
- * unique exit task.
+ * Multiple roots and multiple terminal tasks are valid. The sequence emits
+ * finished() when every scheduled task has completed.
  */
-class EnqueuedAsyncTask
+class AsyncTaskSequence
 {
 public:
     using TaskId = std::size_t;
     static constexpr TaskId invalidTaskId = static_cast<TaskId>(-1);
 
-    EnqueuedAsyncTask();
-    ~EnqueuedAsyncTask();
+    AsyncTaskSequence();
+    ~AsyncTaskSequence();
 
-    EnqueuedAsyncTask(const EnqueuedAsyncTask&) = delete;
-    EnqueuedAsyncTask& operator=(const EnqueuedAsyncTask&) = delete;
+    AsyncTaskSequence(const AsyncTaskSequence&) = delete;
+    AsyncTaskSequence& operator=(const AsyncTaskSequence&) = delete;
 
-    /** @brief Adds a task node and returns its id, or invalidTaskId on error. */
     TaskId addTask(std::shared_ptr<AsyncTask> task);
-
-    /** @brief Makes @p dependent wait for @p dependency. */
     bool addDependency(TaskId dependency, TaskId dependent);
 
-    /** @brief Returns whether the task graph is acyclic and has one exit task. */
-    bool hasValidSingleExit() const;
+    /** @brief Returns whether the graph is non-empty and acyclic. */
+    bool hasValidGraph() const;
 
-    /** @brief Starts all ready tasks on @p pool, or ThreadPool::globalInstance(). */
     bool start(ThreadPool* pool = ThreadPool::globalInstance());
-
-    /** @brief Blocks until the graph has finished or is not running. */
     void wait();
 
     bool isRunning() const;
@@ -59,10 +53,10 @@ public:
     std::size_t taskCount() const;
     std::size_t finishedTaskCount() const;
 
-    /** @brief Emitted once when all tasks have finished. */
-    Signal<> finished;
+    /** @brief Returns the output context produced by @p taskId. */
+    AsyncTaskContext output(TaskId taskId) const;
 
-    /** @brief Emitted whenever an individual task node finishes. */
+    Signal<> finished;
     Signal<TaskId> taskFinished;
 
 private:
@@ -71,15 +65,17 @@ private:
         std::shared_ptr<AsyncTask> task;
         std::vector<TaskId> dependents;
         std::vector<TaskId> dependencies;
+        AsyncTaskContext output;
         std::size_t pendingDependencies = 0;
         bool scheduled = false;
         bool done = false;
     };
 
     bool isValidTaskId(TaskId id) const;
-    bool hasValidSingleExitLocked() const;
+    bool hasValidGraphLocked() const;
+    AsyncTaskContext buildInputForTaskLocked(TaskId id) const;
     void scheduleTask(TaskId id);
-    void onTaskFinished(TaskId id);
+    void onTaskFinished(TaskId id, AsyncTaskContext output);
 
     mutable std::mutex m_mutex;
     std::condition_variable m_done;

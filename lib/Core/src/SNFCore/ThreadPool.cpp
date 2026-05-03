@@ -32,9 +32,9 @@ std::size_t ThreadPool::defaultThreadCount()
     return std::max<std::size_t>(1, hardwareThreads == 0 ? 2 : hardwareThreads);
 }
 
-bool ThreadPool::start(std::shared_ptr<AsyncTask> task)
+bool ThreadPool::start(std::shared_ptr<Runnable> runnable)
 {
-    if (! task) {
+    if (! runnable) {
         return false;
     }
 
@@ -43,7 +43,7 @@ bool ThreadPool::start(std::shared_ptr<AsyncTask> task)
         if (m_stopping) {
             return false;
         }
-        m_tasks.push(std::move(task));
+        m_tasks.push(std::move(runnable));
     }
 
     m_workAvailable.notify_one();
@@ -81,6 +81,17 @@ std::size_t ThreadPool::maxThreadCount() const
     return m_workers.size();
 }
 
+std::vector<std::thread::id> ThreadPool::workerThreadIds() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<std::thread::id> ids;
+    ids.reserve(m_workers.size());
+    for (const std::thread& worker : m_workers) {
+        ids.push_back(worker.get_id());
+    }
+    return ids;
+}
+
 std::size_t ThreadPool::activeThreadCount() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -96,7 +107,7 @@ std::size_t ThreadPool::queuedTaskCount() const
 void ThreadPool::workerLoop()
 {
     while (true) {
-        std::shared_ptr<AsyncTask> task;
+        std::shared_ptr<Runnable> runnable;
         {
             std::unique_lock<std::mutex> lock(m_mutex);
             m_workAvailable.wait(lock, [this]() { return m_stopping || ! m_tasks.empty(); });
@@ -104,12 +115,12 @@ void ThreadPool::workerLoop()
                 return;
             }
 
-            task = std::move(m_tasks.front());
+            runnable = std::move(m_tasks.front());
             m_tasks.pop();
             ++m_activeTasks;
         }
 
-        task->execute();
+        runnable->execute();
 
         {
             std::lock_guard<std::mutex> lock(m_mutex);

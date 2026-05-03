@@ -18,6 +18,9 @@ option(SNF_ENABLE_WEB_TESTS
     "Enable Node-runnable WebAssembly smoke tests when SNF_WEB_ASSEMBLY is ON"
     ${PROJECT_IS_TOP_LEVEL})
 option(SNF_ENABLE_STANDALONE "Build the in-tree standalone examples" ${PROJECT_IS_TOP_LEVEL})
+option(SNF_EXPERIMENTAL
+    "Build experimental SNF modules such as AsyncTask and AsyncTaskSequence"
+    OFF)
 
 # Safety checks: mismatching toolchain / option causes a clear configure error.
 if(EMSCRIPTEN AND NOT SNF_WEB_ASSEMBLY)
@@ -60,6 +63,9 @@ endif()
 add_subdirectory(lib/Core)
 add_subdirectory(lib/Json)
 add_subdirectory(lib/Network)
+if(SNF_EXPERIMENTAL AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/experimental/CMakeLists.txt")
+    add_subdirectory(lib/experimental)
+endif()
 
 if(NOT SNF_WEB_ASSEMBLY)
     # SNFHttpServer is a development HTTP server; only for native builds.
