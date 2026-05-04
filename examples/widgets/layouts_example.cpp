@@ -95,7 +95,27 @@ int main()
     roleRow->addStretch(1);
 
     // -----------------------------------------------------------------------
-    // Row 5: progress bar with label
+    // Row 5: label + checkbox alignment demo
+    // -----------------------------------------------------------------------
+    auto* alignRow = new wg::HBoxLayout(window);
+    root->addWidget(alignRow);
+
+    auto* alignLabel = new wg::Label("Save on disk", window);
+    alignRow->addWidget(alignLabel);
+
+    auto* chkSave = new wg::CheckBox("##save", window);
+    chkSave->setChecked(true);
+    alignRow->addWidget(chkSave);
+
+    auto* historyLabel = new wg::Label("Max history", window);
+    alignRow->addWidget(historyLabel);
+
+    auto* historyEdit = new wg::LineEdit("##history", window);
+    historyEdit->setText("200");
+    alignRow->addWidget(historyEdit, 1);
+
+    // -----------------------------------------------------------------------
+    // Row 6: progress bar with label
     // -----------------------------------------------------------------------
     auto* progressRow = new wg::HBoxLayout(window);
     root->addWidget(progressRow);

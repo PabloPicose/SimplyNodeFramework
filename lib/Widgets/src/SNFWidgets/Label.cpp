@@ -32,6 +32,7 @@ Size Label::sizeHint() const
 
 void Label::renderImGui()
 {
+    ImGui::AlignTextToFramePadding();
     // Use %s to avoid interpreting m_text as a format string.
     ImGui::TextUnformatted(m_text.c_str());
 }
