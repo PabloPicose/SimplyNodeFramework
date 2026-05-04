@@ -175,6 +175,56 @@ public:
     /** @brief Returns the configured companion text width. */
     float companionTextWidth() const;
 
+    // -------------------------------------------------------------------------
+    // Input behaviour options
+    // -------------------------------------------------------------------------
+
+    /**
+     * @brief Makes the widget read-only (prevents user edits).
+     *
+     * Corresponds to `ImGuiInputTextFlags_ReadOnly`. Default: `false`.
+     */
+    void setReadOnly(bool readOnly);
+
+    /** @brief Returns `true` when the widget is in read-only mode. */
+    bool readOnly() const;
+
+    /**
+     * @brief Selects all text automatically when the widget gains mouse focus.
+     *
+     * Corresponds to `ImGuiInputTextFlags_AutoSelectAll`. Default: `false`.
+     */
+    void setAutoSelectAll(bool enabled);
+
+    /** @brief Returns `true` when auto-select-all on focus is active. */
+    bool autoSelectAll() const;
+
+    /**
+     * @brief Masks all characters as `'*'` and disables clipboard copy.
+     *
+     * Useful for password entry fields.
+     * Corresponds to `ImGuiInputTextFlags_Password`. Default: `false`.
+     */
+    void setPassword(bool enabled);
+
+    /** @brief Returns `true` when password masking is active. */
+    bool password() const;
+
+    /**
+     * @brief Changes Escape key behaviour to clear the field instead of reverting.
+     *
+     * When `false` (default): Escape reverts to the value the field had when
+     * it was activated. When `true`: Escape clears a non-empty field, or
+     * deactivates the field if it is already empty.
+     * Corresponds to `ImGuiInputTextFlags_EscapeClearsAll`. Default: `false`.
+     */
+    void setEscapeClearsAll(bool enabled);
+
+    /** @brief Returns `true` when Escape clears the field content. */
+    bool escapeClearsAll() const;
+
+    // -------------------------------------------------------------------------
+
     /**
      * @brief Emitted when the user edits the text and the content changes.
      *
@@ -208,6 +258,7 @@ private:
     bool renderInputText(float width);
     bool renderCompanionText(const std::string& text, float width) const;
     float effectiveMinimumInputWidth() const;
+    int  buildFlags() const;  ///< Builds the ImGuiInputTextFlags bitmask from current settings.
 
     std::string        m_label;
     std::string        m_text;
@@ -220,6 +271,10 @@ private:
     float              m_minimumInputWidth = 0.0f;
     float              m_preferredInputWidth = 0.0f;
     float              m_companionTextWidth = 0.0f;
+    bool               m_readOnly = false;
+    bool               m_autoSelectAll = false;
+    bool               m_password = false;
+    bool               m_escapeClearsAll = false;
 };
 
 }  // namespace widgets

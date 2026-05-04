@@ -145,6 +145,18 @@ float LineEdit::companionTextWidth() const
     return m_companionTextWidth;
 }
 
+void LineEdit::setReadOnly(bool readOnly)     { m_readOnly = readOnly; }
+bool LineEdit::readOnly() const               { return m_readOnly; }
+
+void LineEdit::setAutoSelectAll(bool enabled) { m_autoSelectAll = enabled; }
+bool LineEdit::autoSelectAll() const          { return m_autoSelectAll; }
+
+void LineEdit::setPassword(bool enabled)      { m_password = enabled; }
+bool LineEdit::password() const               { return m_password; }
+
+void LineEdit::setEscapeClearsAll(bool enabled) { m_escapeClearsAll = enabled; }
+bool LineEdit::escapeClearsAll() const          { return m_escapeClearsAll; }
+
 Size LineEdit::sizeHint() const
 {
     if (ImGui::GetCurrentContext() == nullptr) {
@@ -196,7 +208,7 @@ bool LineEdit::renderInputText(float width)
         ImGui::PushItemWidth(width);
     }
 
-    const ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue;
+    const ImGuiInputTextFlags flags = buildFlags();
     bool returned = false;
     if (m_placeholder.empty()) {
         returned = ImGui::InputText("##input", m_buffer.data(), m_buffer.size(), flags);

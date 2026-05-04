@@ -9,6 +9,8 @@
 #include <SNFWidgets/RadioButton.h>
 #include <SNFWidgets/TextEdit.h>
 #include <SNFWidgets/Window.h>
+#include <SNFWidgets/ImGuiDemoWindow.h>
+
 
 #include <string>
 
@@ -20,6 +22,9 @@ int main()
 
     auto* appNode = new wg::ApplicationNode();
     appNode->setTitle("SNF Layouts Example");
+
+    // IMGUI DEMO
+    auto* demoWindow = new wg::ImGuiDemoWindow(appNode);
 
     // -----------------------------------------------------------------------
     // Main window

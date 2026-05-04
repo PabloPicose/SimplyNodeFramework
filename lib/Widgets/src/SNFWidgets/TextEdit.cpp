@@ -46,6 +46,21 @@ std::string TextEdit::label() const
     return m_label;
 }
 
+void TextEdit::setWordWrap(bool enabled)       { m_wordWrap = enabled; }
+bool TextEdit::wordWrap() const                { return m_wordWrap; }
+
+void TextEdit::setReadOnly(bool readOnly)      { m_readOnly = readOnly; }
+bool TextEdit::readOnly() const                { return m_readOnly; }
+
+void TextEdit::setAllowTabInput(bool allow)    { m_allowTabInput = allow; }
+bool TextEdit::allowTabInput() const           { return m_allowTabInput; }
+
+void TextEdit::setCtrlEnterForNewLine(bool enabled) { m_ctrlEnterForNewLine = enabled; }
+bool TextEdit::ctrlEnterForNewLine() const          { return m_ctrlEnterForNewLine; }
+
+void TextEdit::setAutoSelectAll(bool enabled)  { m_autoSelectAll = enabled; }
+bool TextEdit::autoSelectAll() const           { return m_autoSelectAll; }
+
 Size TextEdit::sizeHint() const
 {
     if (ImGui::GetCurrentContext() == nullptr) {
@@ -79,6 +94,17 @@ void TextEdit::renderImGuiConstrained(float width, float height)
     renderInput(width, height);
 }
 
+int TextEdit::buildFlags() const
+{
+    ImGuiInputTextFlags flags = ImGuiInputTextFlags_None;
+    if (m_wordWrap)           flags |= ImGuiInputTextFlags_WordWrap;
+    if (m_readOnly)           flags |= ImGuiInputTextFlags_ReadOnly;
+    if (m_allowTabInput)      flags |= ImGuiInputTextFlags_AllowTabInput;
+    if (m_ctrlEnterForNewLine) flags |= ImGuiInputTextFlags_CtrlEnterForNewLine;
+    if (m_autoSelectAll)      flags |= ImGuiInputTextFlags_AutoSelectAll;
+    return flags;
+}
+
 void TextEdit::renderInput(float width, float height)
 {
     // Grow the buffer when within 128 bytes of capacity.
@@ -109,7 +135,8 @@ void TextEdit::renderInput(float width, float height)
         "##input",
         m_buffer.data(),
         m_buffer.size(),
-        ImVec2(inputWidth, inputHeight));
+        ImVec2(inputWidth, inputHeight),
+        buildFlags());
 
     ImGui::PopID();
 
