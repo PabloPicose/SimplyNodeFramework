@@ -32,6 +32,16 @@ std::string CheckBox::label() const
     return m_label;
 }
 
+void CheckBox::setTextPlacement(CheckBox::TextPlacement placement)
+{
+    m_textPlacement = placement;
+}
+
+CheckBox::TextPlacement CheckBox::textPlacement() const
+{
+    return m_textPlacement;
+}
+
 void CheckBox::setChecked(bool checked)
 {
     m_checked = checked;
@@ -49,6 +59,9 @@ Size CheckBox::sizeHint() const
     }
 
     const float frameHeight = ImGui::GetFrameHeight();
+    if (m_textPlacement == TextPlacement::Hidden) {
+        return Size{frameHeight, frameHeight};
+    }
     const std::string labelText = visibleLabel(m_label);
     const ImVec2 textSize = ImGui::CalcTextSize(labelText.c_str(), nullptr, true);
     const float width = frameHeight
@@ -60,7 +73,9 @@ void CheckBox::renderImGui()
 {
     const bool prev = m_checked;
     ImGui::PushID(this);
-    if (ImGui::Checkbox(visibleLabel(m_label).c_str(), &m_checked)) {
+    const std::string displayLabel =
+        (m_textPlacement == TextPlacement::Hidden) ? std::string{} : visibleLabel(m_label);
+    if (ImGui::Checkbox(displayLabel.c_str(), &m_checked)) {
         if (m_checked != prev) {
             stateChanged.emit(m_checked);
         }

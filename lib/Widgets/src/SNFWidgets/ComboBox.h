@@ -45,18 +45,40 @@ namespace widgets {
  */
 class ComboBox : public Widget
 {
+    /**
+     * @enum TextPlacement
+     * @brief Controls whether the label is rendered next to the combo box.
+     *
+     * `Hidden` suppresses the visible label entirely.  `Right` (the default)
+     * renders the label to the right of the combo preview box, which is the
+     * standard ImGui Combo behaviour.
+     */
+    enum class TextPlacement {
+        Hidden,
+        Right,
+    };
+
 public:
+    /** @brief Creates a combo box without a label. */
+    explicit ComboBox(snf::Node* parent = nullptr);
+
     /**
      * @param label  Text shown next to the combo box.
      * @param parent Parent node (a Window or another container Widget).
      */
-    explicit ComboBox(const std::string& label = std::string(), snf::Node* parent = nullptr);
+    explicit ComboBox(const std::string& label, snf::Node* parent = nullptr);
 
     /** @brief Sets the combo box label. */
     void setLabel(const std::string& label);
 
     /** @brief Returns the current label. */
     std::string label() const;
+
+    /** @brief Sets where the label is rendered relative to the combo box. */
+    void setTextPlacement(TextPlacement placement);
+
+    /** @brief Returns the current label placement. */
+    TextPlacement textPlacement() const;
 
     /** @brief Appends a single item to the list. */
     void addItem(const std::string& item);
@@ -114,6 +136,7 @@ private:
     std::string              m_label;
     std::vector<std::string> m_items;
     int                      m_currentIndex = -1;
+    TextPlacement            m_textPlacement = TextPlacement::Right;
 };
 
 }  // namespace widgets

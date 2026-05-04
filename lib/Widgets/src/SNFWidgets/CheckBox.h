@@ -49,6 +49,25 @@ public:
     /** @brief Returns the current label. */
     std::string label() const;
 
+    /**
+     * @enum TextPlacement
+     * @brief Controls whether the label is rendered next to the checkbox.
+     *
+     * `Hidden` suppresses the visible label entirely (only the checkbox box
+     * is drawn). `Right` (the default) renders the label to the right of the
+     * box, which is the standard ImGui Checkbox behaviour.
+     */
+    enum class TextPlacement {
+        Hidden,
+        Right,
+    };
+
+    /** @brief Sets where the label is rendered relative to the checkbox. */
+    void setTextPlacement(TextPlacement placement);
+
+    /** @brief Returns the current label placement. */
+    TextPlacement textPlacement() const;
+
     /** @brief Sets the checked state (does not emit `stateChanged`). */
     void setChecked(bool checked);
 
@@ -71,6 +90,7 @@ protected:
 private:
     std::string m_label;
     bool        m_checked = false;
+    TextPlacement m_textPlacement = TextPlacement::Right;
 };
 
 }  // namespace widgets
