@@ -42,6 +42,14 @@ public:
           m_clientMode(false),
           m_frameParser(std::make_unique<websocket::detail::WebSocketFrameParser>())
     {
+        // Reparent the accepted socket to the owner WebSocket so that the
+        // EventLoop does not track it as an independent root node.  This
+        // prevents the EventLoop destructor from deleting the TcpSocket
+        // before the WebSocket's own destructor (which owns it via m_socket),
+        // which would cause a double-free.  When m_socket's unique_ptr later
+        // deletes the TcpSocket, Node::~Node() removes it from the owner's
+        // children list, so no double-deletion occurs.
+        owner.addChild(m_socket.get());
     }
 
     ~WebSocketImplNative() override
@@ -152,8 +160,15 @@ void WebSocketImplNative::close()
         sendFrame(websocket::detail::OpCode::Close, {}, false);
         m_closeFrameSent = true;
         setState(WebSocketState::Closing);
+        // RFC 6455 §7.1.2: after initiating the close handshake the TCP
+        // connection must stay open until the peer echoes the Close frame
+        // back.  The TCP socket is closed in processFrame(OpCode::Close)
+        // when the echo arrives, or in the destructor as a last resort.
+        return;
     }
 
+    // For any state other than Open (Closing, Closed, Error, Connecting)
+    // force-close the underlying TCP socket immediately.
     if (m_socket) {
         m_socket->close();
     }

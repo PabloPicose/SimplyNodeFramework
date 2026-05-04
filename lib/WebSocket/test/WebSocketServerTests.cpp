@@ -346,3 +346,403 @@ TEST_F(WebSocketServerFixture, RejectsPlainTcpHandshake)
 
     EXPECT_TRUE(serverError);
 }
+
+TEST_F(WebSocketServerFixture, DeleteLaterOnDisconnectedDoesNotCrash)
+{
+    // Regression test: calling deleteLater() inside the disconnected signal handler
+    // must not crash EventLoop::run when the deferred deletion is processed.
+    WebSocketServer server;
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+
+    bool clientDidConnect = false;
+    bool serverPeerDisconnected = false;
+
+    server.newConnection.connect([&]() {
+        WebSocket* peer = server.nextPendingConnection();
+        ASSERT_NE(peer, nullptr);
+        // Do NOT add to acceptedSockets — ownership is transferred via deleteLater.
+        peer->disconnected.connect([peer, &serverPeerDisconnected]() {
+            serverPeerDisconnected = true;
+            EventLoop* loop = peer->ownerEventLoop();
+            peer->deleteLater();
+            if (loop) {
+                loop->post([loop]() { loop->stop(); });
+            }
+        });
+    });
+
+    WebSocket client;
+    client.connected.connect([&]() {
+        clientDidConnect = true;
+        client.close();
+    });
+    client.errorOccurred.connect([&](const std::string&) {
+        stopLoopFrom(client);
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 3s);
+
+    client.connectToHost(HostAddress::LocalHost, server.serverPort());
+    app->run();
+
+    EXPECT_TRUE(clientDidConnect);
+    EXPECT_TRUE(serverPeerDisconnected);
+}
+
+// ─── Server-initiated behaviours ─────────────────────────────────────────────
+
+TEST_F(WebSocketServerFixture, ServerInitiatesClose)
+{
+    // RFC 6455 §7.1.2: either endpoint may initiate the closing handshake.
+    // Server calls close() on the accepted peer; the client must receive
+    // disconnected (after echoing the Close frame back).
+    WebSocketServer server;
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+
+    server.newConnection.connect([&]() {
+        WebSocket* peer = server.nextPendingConnection();
+        ASSERT_NE(peer, nullptr);
+        acceptedSockets.push_back(peer);
+        // Initiate the closing handshake immediately after accepting.
+        peer->close();
+    });
+
+    WebSocket client;
+    bool clientDisconnected = false;
+    bool clientError = false;
+
+    client.disconnected.connect([&]() {
+        clientDisconnected = true;
+        stopLoopFrom(client);
+    });
+    client.errorOccurred.connect([&](const std::string&) {
+        clientError = true;
+        stopLoopFrom(client);
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 3s);
+
+    client.connectToHost(HostAddress::LocalHost, server.serverPort());
+    app->run();
+
+    EXPECT_TRUE(clientDisconnected);
+    EXPECT_FALSE(clientError);
+}
+
+TEST_F(WebSocketServerFixture, ServerSendsMessageBeforeClientDoes)
+{
+    // Server pushes a message immediately after accepting — client has not
+    // sent anything yet.  Models "push notification on connect" pattern.
+    WebSocketServer server;
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+
+    const std::string greeting = "welcome";
+
+    server.newConnection.connect([&]() {
+        WebSocket* peer = server.nextPendingConnection();
+        ASSERT_NE(peer, nullptr);
+        acceptedSockets.push_back(peer);
+        peer->sendTextMessage(greeting);
+    });
+
+    WebSocket client;
+    std::string received;
+
+    client.textMessageReceived.connect([&](const std::string& msg) {
+        received = msg;
+        client.close();
+        stopLoopFrom(client);
+    });
+    client.errorOccurred.connect([&](const std::string&) { stopLoopFrom(client); });
+
+    Timer shutdown;
+    armShutdown(shutdown, 3s);
+
+    client.connectToHost(HostAddress::LocalHost, server.serverPort());
+    app->run();
+
+    EXPECT_EQ(received, greeting);
+}
+
+TEST_F(WebSocketServerFixture, ServerPingsClientAutoRespondsWithPong)
+{
+    // RFC 6455 §5.5.3: receiver of a ping MUST respond with pong using the
+    // same payload.  The server sends a ping; the pong should arrive back on
+    // the server-side peer socket via pongReceived.
+    WebSocketServer server;
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+
+    const std::vector<std::uint8_t> pingPayload = {'r', 'f', 'c', '6', '4', '5', '5'};
+    std::vector<std::uint8_t> receivedPong;
+
+    server.newConnection.connect([&]() {
+        WebSocket* peer = server.nextPendingConnection();
+        ASSERT_NE(peer, nullptr);
+        acceptedSockets.push_back(peer);
+        peer->pongReceived.connect([peer, &receivedPong](const std::vector<std::uint8_t>& payload) {
+            receivedPong = payload;
+            peer->close();
+            stopLoopFrom(*peer);
+        });
+        peer->ping(pingPayload);
+    });
+
+    WebSocket client;
+    client.errorOccurred.connect([&](const std::string&) { stopLoopFrom(client); });
+    // Keep the client alive until the server stops the loop.
+    client.disconnected.connect([&]() { stopLoopFrom(client); });
+
+    Timer shutdown;
+    armShutdown(shutdown, 3s);
+
+    client.connectToHost(HostAddress::LocalHost, server.serverPort());
+    app->run();
+
+    EXPECT_EQ(receivedPong, pingPayload);
+}
+
+// ─── Message-type interleaving ────────────────────────────────────────────────
+
+TEST_F(WebSocketServerFixture, InterleavedTextAndBinaryMessagesEchoedInOrder)
+{
+    // Mixing text and binary frames on the same connection must not confuse
+    // the frame parser or dispatch to the wrong signal.
+    WebSocketServer server;
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+
+    server.newConnection.connect([&]() {
+        WebSocket* peer = server.nextPendingConnection();
+        ASSERT_NE(peer, nullptr);
+        acceptedSockets.push_back(peer);
+        peer->textMessageReceived.connect(
+            [peer](const std::string& msg) { peer->sendTextMessage(msg); });
+        peer->binaryMessageReceived.connect(
+            [peer](const std::vector<std::uint8_t>& data) { peer->sendBinaryMessage(data); });
+    });
+
+    WebSocket client;
+    std::vector<std::string>              receivedText;
+    std::vector<std::vector<std::uint8_t>> receivedBinary;
+    const std::vector<std::string>              expectedText   = {"alpha", "gamma"};
+    const std::vector<std::vector<std::uint8_t>> expectedBinary = {{0x01, 0x02}, {0x03, 0x04}};
+    int totalExpected = 4;
+    int totalReceived = 0;
+
+    auto checkDone = [&]() {
+        if (++totalReceived == totalExpected) {
+            client.close();
+            stopLoopFrom(client);
+        }
+    };
+    client.textMessageReceived.connect([&](const std::string& msg) {
+        receivedText.push_back(msg);
+        checkDone();
+    });
+    client.binaryMessageReceived.connect([&](const std::vector<std::uint8_t>& data) {
+        receivedBinary.push_back(data);
+        checkDone();
+    });
+    client.errorOccurred.connect([&](const std::string&) { stopLoopFrom(client); });
+
+    client.connected.connect([&]() {
+        client.sendTextMessage(expectedText[0]);
+        client.sendBinaryMessage(expectedBinary[0]);
+        client.sendTextMessage(expectedText[1]);
+        client.sendBinaryMessage(expectedBinary[1]);
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 3s);
+
+    client.connectToHost(HostAddress::LocalHost, server.serverPort());
+    app->run();
+
+    EXPECT_EQ(receivedText,   expectedText);
+    EXPECT_EQ(receivedBinary, expectedBinary);
+}
+
+// ─── Reconnect ───────────────────────────────────────────────────────────────
+
+TEST_F(WebSocketServerFixture, ClientReconnectsAfterCleanDisconnect)
+{
+    // A client that closes and then calls connectToHost() again must be able
+    // to establish a fresh connection.  Models restart-without-restart-app.
+    WebSocketServer server;
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+
+    server.newConnection.connect([&]() {
+        WebSocket* peer = server.nextPendingConnection();
+        ASSERT_NE(peer, nullptr);
+        acceptedSockets.push_back(peer);
+        peer->textMessageReceived.connect(
+            [peer](const std::string& msg) { peer->sendTextMessage(msg); });
+    });
+
+    WebSocket client;
+    int connectCount  = 0;
+    int echoCount     = 0;
+    std::string lastEcho;
+
+    client.connected.connect([&]() {
+        ++connectCount;
+        client.sendTextMessage("attempt-" + std::to_string(connectCount));
+    });
+    client.textMessageReceived.connect([&](const std::string& msg) {
+        lastEcho = msg;
+        ++echoCount;
+        client.close();
+        if (echoCount < 2) {
+            // Reconnect on the next loop iteration.
+            if (EventLoop* loop = client.ownerEventLoop()) {
+                loop->post([&]() {
+                    client.connectToHost(HostAddress::LocalHost, server.serverPort());
+                });
+            }
+        } else {
+            stopLoopFrom(client);
+        }
+    });
+    client.errorOccurred.connect([&](const std::string&) { stopLoopFrom(client); });
+
+    Timer shutdown;
+    armShutdown(shutdown, 5s);
+
+    client.connectToHost(HostAddress::LocalHost, server.serverPort());
+    app->run();
+
+    EXPECT_EQ(connectCount, 2);
+    EXPECT_EQ(echoCount,    2);
+    EXPECT_EQ(lastEcho,     "attempt-2");
+}
+
+// ─── Broadcast ───────────────────────────────────────────────────────────────
+
+TEST_F(WebSocketServerFixture, ServerBroadcastsToAllConnectedClients)
+{
+    // Server waits until N clients are connected, then broadcasts one message
+    // to all of them.  Every client must receive the broadcast exactly once.
+    WebSocketServer server;
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+
+    constexpr int N = 3;
+    const std::string broadcast = "broadcast-payload";
+    int receivedCount = 0;
+
+    server.newConnection.connect([&]() {
+        WebSocket* peer = server.nextPendingConnection();
+        ASSERT_NE(peer, nullptr);
+        acceptedSockets.push_back(peer);
+
+        if (static_cast<int>(acceptedSockets.size()) == N) {
+            for (WebSocket* s : acceptedSockets) {
+                s->sendTextMessage(broadcast);
+            }
+        }
+    });
+
+    std::array<WebSocket, N> clients;
+    for (WebSocket& c : clients) {
+        c.textMessageReceived.connect([&](const std::string& msg) {
+            EXPECT_EQ(msg, broadcast);
+            if (++receivedCount == N) {
+                for (WebSocket& s : clients) { s.close(); }
+                stopLoopFrom(clients[0]);
+            }
+        });
+        c.errorOccurred.connect([&](const std::string&) { stopLoopFrom(c); });
+    }
+
+    Timer shutdown;
+    armShutdown(shutdown, 4s);
+
+    for (WebSocket& c : clients) {
+        c.connectToHost(HostAddress::LocalHost, server.serverPort());
+    }
+    app->run();
+
+    EXPECT_EQ(receivedCount, N);
+}
+
+// ─── Ping / Pong edge cases ──────────────────────────────────────────────────
+
+TEST_F(WebSocketServerFixture, MultipleRapidPingsAllPongsReceived)
+{
+    // Autobahn §2.x: consecutive pings must each produce a pong with the
+    // matching payload.  This catches implementations that drop queued pings.
+    WebSocketServer server;
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+
+    server.newConnection.connect([&]() {
+        WebSocket* peer = server.nextPendingConnection();
+        ASSERT_NE(peer, nullptr);
+        acceptedSockets.push_back(peer);
+    });
+
+    WebSocket client;
+    constexpr int N = 3;
+    const std::vector<std::vector<std::uint8_t>> payloads = {{'p', '1'}, {'p', '2'}, {'p', '3'}};
+    std::vector<std::vector<std::uint8_t>> pongs;
+
+    client.connected.connect([&]() {
+        for (const auto& pl : payloads) {
+            client.ping(pl);
+        }
+    });
+    client.pongReceived.connect([&](const std::vector<std::uint8_t>& p) {
+        pongs.push_back(p);
+        if (static_cast<int>(pongs.size()) == N) {
+            client.close();
+            stopLoopFrom(client);
+        }
+    });
+    client.errorOccurred.connect([&](const std::string&) { stopLoopFrom(client); });
+
+    Timer shutdown;
+    armShutdown(shutdown, 3s);
+
+    client.connectToHost(HostAddress::LocalHost, server.serverPort());
+    app->run();
+
+    EXPECT_EQ(pongs, payloads);
+}
+
+// ─── Large message ───────────────────────────────────────────────────────────
+
+TEST_F(WebSocketServerFixture, LargeTextMessageRoundTrip)
+{
+    // Autobahn §1.x: text frames up to 64 KiB must round-trip intact.
+    WebSocketServer server;
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+
+    server.newConnection.connect([&]() {
+        WebSocket* peer = server.nextPendingConnection();
+        ASSERT_NE(peer, nullptr);
+        acceptedSockets.push_back(peer);
+        peer->textMessageReceived.connect(
+            [peer](const std::string& msg) { peer->sendTextMessage(msg); });
+    });
+
+    const std::string payload(64 * 1024, 'x');
+    std::string received;
+
+    WebSocket client;
+    client.connected.connect([&]() { client.sendTextMessage(payload); });
+    client.textMessageReceived.connect([&](const std::string& msg) {
+        received = msg;
+        client.close();
+        stopLoopFrom(client);
+    });
+    client.errorOccurred.connect([&](const std::string&) { stopLoopFrom(client); });
+
+    Timer shutdown;
+    armShutdown(shutdown, 5s);
+
+    client.connectToHost(HostAddress::LocalHost, server.serverPort());
+    app->run();
+
+    EXPECT_EQ(received.size(), payload.size());
+    EXPECT_EQ(received, payload);
+}
+

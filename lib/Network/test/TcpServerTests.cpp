@@ -676,3 +676,50 @@ TEST_F(TcpServerFixture, quitApplicationWithSigintAfterClientConnect)
     client.close();
     server.close();
 }
+
+TEST_F(TcpServerFixture, deleteLaterOnAcceptedSocketDisconnectedDoesNotCrash)
+{
+    // Regression test: calling deleteLater() on an accepted TcpSocket inside
+    // its disconnected signal must not crash EventLoop::run when the deferred
+    // deletion is processed (same root-node double-free class of bug as the
+    // WebSocket equivalent).
+    TcpServer server;
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+
+    bool clientDidConnect = false;
+    bool serverPeerDisconnected = false;
+
+    server.newConnection.connect([&]() {
+        TcpSocket* peer = server.nextPendingConnection();
+        ASSERT_NE(peer, nullptr);
+        // Do NOT delete peer manually — ownership is transferred via deleteLater.
+        peer->disconnected.connect([peer, &serverPeerDisconnected]() {
+            serverPeerDisconnected = true;
+            EventLoop* loop = peer->ownerEventLoop();
+            peer->deleteLater();
+            if (loop) {
+                loop->post([loop]() { loop->stop(); });
+            }
+        });
+    });
+
+    TcpSocket client(false);
+    client.connected.connect([&]() {
+        clientDidConnect = true;
+        client.close();
+    });
+    client.errorOccurred.connect([&](const std::string& error) {
+        if (EventLoop* loop = client.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 3s);
+
+    client.connectToHost(HostAddress::LocalHost, server.serverPort());
+    app->run();
+
+    EXPECT_TRUE(clientDidConnect);
+    EXPECT_TRUE(serverPeerDisconnected);
+}
