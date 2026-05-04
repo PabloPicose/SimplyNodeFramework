@@ -142,14 +142,28 @@ int main()
     buttonRow->addWidget(btnSubmit);
 
     // -----------------------------------------------------------------------
-    // Row 7: multi-line text editor (notes)
+    // Row 7: two side-by-side text editors
+    // -----------------------------------------------------------------------
+    auto* twoEditRow = new wg::HBoxLayout(window);
+    root->addWidget(twoEditRow, 1);
+
+    auto* leftEdit = new wg::TextEdit("Left editor", window);
+    leftEdit->setText("Left side…");
+    twoEditRow->addWidget(leftEdit, 1);
+
+    auto* rightEdit = new wg::TextEdit("Right editor", window);
+    rightEdit->setText("Right side…");
+    twoEditRow->addWidget(rightEdit, 1);
+
+    // -----------------------------------------------------------------------
+    // Row 8: multi-line text editor (notes)
     // -----------------------------------------------------------------------
     auto* notesEdit = new wg::TextEdit(window);
     notesEdit->setText("Notes go here…");
     root->addWidget(notesEdit, 1);
 
     // -----------------------------------------------------------------------
-    // Row 8: status label (feedback)
+    // Row 9: status label (feedback)
     // -----------------------------------------------------------------------
     auto* statusRow = new wg::HBoxLayout(window);
     root->addWidget(statusRow);

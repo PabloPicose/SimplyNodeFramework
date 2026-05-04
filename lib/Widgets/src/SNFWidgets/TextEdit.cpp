@@ -55,7 +55,8 @@ Size TextEdit::sizeHint() const
     const float labelHeight = m_label.empty()
         ? 0.0f
         : ImGui::GetTextLineHeight() + ImGui::GetStyle().ItemSpacing.y;
-    return Size{0.0f, labelHeight + ImGui::GetFrameHeightWithSpacing() * 6.0f};
+    const float minWidth = ImGui::GetFrameHeight() * 6.0f;
+    return Size{minWidth, labelHeight + ImGui::GetFrameHeightWithSpacing() * 6.0f};
 }
 
 void TextEdit::syncBuffer()
