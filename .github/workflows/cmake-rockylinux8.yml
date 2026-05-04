@@ -25,7 +25,7 @@ jobs:
           dnf -y install gcc gcc-c++ make git python3 python3-pip which findutils \
             wayland-devel wayland-protocols-devel libxkbcommon-devel \
             libX11-devel libXrandr-devel libXinerama-devel libXcursor-devel libXi-devel \
-            mesa-libGL-devel pkgconf-pkg-config
+            mesa-libGL-devel pkgconf-pkg-config sqlite-devel
           python3 -m venv /opt/ci-venv
           /opt/ci-venv/bin/pip install --upgrade pip
           /opt/ci-venv/bin/pip install cmake ninja
