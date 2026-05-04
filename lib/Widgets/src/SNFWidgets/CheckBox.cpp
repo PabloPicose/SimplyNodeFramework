@@ -5,6 +5,18 @@
 namespace snf {
 namespace widgets {
 
+namespace {
+std::string visibleLabel(const std::string& label)
+{
+    const std::size_t marker = label.find("##");
+    return marker != std::string::npos ? label.substr(0, marker) : label;
+}
+}  // namespace
+CheckBox::CheckBox(snf::Node* parent)
+    : Widget(parent)
+{
+}
+
 CheckBox::CheckBox(const std::string& label, snf::Node* parent)
     : Widget(parent), m_label(label)
 {
@@ -37,7 +49,8 @@ Size CheckBox::sizeHint() const
     }
 
     const float frameHeight = ImGui::GetFrameHeight();
-    const ImVec2 textSize = ImGui::CalcTextSize(m_label.c_str(), nullptr, true);
+    const std::string labelText = visibleLabel(m_label);
+    const ImVec2 textSize = ImGui::CalcTextSize(labelText.c_str(), nullptr, true);
     const float width = frameHeight
         + (textSize.x > 0.0f ? ImGui::GetStyle().ItemInnerSpacing.x + textSize.x : 0.0f);
     return Size{width, frameHeight};
@@ -46,11 +59,13 @@ Size CheckBox::sizeHint() const
 void CheckBox::renderImGui()
 {
     const bool prev = m_checked;
-    if (ImGui::Checkbox(m_label.c_str(), &m_checked)) {
+    ImGui::PushID(this);
+    if (ImGui::Checkbox(visibleLabel(m_label).c_str(), &m_checked)) {
         if (m_checked != prev) {
             stateChanged.emit(m_checked);
         }
     }
+    ImGui::PopID();
 }
 
 }  // namespace widgets

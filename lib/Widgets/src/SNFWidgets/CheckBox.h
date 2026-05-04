@@ -40,6 +40,7 @@ public:
      * @param label   Text shown next to the checkbox.
      * @param parent  Parent node (a Window or another container Widget).
      */
+    explicit CheckBox(snf::Node* parent = nullptr);
     explicit CheckBox(const std::string& label, snf::Node* parent = nullptr);
 
     /** @brief Sets the checkbox label. */

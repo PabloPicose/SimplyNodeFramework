@@ -46,6 +46,7 @@ public:
      * @param label   Text shown next to the button.
      * @param parent  Parent node (a Window or another container Widget).
      */
+    explicit RadioButton(snf::Node* parent = nullptr);
     explicit RadioButton(const std::string& label, snf::Node* parent = nullptr);
 
     /** @brief Sets the radio button label. */

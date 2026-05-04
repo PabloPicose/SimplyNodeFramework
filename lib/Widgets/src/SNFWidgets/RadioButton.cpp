@@ -13,7 +13,18 @@ bool containsButton(const std::vector<RadioButton*>& buttons, const RadioButton*
 {
     return std::find(buttons.begin(), buttons.end(), button) != buttons.end();
 }
+
+std::string visibleLabel(const std::string& label)
+{
+    const std::size_t marker = label.find("##");
+    return marker != std::string::npos ? label.substr(0, marker) : label;
+}
 }  // namespace
+
+RadioButton::RadioButton(snf::Node* parent)
+    : Widget(parent)
+{
+}
 
 RadioButton::RadioButton(const std::string& label, snf::Node* parent)
     : Widget(parent), m_label(label)
@@ -129,7 +140,8 @@ Size RadioButton::sizeHint() const
     }
 
     const float frameHeight = ImGui::GetFrameHeight();
-    const ImVec2 textSize = ImGui::CalcTextSize(m_label.c_str(), nullptr, true);
+    const std::string labelText = visibleLabel(m_label);
+    const ImVec2 textSize = ImGui::CalcTextSize(labelText.c_str(), nullptr, true);
     const float width = frameHeight
         + (textSize.x > 0.0f ? ImGui::GetStyle().ItemInnerSpacing.x + textSize.x : 0.0f);
     return Size{width, frameHeight};
@@ -140,11 +152,13 @@ void RadioButton::renderImGui()
     // ImGui::RadioButton(label, active) renders a single radio button that
     // returns true when clicked regardless of its previous state. We track
     // state ourselves to detect actual changes and emit only on real change.
-    if (ImGui::RadioButton(m_label.c_str(), m_selected)) {
+    ImGui::PushID(this);
+    if (ImGui::RadioButton(visibleLabel(m_label).c_str(), m_selected)) {
         if (!m_selected) {
             setSelectedInternal(true, true);
         }
     }
+    ImGui::PopID();
 }
 
 void RadioButton::setSelectedInternal(bool selected, bool emitSignals)

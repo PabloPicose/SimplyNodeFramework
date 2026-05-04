@@ -103,7 +103,7 @@ int main()
     auto* alignLabel = new wg::Label("Save on disk", window);
     alignRow->addWidget(alignLabel);
 
-    auto* chkSave = new wg::CheckBox("##save", window);
+    auto* chkSave = new wg::CheckBox(window);
     chkSave->setChecked(true);
     alignRow->addWidget(chkSave);
 
