@@ -89,7 +89,12 @@ void TextEdit::renderInput(float width, float height)
     ImGui::PushID(this);
 
     if (! m_label.empty()) {
+        const ImVec2 labelPos = ImGui::GetCursorScreenPos();
         ImGui::TextUnformatted(m_label.c_str());
+        // TextUnformatted resets the cursor X to the window's left edge.
+        // Restore it so InputTextMultiline renders in the correct column.
+        const ImVec2 afterLabel = ImGui::GetCursorScreenPos();
+        ImGui::SetCursorScreenPos(ImVec2(labelPos.x, afterLabel.y));
     }
 
     const float inputWidth = width > 0.0f ? width : -FLT_MIN;
