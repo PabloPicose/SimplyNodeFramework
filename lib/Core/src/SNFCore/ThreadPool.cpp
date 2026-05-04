@@ -8,11 +8,18 @@ namespace snf {
 
 ThreadPool::ThreadPool(std::size_t maxThreadCount)
 {
+#ifdef SNF_PLATFORM_WEB
+    // Emscripten single-threaded build: std::thread is not available without
+    // -pthread.  Keep the pool as a zero-worker stub; tasks submitted via
+    // start() are silently dropped (no background work is expected on web).
+    (void)maxThreadCount;
+#else
     maxThreadCount = std::max<std::size_t>(1, maxThreadCount);
     m_workers.reserve(maxThreadCount);
     for (std::size_t i = 0; i < maxThreadCount; ++i) {
         m_workers.emplace_back([this]() { workerLoop(); });
     }
+#endif
 }
 
 ThreadPool::~ThreadPool()
@@ -28,8 +35,12 @@ ThreadPool* ThreadPool::globalInstance()
 
 std::size_t ThreadPool::defaultThreadCount()
 {
+#ifdef SNF_PLATFORM_WEB
+    return 0;  // No worker threads in Emscripten single-threaded builds.
+#else
     const unsigned int hardwareThreads = std::thread::hardware_concurrency();
     return std::max<std::size_t>(1, hardwareThreads == 0 ? 2 : hardwareThreads);
+#endif
 }
 
 bool ThreadPool::start(std::shared_ptr<Runnable> runnable)

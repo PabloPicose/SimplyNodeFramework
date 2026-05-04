@@ -111,6 +111,8 @@ target_sources(SNFWidgets
         "${SNFWIDGETS_DIR}/ProgressBar.cpp"
         "${SNFWIDGETS_DIR}/TableView.cpp"
         "${SNFWIDGETS_DIR}/DataWidgetMapper.cpp"
+        "${SNFWIDGETS_DIR}/FileSaveButton.cpp"
+        "${SNFWIDGETS_DIR}/FileOpenButton.cpp"
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS "${SRC_DIR}"
@@ -137,6 +139,8 @@ target_sources(SNFWidgets
             "${SNFWIDGETS_DIR}/ProgressBar.h"
             "${SNFWIDGETS_DIR}/TableView.h"
             "${SNFWIDGETS_DIR}/DataWidgetMapper.h"
+            "${SNFWIDGETS_DIR}/FileSaveButton.h"
+            "${SNFWIDGETS_DIR}/FileOpenButton.h"
 )
 
 target_include_directories(SNFWidgets

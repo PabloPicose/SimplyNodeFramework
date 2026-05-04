@@ -243,6 +243,16 @@ float LineEdit::effectiveMinimumInputWidth() const
     return m_minimumInputWidth > 0.0f ? m_minimumInputWidth : k_defaultInputWidth;
 }
 
+int LineEdit::buildFlags() const
+{
+    ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue;
+    if (m_readOnly)        flags |= ImGuiInputTextFlags_ReadOnly;
+    if (m_autoSelectAll)   flags |= ImGuiInputTextFlags_AutoSelectAll;
+    if (m_password)        flags |= ImGuiInputTextFlags_Password;
+    if (m_escapeClearsAll) flags |= ImGuiInputTextFlags_EscapeClearsAll;
+    return flags;
+}
+
 bool LineEdit::renderCompanionText(const std::string& text, float width) const
 {
     if (text.empty() || width <= 0.0f) {
