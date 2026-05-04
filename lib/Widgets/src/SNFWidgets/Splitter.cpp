@@ -168,6 +168,16 @@ float Splitter::handleSize() const
     return m_handleSize;
 }
 
+void Splitter::setPanePadding(float padding)
+{
+    m_panePadding = std::max(0.0f, padding);
+}
+
+float Splitter::panePadding() const
+{
+    return m_panePadding;
+}
+
 Size Splitter::sizeHint() const
 {
     const Size primaryHint = primaryWidget() ? primaryWidget()->sizeHint() : Size{};
@@ -294,7 +304,12 @@ void Splitter::renderPane(const char* id, Widget* widget, float width, float hei
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     if (ImGui::BeginChild(id, ImVec2(width, height), ImGuiChildFlags_None, flags)) {
         if (widget && ! snf::NodePtr<Widget>(widget).isMarkedToDelete()) {
-            widget->renderWidgetConstrained(width, height);
+            if (m_panePadding > 0.0f) {
+                ImGui::SetCursorPos(ImVec2(m_panePadding, m_panePadding));
+            }
+            widget->renderWidgetConstrained(
+                std::max(0.0f, width  - 2.0f * m_panePadding),
+                std::max(0.0f, height - 2.0f * m_panePadding));
         }
     }
     ImGui::EndChild();

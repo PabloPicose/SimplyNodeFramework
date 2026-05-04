@@ -148,6 +148,16 @@ public:
     /** @brief Returns the current handle thickness in pixels. */
     float handleSize() const;
 
+    /**
+     * @brief Sets the inner padding applied to both panes.
+     *
+     * Creates space between the pane content and the splitter handle (and the
+     * outer edges). Values below 0 are clamped to 0.
+     */
+    void setPanePadding(float padding);
+    /** @brief Returns the current pane padding in pixels. */
+    float panePadding() const;
+
     Size sizeHint() const override;
 
     /**
@@ -190,6 +200,7 @@ private:
     float m_primaryMinimumSize = 0.0f;
     float m_secondaryMinimumSize = 0.0f;
     float m_handleSize = 8.0f;
+    float m_panePadding = 4.0f;
 };
 
 }  // namespace widgets
