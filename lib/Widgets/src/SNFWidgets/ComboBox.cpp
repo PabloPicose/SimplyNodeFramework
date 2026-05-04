@@ -7,6 +7,41 @@
 namespace snf {
 namespace widgets {
 
+namespace {
+std::string visibleLabel(const std::string& label)
+{
+    const std::size_t marker = label.find("##");
+    return marker != std::string::npos ? label.substr(0, marker) : label;
+}
+}  // namespace
+
+Size ComboBox::sizeHint() const
+{
+    if (ImGui::GetCurrentContext() == nullptr) {
+        return {};
+    }
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+
+    float maxItemWidth = 0.0f;
+    for (const auto& item : m_items) {
+        maxItemWidth = std::max(maxItemWidth, ImGui::CalcTextSize(item.c_str()).x);
+    }
+
+    // Combo body: preview text + frame padding + arrow button (square)
+    const float arrowWidth = ImGui::GetFrameHeight();
+    const float comboWidth = style.FramePadding.x * 2.0f + maxItemWidth + arrowWidth;
+
+    // Visible label to the right (text before ##)
+    float labelWidth = 0.0f;
+    const std::string labelText = visibleLabel(m_label);
+    if (! labelText.empty()) {
+        labelWidth = ImGui::CalcTextSize(labelText.c_str()).x + style.ItemInnerSpacing.x;
+    }
+
+    return Size{comboWidth + labelWidth, ImGui::GetFrameHeight()};
+}
+
 ComboBox::ComboBox(const std::string& label, snf::Node* parent)
     : Widget(parent), m_label(label)
 {

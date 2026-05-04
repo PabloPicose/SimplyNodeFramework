@@ -235,7 +235,10 @@ void Layout::renderImGuiConstrained(float width, float height)
         | ImGuiWindowFlags_NoScrollWithMouse;
 
     ImGui::PushID(this);
-    if (ImGui::BeginChild("layout_bounds", ImVec2(childWidth, childHeight), ImGuiChildFlags_None, childFlags)) {
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    const bool visible = ImGui::BeginChild("layout_bounds", ImVec2(childWidth, childHeight), ImGuiChildFlags_None, childFlags);
+    ImGui::PopStyleVar();
+    if (visible) {
         renderImGui();
     }
     ImGui::EndChild();

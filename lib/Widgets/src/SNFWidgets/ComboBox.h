@@ -91,6 +91,8 @@ public:
      */
     std::string currentText() const;
 
+    Size sizeHint() const override;
+
     /**
      * @brief Emitted when the current index changes due to user interaction.
      *

@@ -75,6 +75,8 @@ public:
     /** @brief Returns the current overlay text. */
     std::string overlayText() const;
 
+    Size sizeHint() const override;
+
 protected:
     void renderImGui() override;
 

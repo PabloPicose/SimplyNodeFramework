@@ -30,6 +30,19 @@ bool CheckBox::isChecked() const
     return m_checked;
 }
 
+Size CheckBox::sizeHint() const
+{
+    if (ImGui::GetCurrentContext() == nullptr) {
+        return {};
+    }
+
+    const float frameHeight = ImGui::GetFrameHeight();
+    const ImVec2 textSize = ImGui::CalcTextSize(m_label.c_str(), nullptr, true);
+    const float width = frameHeight
+        + (textSize.x > 0.0f ? ImGui::GetStyle().ItemInnerSpacing.x + textSize.x : 0.0f);
+    return Size{width, frameHeight};
+}
+
 void CheckBox::renderImGui()
 {
     const bool prev = m_checked;

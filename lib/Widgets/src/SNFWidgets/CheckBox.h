@@ -54,6 +54,8 @@ public:
     /** @brief Returns @c true if the checkbox is currently checked. */
     bool isChecked() const;
 
+    Size sizeHint() const override;
+
     /**
      * @brief Emitted when the user toggles the checkbox.
      *

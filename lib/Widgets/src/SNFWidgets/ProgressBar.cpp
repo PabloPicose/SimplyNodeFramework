@@ -61,6 +61,14 @@ std::string ProgressBar::overlayText() const
     return m_overlayText;
 }
 
+Size ProgressBar::sizeHint() const
+{
+    if (ImGui::GetCurrentContext() == nullptr) {
+        return {};
+    }
+    return Size{0.0f, ImGui::GetFrameHeight()};
+}
+
 void ProgressBar::renderImGui()
 {
     // Protect against minimum == maximum: treat as fully filled.

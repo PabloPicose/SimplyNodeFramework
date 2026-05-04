@@ -13,6 +13,7 @@
 #include <SNFWidgets/TableView.h>
 #include <SNFWidgets/TextEdit.h>
 #include <SNFWidgets/Window.h>
+#include <SNFWidgets/CheckBox.h>
 
 #include <string>
 #include <vector>

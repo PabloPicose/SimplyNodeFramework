@@ -122,6 +122,19 @@ int RadioButton::linkedButtonCount() const
     return static_cast<int>(linkedPeers().size());
 }
 
+Size RadioButton::sizeHint() const
+{
+    if (ImGui::GetCurrentContext() == nullptr) {
+        return {};
+    }
+
+    const float frameHeight = ImGui::GetFrameHeight();
+    const ImVec2 textSize = ImGui::CalcTextSize(m_label.c_str(), nullptr, true);
+    const float width = frameHeight
+        + (textSize.x > 0.0f ? ImGui::GetStyle().ItemInnerSpacing.x + textSize.x : 0.0f);
+    return Size{width, frameHeight};
+}
+
 void RadioButton::renderImGui()
 {
     // ImGui::RadioButton(label, active) renders a single radio button that

@@ -27,7 +27,7 @@ Size Label::sizeHint() const
     }
 
     const ImVec2 textSize = ImGui::CalcTextSize(m_text.c_str(), nullptr, false);
-    return Size{textSize.x, textSize.y};
+    return Size{textSize.x, ImGui::GetFrameHeight()};
 }
 
 void Label::renderImGui()

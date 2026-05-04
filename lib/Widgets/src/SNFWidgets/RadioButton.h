@@ -60,6 +60,8 @@ public:
     /** @brief Returns @c true if this radio button is currently selected. */
     bool isSelected() const;
 
+    Size sizeHint() const override;
+
     /**
      * @brief Links this radio button with another one as part of the same
      *        exclusive group.
