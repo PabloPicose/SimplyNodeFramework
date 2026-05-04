@@ -156,6 +156,33 @@ public:
     /** @brief Clears current and selected indexes. */
     void clearSelection();
 
+    /**
+     * @brief Hides @p column from the view.
+     *
+     * Hidden columns are not rendered and cannot be selected. The underlying
+     * model column is unaffected. Does nothing if @p column is out of range.
+     * Emits `columnHiddenChanged` when the state changes.
+     */
+    void hideColumn(int column);
+
+    /**
+     * @brief Shows a previously hidden @p column.
+     *
+     * Does nothing if @p column is out of range or already visible.
+     * Emits `columnHiddenChanged` when the state changes.
+     */
+    void showColumn(int column);
+
+    /**
+     * @brief Sets the visibility of @p column.
+     *
+     * Equivalent to calling `hideColumn()` or `showColumn()`.
+     */
+    void setColumnHidden(int column, bool hidden);
+
+    /** @brief Returns @c true if @p column is currently hidden. */
+    bool isColumnHidden(int column) const;
+
     /** @brief Returns selected row numbers. */
     std::vector<int> selectedRows() const;
 
@@ -179,6 +206,9 @@ public:
 
     /** @brief Emitted when the selected rows, columns, or cells change. */
     Signal<> selectionChanged;
+
+    /** @brief Emitted when the hidden state of a column changes. Arguments are column, hidden. */
+    Signal<int, bool> columnHiddenChanged;
 
     /** @brief Emitted when the user clicks a cell. Arguments are row, column. */
     Signal<int, int> cellClicked;
@@ -222,6 +252,8 @@ private:
     bool isValidColumn(int column) const;
     bool isValidCell(int row, int column) const;
     bool isValidSelectionKey(const SelectionKey& key) const;
+    bool isVisibleColumn(int column) const;
+    std::vector<int> visibleColumns() const;
     bool containsSelectionKey(const SelectionKey& key) const;
     SelectionKey keyForCell(int row, int column) const;
     void updateCurrent(int row, int column);
@@ -245,6 +277,7 @@ private:
     int                      m_currentRow = -1;
     int                      m_currentColumn = -1;
     std::vector<SelectionKey> m_selection;
+    std::vector<int>          m_hiddenColumns;
     Connection               m_modelResetConnection;
     Connection               m_dataChangedConnection;
     Connection               m_rowsInsertedConnection;

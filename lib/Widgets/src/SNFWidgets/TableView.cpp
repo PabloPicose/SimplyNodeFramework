@@ -184,7 +184,7 @@ int TableView::currentRow() const
 
 void TableView::setCurrentCell(int row, int column)
 {
-    if (! isValidCell(row, column)) {
+    if (! isValidCell(row, column) || isColumnHidden(column)) {
         clearSelection();
         return;
     }
@@ -218,7 +218,7 @@ void TableView::selectRow(int row)
 
 void TableView::selectColumn(int column)
 {
-    if (! isValidColumn(column)) {
+    if (! isVisibleColumn(column)) {
         clearSelection();
         return;
     }
@@ -233,7 +233,7 @@ void TableView::selectColumn(int column)
 
 void TableView::selectCell(int row, int column)
 {
-    if (! isValidCell(row, column)) {
+    if (! isValidCell(row, column) || isColumnHidden(column)) {
         clearSelection();
         return;
     }
@@ -254,6 +254,66 @@ void TableView::clearSelection()
     if (hadSelection) {
         selectionChanged.emit();
     }
+}
+
+void TableView::hideColumn(int column)
+{
+    setColumnHidden(column, true);
+}
+
+void TableView::showColumn(int column)
+{
+    setColumnHidden(column, false);
+}
+
+void TableView::setColumnHidden(int column, bool hidden)
+{
+    if (! isValidColumn(column)) {
+        return;
+    }
+
+    const bool currentlyHidden = isColumnHidden(column);
+    if (currentlyHidden == hidden) {
+        return;
+    }
+
+    if (hidden) {
+        m_hiddenColumns.push_back(column);
+        std::sort(m_hiddenColumns.begin(), m_hiddenColumns.end());
+        validateSelection();
+    } else {
+        m_hiddenColumns.erase(
+            std::remove(m_hiddenColumns.begin(), m_hiddenColumns.end(), column),
+            m_hiddenColumns.end());
+    }
+
+    columnHiddenChanged.emit(column, hidden);
+}
+
+bool TableView::isColumnHidden(int column) const
+{
+    return std::find(m_hiddenColumns.begin(), m_hiddenColumns.end(), column) != m_hiddenColumns.end();
+}
+
+bool TableView::isVisibleColumn(int column) const
+{
+    return isValidColumn(column) && ! isColumnHidden(column);
+}
+
+std::vector<int> TableView::visibleColumns() const
+{
+    std::vector<int> cols;
+    if (! m_model) {
+        return cols;
+    }
+
+    const int columns = safeCount(m_model->columnCount());
+    for (int c = 0; c < columns; ++c) {
+        if (! isColumnHidden(c)) {
+            cols.push_back(c);
+        }
+    }
+    return cols;
 }
 
 std::vector<int> TableView::selectedRows() const
@@ -354,13 +414,13 @@ bool TableView::isValidCell(int row, int column) const
 bool TableView::isValidSelectionKey(const SelectionKey& key) const
 {
     if (key.row >= 0 && key.column >= 0) {
-        return isValidCell(key.row, key.column);
+        return isValidCell(key.row, key.column) && ! isColumnHidden(key.column);
     }
     if (key.row >= 0) {
         return isValidRow(key.row);
     }
     if (key.column >= 0) {
-        return isValidColumn(key.column);
+        return isVisibleColumn(key.column);
     }
     return false;
 }
@@ -537,6 +597,12 @@ void TableView::handleColumnsInserted(int first, int count)
         return;
     }
 
+    for (int& hiddenCol : m_hiddenColumns) {
+        if (hiddenCol >= first) {
+            hiddenCol += count;
+        }
+    }
+
     const std::vector<SelectionKey> previousSelection = m_selection;
     const bool hasRowSelection = std::any_of(m_selection.begin(), m_selection.end(), [](const SelectionKey& key) {
         return key.row >= 0 && key.column < 0;
@@ -565,6 +631,17 @@ void TableView::handleColumnsRemoved(int first, int count)
     }
 
     const int last = first + count - 1;
+    m_hiddenColumns.erase(
+        std::remove_if(m_hiddenColumns.begin(),
+                       m_hiddenColumns.end(),
+                       [first, last](int col) { return col >= first && col <= last; }),
+        m_hiddenColumns.end());
+    for (int& hiddenCol : m_hiddenColumns) {
+        if (hiddenCol > last) {
+            hiddenCol -= count;
+        }
+    }
+
     const std::vector<SelectionKey> previousSelection = m_selection;
     const bool hasRowSelection = std::any_of(m_selection.begin(), m_selection.end(), [](const SelectionKey& key) {
         return key.row >= 0 && key.column < 0;
@@ -633,16 +710,17 @@ Size TableView::sizeHint() const
     }
 
     const int rows = safeCount(m_model->rowCount());
-    const int columns = safeCount(m_model->columnCount());
-    if (columns == 0) {
+    const std::vector<float> colWidths = naturalColumnWidths();
+    const int visibleCount = static_cast<int>(colWidths.size());
+    if (visibleCount == 0) {
         return {};
     }
 
     float width = 0.0f;
-    for (const float columnWidth : naturalColumnWidths()) {
+    for (const float columnWidth : colWidths) {
         width += columnWidth;
     }
-    width += tableBorderWidth(m_showGrid, columns);
+    width += tableBorderWidth(m_showGrid, visibleCount);
 
     const ImGuiStyle& style = ImGui::GetStyle();
     const float rowHeight = ImGui::GetTextLineHeight() + style.CellPadding.y * 2.0f;
@@ -667,6 +745,9 @@ std::vector<float> TableView::naturalColumnWidths() const
     widths.reserve(static_cast<std::size_t>(columns));
 
     for (int column = 0; column < columns; ++column) {
+        if (isColumnHidden(column)) {
+            continue;
+        }
         float columnWidth = ImGui::CalcTextSize(m_model->headerData(column).c_str()).x;
         for (int row = 0; row < rows; ++row) {
             const snf::ModelIndex index = m_model->index(row, column);
@@ -686,8 +767,9 @@ void TableView::renderTable(float width, float height)
     }
 
     const int rows = safeCount(m_model->rowCount());
-    const int columns = safeCount(m_model->columnCount());
-    if (columns == 0) {
+    const std::vector<int> visibleCols = visibleColumns();
+    const int visibleCount = static_cast<int>(visibleCols.size());
+    if (visibleCount == 0) {
         return;
     }
 
@@ -699,7 +781,7 @@ void TableView::renderTable(float width, float height)
     }
 
     const std::vector<float> columnWidths = naturalColumnWidths();
-    float naturalWidth = tableBorderWidth(m_showGrid, columns);
+    float naturalWidth = tableBorderWidth(m_showGrid, visibleCount);
     for (const float columnWidth : columnWidths) {
         naturalWidth += columnWidth;
     }
@@ -709,15 +791,16 @@ void TableView::renderTable(float width, float height)
         height > 0.0f ? height : 0.0f);
 
     ImGui::PushID(this);
-    if (ImGui::BeginTable("TableView", columns, flags, outerSize)) {
+    if (ImGui::BeginTable("TableView", visibleCount, flags, outerSize)) {
         const bool stretchLastColumn = m_stretchLastColumn && constrainedWidth && width > naturalWidth;
-        for (int column = 0; column < columns; ++column) {
+        for (int vi = 0; vi < visibleCount; ++vi) {
+            const int column = visibleCols[static_cast<std::size_t>(vi)];
             const std::string header = m_model->headerData(column);
             if (constrainedWidth) {
-                if (stretchLastColumn && column == columns - 1) {
+                if (stretchLastColumn && vi == visibleCount - 1) {
                     ImGui::TableSetupColumn(header.c_str(), ImGuiTableColumnFlags_WidthStretch, 1.0f);
                 } else {
-                    const float columnWidth = columnWidths[static_cast<std::size_t>(column)];
+                    const float columnWidth = columnWidths[static_cast<std::size_t>(vi)];
                     ImGui::TableSetupColumn(header.c_str(), ImGuiTableColumnFlags_WidthFixed, columnWidth);
                 }
             } else {
@@ -731,8 +814,9 @@ void TableView::renderTable(float width, float height)
 
         for (int row = 0; row < rows; ++row) {
             ImGui::TableNextRow();
-            for (int column = 0; column < columns; ++column) {
-                ImGui::TableSetColumnIndex(column);
+            for (int vi = 0; vi < visibleCount; ++vi) {
+                const int column = visibleCols[static_cast<std::size_t>(vi)];
+                ImGui::TableSetColumnIndex(vi);
 
                 const snf::ModelIndex index = m_model->index(row, column);
                 const std::string cell = m_model->data(index).toString();
