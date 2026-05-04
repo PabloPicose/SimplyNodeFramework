@@ -200,7 +200,7 @@ private:
     float m_primaryMinimumSize = 0.0f;
     float m_secondaryMinimumSize = 0.0f;
     float m_handleSize = 8.0f;
-    float m_panePadding = 4.0f;
+    float m_panePadding = 0.0f;
 };
 
 }  // namespace widgets
