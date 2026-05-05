@@ -122,6 +122,30 @@ std::string ComboBox::currentText() const
     return m_items[static_cast<std::size_t>(m_currentIndex)];
 }
 
+void ComboBox::renderImGuiConstrained(float width, float height)
+{
+    (void)height;
+
+    // Compute the minimum width needed so that all item texts fit without
+    // clipping inside the popup window.  BeginCombo internally constrains the
+    // popup to CalcItemWidth(), so we must ensure that value is large enough.
+    float minWidth = width > 0.0f ? width : 0.0f;
+    if (ImGui::GetCurrentContext() != nullptr) {
+        const ImGuiStyle& style   = ImGui::GetStyle();
+        const float       padding = style.FramePadding.x * 2.0f
+                                    + style.ScrollbarSize;  // popup may have a scrollbar
+        for (const auto& item : m_items) {
+            minWidth = std::max(minWidth,
+                                ImGui::CalcTextSize(item.c_str()).x + padding);
+        }
+    }
+
+    if (minWidth > 0.0f) {
+        ImGui::SetNextItemWidth(minWidth);
+    }
+    renderImGui();
+}
+
 void ComboBox::renderImGui()
 {
     ImGui::PushID(this);
