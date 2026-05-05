@@ -21,3 +21,4 @@ ignore:
   - "**/_deps/**"
   - "standalone/**"
   - "**/examples/**"
+  - "examples/**"
