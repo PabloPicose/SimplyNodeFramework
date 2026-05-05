@@ -24,6 +24,9 @@ option(SNF_EXPERIMENTAL
 option(SNF_ENABLE_SQLITE
     "Enable SQLite support in SNFDatabase"
     ON)
+option(SNF_ENABLE_SNMP
+    "Build the SNFSnmp module (requires net-snmp / libsnmp-dev)"
+    ON)
 
 # Safety checks: mismatching toolchain / option causes a clear configure error.
 if(EMSCRIPTEN AND NOT SNF_WEB_ASSEMBLY)
@@ -74,6 +77,9 @@ endif()
 if(NOT SNF_WEB_ASSEMBLY)
     # SNFHttpServer is a development HTTP server; only for native builds.
     add_subdirectory(lib/HttpServer)
+    if(SNF_ENABLE_SNMP)
+        add_subdirectory(lib/Snmp)
+    endif()
 endif()
 
 # SNFWebSocket provides non-TLS ws:// client support on all platforms.
