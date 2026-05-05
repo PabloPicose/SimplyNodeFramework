@@ -164,7 +164,7 @@ protected:
      * block; long-running work should be posted to the event loop or run on
      * a separate thread.
      */
-    virtual void update() {}
+    virtual void update();
 
     /**
      * @brief Called on the owner thread just before the node is migrated to
