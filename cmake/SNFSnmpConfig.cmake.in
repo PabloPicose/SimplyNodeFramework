@@ -1,0 +1,12 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(SNFCore CONFIG REQUIRED)
+
+include("${CMAKE_CURRENT_LIST_DIR}/SNFSnmpTargets.cmake")
+
+if(TARGET SNFSnmp AND NOT TARGET SNFSnmp::SNFSnmp)
+    add_library(SNFSnmp::SNFSnmp ALIAS SNFSnmp)
+endif()
+
+check_required_components(SNFSnmp)
