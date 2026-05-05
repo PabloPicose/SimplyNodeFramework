@@ -71,6 +71,26 @@ public:
     bool isEffectivelyEnabled() const;
 
     /**
+     * @brief Shows or hides this widget.
+     *
+     * A hidden widget is not rendered at all; it takes no space in the frame.
+     * Container and layout widgets hidden via this method will also suppress
+     * rendering of all their descendants.
+     */
+    void setVisible(bool visible);
+
+    /** @brief Convenience inverse of `setVisible()`. */
+    void setHidden(bool hidden);
+
+    /** @brief Returns this widget's local visibility state. */
+    bool isVisible() const;
+
+    /**
+     * @brief Returns whether this widget and all widget ancestors are visible.
+     */
+    bool isEffectivelyVisible() const;
+
+    /**
      * @brief Returns the preferred size used by layout containers.
      *
      * Widgets that cannot know their natural size without rendering may return
@@ -129,10 +149,12 @@ private:
     friend class Layout;
     friend class ScrollArea;
     friend class Splitter;
+    friend class StackedWidget;
     friend class Tabs;
     friend class Window;
 
     bool m_enabled = true;
+    bool m_visible = true;
 };
 
 }  // namespace widgets

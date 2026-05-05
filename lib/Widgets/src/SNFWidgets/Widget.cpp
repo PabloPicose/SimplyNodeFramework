@@ -40,6 +40,39 @@ bool Widget::isEffectivelyEnabled() const
     return true;
 }
 
+void Widget::setVisible(bool visible)
+{
+    m_visible = visible;
+}
+
+void Widget::setHidden(bool hidden)
+{
+    setVisible(! hidden);
+}
+
+bool Widget::isVisible() const
+{
+    return m_visible;
+}
+
+bool Widget::isEffectivelyVisible() const
+{
+    if (! m_visible) {
+        return false;
+    }
+
+    const snf::Node* current = parent();
+    while (current) {
+        const auto* widgetParent = dynamic_cast<const Widget*>(current);
+        if (widgetParent && ! widgetParent->isVisible()) {
+            return false;
+        }
+        current = current->parent();
+    }
+
+    return true;
+}
+
 Size Widget::sizeHint() const
 {
     return {};
@@ -52,6 +85,10 @@ bool Widget::containsWidget(const Widget* /*widget*/) const
 
 void Widget::renderWidget()
 {
+    if (! isEffectivelyVisible()) {
+        return;
+    }
+
     const bool disabled = ! isEffectivelyEnabled();
     if (disabled) {
         ImGui::BeginDisabled();
@@ -66,6 +103,10 @@ void Widget::renderWidget()
 
 void Widget::renderWidgetConstrained(float width, float height)
 {
+    if (! isEffectivelyVisible()) {
+        return;
+    }
+
     const bool disabled = ! isEffectivelyEnabled();
     if (disabled) {
         ImGui::BeginDisabled();

@@ -297,6 +297,12 @@ doxygen docs/Doxyfile
 - [ ] Process management (spawn, stdout/stderr capture)
 - [ ] Plugin system (runtime shared-library loading)
 - [ ] Per-node update flag (skip `update()` when no work is pending)
+- [ ] Logging framework (log levels, formatting, file output)
+
+### Profiling
+- [ ] Classes and macros for measuring execution time, memory usage, and other metrics
+- [ ] Server profiler that collects and exposes metrics via a socket or HTTP endpoint
+- [ ] Macro/function to measure momory usage of a class or function scope
 
 ### Network
 - [x] UDP socket
