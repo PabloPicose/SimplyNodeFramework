@@ -315,3 +315,11 @@ doxygen docs/Doxyfile
 
 ### Audio
 - [ ] ALSA wrapper
+
+## Contributing
+
+Contributions are welcome.
+
+If you want to fix a bug, improve the documentation, or propose a new feature, please read the contribution guide first:
+
+[CONTRIBUTING.md](CONTRIBUTING.md)
