@@ -19,14 +19,14 @@ First, fork the repository on GitHub.
 Then clone your fork locally:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/REPOSITORY_NAME.git
-cd REPOSITORY_NAME
+git clone https://github.com/PabloPicose/SimplyNodeFramework.git
+cd SimplyNodeFramework
 ```
 
 Add the original repository as `upstream`:
 
 ```bash
-git remote add upstream https://github.com/ORIGINAL_OWNER/REPOSITORY_NAME.git
+git remote add upstream https://github.com/PabloPicose/SimplyNodeFramework.git
 ```
 
 Keep your fork up to date:
