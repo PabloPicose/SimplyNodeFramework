@@ -24,7 +24,7 @@ int main()
     appNode->setTitle("SNF Layouts Example");
 
     // IMGUI DEMO
-    auto* demoWindow = new wg::ImGuiDemoWindow(appNode);
+    new wg::ImGuiDemoWindow(appNode);
 
     // -----------------------------------------------------------------------
     // Main window

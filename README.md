@@ -1,111 +1,74 @@
 # SimplyNodeFramework
 
-- [![Ubuntu (build + test)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-single-platform.yml/badge.svg)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-single-platform.yml)
-- [![Coverage (Codecov)](https://codecov.io/gh/PabloPicose/SimplyNodeFramework/graph/badge.svg)](https://codecov.io/gh/PabloPicose/SimplyNodeFramework)
-- [![Rocky Linux 8](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-rockylinux8.yml/badge.svg)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-rockylinux8.yml)
-- [![Debian 12](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-debian12.yml/badge.svg)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-debian12.yml)
+[![Ubuntu](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-single-platform.yml/badge.svg)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-single-platform.yml)
+[![Coverage](https://codecov.io/gh/PabloPicose/SimplyNodeFramework/graph/badge.svg)](https://codecov.io/gh/PabloPicose/SimplyNodeFramework)
+[![Rocky Linux 8](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-rockylinux8.yml/badge.svg)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-rockylinux8.yml)
+[![Debian 12](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-debian12.yml/badge.svg)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-debian12.yml)
 
-A modular C++ library providing an event-driven, node-based runtime for Linux.
-It consists of two independent CMake packages:
+A modular C++ library providing an event-driven, node-based runtime.
+Requires **C++17**. Primary target is **Linux** (epoll); **WebAssembly** (Emscripten) is supported for `SNFCore`.
 
-- **`SNFCore`** — event loop, node ownership model, timers, and signals.
-- **`SNFNetwork`** — TCP and Unix domain socket networking, built on top of `SNFCore`.
-
-Both packages require **C++17** and target **Linux** (epoll-based I/O).
-
-## Current Scope (What Is Included)
-
-This section defines the current scope of SimplyNodeFramework so project status
-and expectations are explicit.
-
-### SNFCore
-
-- Application singleton and per-thread EventLoop lifecycle
-- Node ownership tree (parent/child), root-node management, and deferred deletion
-- NodePtr generation-based safe references (use-after-free protection)
-- Signal/Connection system with Direct and Queued delivery
-- Timer scheduling (single-shot and repeating) integrated with EventLoop
-- Cross-thread marshaling patterns through EventLoop task posting
-
-### SNFNetwork
-
-- TcpSocket: non-blocking client socket, async read/write, and lifecycle signals
-- TcpServer: listen/accept flow, pending connection queue, and server-side socket handoff
-- LocalSocket: Unix domain socket client behavior with async integration
-- LocalServer: Unix domain socket server with pending connection queue
-- IOEvent epoll integration used by TCP and Local socket/server classes
-
-### Current Platform and Design Boundaries
-
-- Platform target is Linux only (epoll-based implementation)
-- Public API is C++17
-- Event-driven, non-blocking design is the primary execution model
-- Core and Network are distributed as independent CMake packages (SNFCore and SNFNetwork)
+| Package | Contents |
+|---|---|
+| **`SNFCore`** | Event loop, node ownership tree, timers, signals, cross-thread dispatch |
+| **`SNFNetwork`** | TCP/Unix sockets (non-blocking, epoll-based). Linux only. |
 
 ---
 
 ## Installation
 
-### FetchContent
+### Option A — git clone + add_subdirectory
+
+```bash
+# From your project root:
+git clone https://github.com/PabloPicose/SimplyNodeFramework.git deps/SimplyNodeFramework
+```
+
+```cmake
+set(SNF_ENABLE_TESTS    OFF CACHE BOOL "" FORCE)
+set(SNF_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+add_subdirectory(deps/SimplyNodeFramework)
+
+add_executable(app main.cpp)
+target_link_libraries(app PRIVATE SNFCore::SNFCore)
+```
+
+### Option B — FetchContent
 
 ```cmake
 include(FetchContent)
 
-if(NOT TARGET SNFCore::SNFCore OR NOT TARGET SNFNetwork::SNFNetwork)
-    # Disable tests when consumed as a dependency.
+if(NOT TARGET SNFCore::SNFCore)
     set(SNF_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
-
     FetchContent_Declare(
         SimplyNodeFramework
         GIT_REPOSITORY https://github.com/PabloPicose/SimplyNodeFramework.git
         GIT_TAG main
     )
-
     FetchContent_MakeAvailable(SimplyNodeFramework)
 endif()
 
 add_executable(app main.cpp)
 target_link_libraries(app PRIVATE SNFCore::SNFCore)
-# For networking support use SNFNetwork (automatically pulls in SNFCore):
-# target_link_libraries(app PRIVATE SNFNetwork::SNFNetwork)
 ```
 
-`SNF_ENABLE_TESTS` defaults to `ON` only when the project is the top-level CMake project.
-
-The `if(NOT TARGET ...)` guard is useful when your project can be configured in environments where `SNFCore::SNFCore` or `SNFNetwork::SNFNetwork` may already exist.
-
-The exported namespaced targets are `SNFCore::SNFCore` and `SNFNetwork::SNFNetwork`. Those are the recommended target names to use both in `if(NOT TARGET ...)` guards and in `target_link_libraries(...)`.
-
-
-### find\_package after installation
-
-Build and install the library once:
+### Option C — find_package after installation
 
 ```bash
-cmake -S . -B build
-cmake --build build
+cmake -S . -B build && cmake --build build
 cmake --install build --prefix /usr/local
 ```
 
-Then consume it from your project:
-
 ```cmake
 find_package(SNFCore CONFIG REQUIRED)
-find_package(SNFNetwork CONFIG REQUIRED)   # also pulls in SNFCore
-
-add_executable(app main.cpp)
-target_link_libraries(app PRIVATE SNFNetwork::SNFNetwork)
+target_link_libraries(app PRIVATE SNFCore::SNFCore)
 ```
-
-Available targets: `SNFCore`, `SNFCore::SNFCore`, `SNFNetwork`, `SNFNetwork::SNFNetwork`.
 
 ---
 
-## Example 1 — Periodic timer (SNFCore)
+## Quick start examples
 
-This mini-app fires a timer every 200 ms, prints a counter, and quits after five ticks.
-
-**`main.cpp`**
+### Timer (SNFCore)
 
 ```cpp
 #include <SNFCore/Application.h>
@@ -118,39 +81,20 @@ using namespace std::chrono_literals;
 int main(int argc, char** argv)
 {
     Application app(argc, argv);
-
     int ticks = 0;
     Timer timer;
 
-    // Connect a slot: the lambda fires on the timer's owner thread.
     timer.timeout.connect([&]() {
         std::cout << "Tick " << ++ticks << "\n";
-        if (ticks >= 5) {
-            timer.stop();
-            app.quit();   // Unblocks app.run()
-        }
+        if (ticks >= 5) { timer.stop(); app.quit(); }
     });
 
-    timer.start(200ms);   // Repeating, 200 ms interval
-    return app.run();     // Blocks the event loop until quit()
+    timer.start(200ms);
+    return app.run();
 }
 ```
 
-**`CMakeLists.txt`**
-
-```cmake
-target_link_libraries(app PRIVATE SNFCore)
-```
-
----
-
-## Example 2 — TCP echo server and client (SNFNetwork)
-
-This mini-app starts a TCP echo server on port 9000, connects a client, sends a
-message, prints the echoed response, and quits. All I/O is handled asynchronously
-via the event loop.
-
-**`main.cpp`**
+### TCP echo server + client (SNFNetwork)
 
 ```cpp
 #include <SNFCore/Application.h>
@@ -159,7 +103,6 @@ via the event loop.
 #include <SNFNetwork/TcpServer.h>
 #include <SNFNetwork/TcpSocket.h>
 #include <iostream>
-#include <string>
 
 using namespace snf;
 using namespace std::chrono_literals;
@@ -168,157 +111,142 @@ int main(int argc, char** argv)
 {
     Application app(argc, argv);
 
-    // ── Server ──────────────────────────────────────────────────────────────
     TcpServer server;
     server.listen(HostAddress::LocalHost, 9000);
-
     server.newConnection.connect([&]() {
         TcpSocket* peer = server.nextPendingConnection();
-
-        // Echo every incoming message back to the client.
-        peer->readyRead.connect([peer]() {
-            peer->write(peer->readAll());
-        });
-
-        // Free the server-side socket once the client disconnects.
-        peer->disconnected.connect([peer]() {
-            peer->deleteLater();
-        });
+        peer->readyRead.connect([peer]()   { peer->write(peer->readAll()); });
+        peer->disconnected.connect([peer]() { peer->deleteLater(); });
     });
 
-    // ── Client ──────────────────────────────────────────────────────────────
     TcpSocket client;
     client.connectToHost(HostAddress::LocalHost, 9000);
-
-    client.connected.connect([&]() {
-        client.write("Hello, SNF!\n");
-    });
-
+    client.connected.connect([&]()  { client.write("Hello, SNF!\n"); });
     client.readyRead.connect([&]() {
-        auto bytes = client.readAll();
-        std::cout << std::string(bytes.begin(), bytes.end());
+        auto b = client.readAll();
+        std::cout << std::string(b.begin(), b.end());
         app.quit();
     });
-
-    client.errorOccurred.connect([&](const std::string& err) {
-        std::cerr << "Connection error: " << err << "\n";
-        app.quit();
+    client.errorOccurred.connect([&](const std::string& e) {
+        std::cerr << e << "\n"; app.quit();
     });
 
-    // Safety shutdown: quit after 3 s if something goes wrong.
     Timer::singleShot(3000ms, [&]() { app.quit(); });
-
     return app.run();
 }
 ```
 
-**`CMakeLists.txt`**
+### Cross-thread signal with `moveToThread()` (SNFCore)
 
-```cmake
-target_link_libraries(app PRIVATE SNFNetwork)
+```cpp
+#include <SNFCore/Application.h>
+#include <SNFCore/Connection.h>
+#include <SNFCore/Node.h>
+#include <SNFCore/NodePtr.h>
+#include <SNFCore/Timer.h>
+#include <future>
+#include <iostream>
+#include <thread>
+
+using namespace snf;
+
+class Receiver : public Node {
+public:
+    explicit Receiver(Node* p = nullptr) : Node(p) {}
+    void slotRecv(int v) {
+        std::cout << "Received " << v << " on thread " << std::this_thread::get_id() << '\n';
+        Application::instance()->quit();
+    }
+private:
+    void update() override {}
+};
+
+int main(int argc, char** argv)
+{
+    Application app(argc, argv);
+
+    std::promise<std::thread::id> ready;
+    std::thread worker([&]() {
+        auto* loop = app.getOrCreateCurrentThreadEventLoop();
+        ready.set_value(std::this_thread::get_id());
+        Timer keepAlive; keepAlive.setSingleShot(true); keepAlive.start(500);
+        loop->run();
+    });
+
+    auto* receiver = new Receiver();
+    receiver->moveToThread(ready.get_future().get());
+
+    NodePtr<Receiver> ptr(receiver);
+    Signal<int> signal;
+    signal.connect(ptr, &Receiver::slotRecv, ConnectionType::Queued);
+
+    std::cout << "Emitting from main thread " << std::this_thread::get_id() << '\n';
+    signal.emit(42);
+
+    app.run();
+    worker.join();
+    return 0;
+}
 ```
+
+> For a detailed explanation see [docs/guides/thread-affinity.md](docs/guides/thread-affinity.md).
 
 ---
 
 ## Core Concepts
 
-### Node ownership and lifetime
+### Node ownership
 
-`Node` is the abstract base class for every object managed by the framework.
-Every node is either a *root node* (owned by the `Application`) or a *child* of
-another node. The parent owns its children and deletes them on destruction.
+Every `Node` belongs to a parent–child ownership tree. The parent destructs its
+children. Root nodes (no parent) are managed by the `Application`.
 
 ```cpp
-// Parent owns child: child is deleted when parent is deleted.
-auto* child = new MyNode(parent);
-
-// Adopt an existing node.
-parent->addChild(orphan);
-
-// Schedule deferred deletion through the event loop.
-// Safe to call from within signal handlers or update().
-node->deleteLater();
+auto* child = new MyNode(parent);   // parent owns child
+node->deleteLater();                // safe deferred deletion
 ```
 
-> **Important:** do not create a `Node` subclass on the stack and then call
-> `addChild` or `deleteLater` on it — stack-allocated nodes must be destructed
-> normally by going out of scope.
+### `NodePtr<T>` — safe references
 
-### `NodePtr<T>` — safe node references
-
-`NodePtr<T>` wraps a raw node pointer together with a *generation counter*.
-It becomes `false` (expired) automatically as soon as the target node is deleted,
-preventing use-after-free.
+Wraps a raw pointer + generation counter. Becomes `false` when the target is
+deleted, preventing use-after-free.
 
 ```cpp
 NodePtr<MyNode> ptr(node);
-if (ptr) {
-    ptr->doWork();   // Safe: node is still alive.
-}
-```
-
-Always pass a `NodePtr<Receiver>` when connecting a signal to a member function
-so that the connection is automatically invalidated when the receiver is deleted:
-
-```cpp
-signal.connect(NodePtr<MyNode>(node), &MyNode::onFired);
+if (ptr) { ptr->doWork(); }
 ```
 
 ### Signals and connections
 
-`Signal<Args...>` is a type-safe, thread-aware publish/subscribe mechanism.
-
-| Connection type | Delivery | Use when |
-|---|---|---|
-| `Direct` *(default)* | Synchronous, on the emitter's thread | Emitter and receiver share the same thread |
-| `Queued` | Posted to the receiver's `EventLoop` | Cross-thread signal delivery |
+| `ConnectionType` | Delivery |
+|---|---|
+| `Direct` *(default)* | Synchronous on the emitter's thread |
+| `Queued` | Posted to the receiver's `EventLoop` |
 
 ```cpp
 Signal<int> sig;
-
-// Direct connection (default)
-Connection conn = sig.connect([](int v) { /* runs on emitter's thread */ });
-
-// Queued connection — safe for cross-thread use
-sig.connect(NodePtr<Worker>(worker), &Worker::onValue, ConnectionType::Queued);
-
-// Disconnect explicitly
-conn.disconnect();
+sig.connect([](int v) { /* direct */ });
+sig.connect(NodePtr<Worker>(w), &Worker::onValue, ConnectionType::Queued);
 ```
-
-Connections to a `NodePtr<Receiver>` are invalidated automatically when the
-receiver is deleted.
 
 ### Application and EventLoop
 
-`Application` owns the main thread's `EventLoop`. Each thread that calls
-`getOrCreateCurrentThreadEventLoop()` gets its own independent `EventLoop`.
-
 ```cpp
 Application app(argc, argv);
-// ... create nodes, connect signals ...
-return app.run();   // Blocks until app.quit() or the last EventLoop stops.
-```
+return app.run();   // blocks until quit()
 
-To post work onto a specific thread:
-
-```cpp
-eventLoop->post([]() { /* runs on the EventLoop's thread */ });
+// Register a new thread and post work to it:
+app.getOrCreateCurrentThreadEventLoop();
+loop->post([]() { /* runs on this thread */ });
 ```
 
 ### Timer
 
-`Timer` schedules repeating or one-shot callbacks on its owner thread.
-
 ```cpp
 Timer t;
-t.setInterval(500ms);
-t.setSingleShot(false);
-t.timeout.connect([]() { /* called every 500 ms */ });
-t.start();
+t.timeout.connect([]() { /* every 500 ms */ });
+t.start(500ms);
 
-// Free-standing one-shot timer (self-destructs after firing)
-Timer::singleShot(1000ms, []() { /* called once after 1 s */ });
+Timer::singleShot(1000ms, []() { /* once */ });
 ```
 
 ---
@@ -327,48 +255,63 @@ Timer::singleShot(1000ms, []() { /* called once after 1 s */ });
 
 | CMake variable | Default | Description |
 |---|---|---|
-| `SNF_ENABLE_TESTS` | `ON` if top-level, `OFF` otherwise | Build unit tests with GoogleTest |
+| `SNF_ENABLE_TESTS` | `ON` if top-level | Build unit tests (GoogleTest) |
+| `SNF_ENABLE_EXAMPLES` | `ON` if top-level | Build in-tree examples |
+| `SNF_WEB_ASSEMBLY` | `OFF` | Build `SNFCore` for WebAssembly (requires Emscripten toolchain) |
+
+---
+
+## Guides
+
+Step-by-step documentation lives in [`docs/guides/`](docs/guides/):
+
+| Guide | Description |
+|---|---|
+| [Building with Emscripten](docs/guides/building-with-emscripten.md) | Compile an SNFWidgets app to WebAssembly and run it in a browser or Node.js — no platform `#ifdef`s needed |
+| [Thread Affinity](docs/guides/thread-affinity.md) | Cross-thread signal delivery with `moveToThread()` and `Queued` connections |
 
 ---
 
 ## API Reference
 
-Full API documentation can be generated locally with [Doxygen](https://www.doxygen.nl):
+Generate locally with [Doxygen](https://www.doxygen.nl):
 
 ```bash
 doxygen docs/Doxyfile
+# open docs/html/index.html
 ```
 
-Open `docs/html/index.html` in a browser.
+---
 
-## TODO list
+## TODO
 
+### General
 - [x] Ini parser
-- [x] Json wrapper using nlohmann/json
-- [ ] Serial Port class
-- [ ] TLV Packet (Type-Length-Value), helper class to send packets through TCP/Unix socket
-- [x] WebSocket support
-- [x] HTTP server
-- [x] HTTP Request/Response parser
-- [ ] Embed assets/data into the binary (e.g. for serving static files in an HTTP server)
-- [ ] HTTP request handler (e.g. for REST APIs)
-- [ ] ALSA audio support
+- [x] JSON wrapper (nlohmann/json)
+- [x] HTTP server + request/response parser
+- [ ] TLV Packet helper (`[magic:4][flags:1][type:2][len:4][payload:N]`)
+- [ ] Embed static assets into binary
+
+### Core
+- [ ] File system watcher (inotify)
+- [ ] Process management (spawn, stdout/stderr capture)
+- [ ] Plugin system (runtime shared-library loading)
+- [ ] Per-node update flag (skip `update()` when no work is pending)
+
+### Network
+- [x] UDP socket
+- [x] WebSocket
+- [ ] HTTP client
+- [ ] Serial port
 
 ### Widgets
 - [ ] SelectionModel
-- [ ] ItemDelegate: for rendering items in a view (e.g. buttons, checkboxes, etc.)
-- [ ] Validator: for validating user input in widgets (e.g. regex, range, etc.)
+- [ ] ItemDelegate
+- [ ] Validator
 
-# Database
-- [ ] SQLite wrapper
+### Database
+- [x] SQLite wrapper + SqlTableModel
 - [ ] MySQL wrapper
 
-### TLV
-This is how I see the spec of the posible TLV packet:
-`[magic:4][flags:1][type:2][payload_len:4][payload:N]`
-Where: 
-- `magic` = 4 Bytes "SNF1" means SimplyNodeFramework1
-- `flags` = 1 Byte, bitfield for future use (e.g. compression, encryption, etc.)
-- `type` = 2 Bytes, user-defined packet type identifier, first byte could be my system PING, the rest are user defined.
-- `payload_len` = 4 Bytes, length of the payload in bytes (N)
-- `payload` = N Bytes, the actual data of the packet
+### Audio
+- [ ] ALSA wrapper
