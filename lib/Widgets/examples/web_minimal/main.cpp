@@ -35,9 +35,5 @@ int main()
     webApp.initialized.connect([]() {
         std::printf("SNFWidgets: ready\n");
     });
-
-    // run() enters the Emscripten main loop (does not return on web).
-    webApp.run();
-
-    return 0;
+    return app.run();
 }

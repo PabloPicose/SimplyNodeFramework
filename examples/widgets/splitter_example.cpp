@@ -87,13 +87,13 @@ int main()
     snf::Application app(0, nullptr);
     SensorModel sensorModel;
 
-    auto* webApp = new wg::ApplicationNode();
-    webApp->setTitle("SNF Splitter Example");
+    wg::ApplicationNode webApp;
+    webApp.setTitle("SNF Splitter Example");
 
     // -----------------------------------------------------------------------
     // Main window
     // -----------------------------------------------------------------------
-    auto* window = new wg::Window("Splitter layout demo", webApp);
+    auto* window = new wg::Window("Splitter layout demo", &webApp);
     window->setInitialSize(1000.0f, 620.0f);
     window->setInitialPosition(24.0f, 24.0f);
     window->setResizable(true);
@@ -233,8 +233,5 @@ int main()
     // -----------------------------------------------------------------------
     // Run
     // -----------------------------------------------------------------------
-    webApp->run();
-    delete webApp;
-
-    return 0;
+    return app.run();
 }

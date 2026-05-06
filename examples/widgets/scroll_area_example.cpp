@@ -79,10 +79,10 @@ int main()
     TwentyRowModel leftModel("A");
     TwentyRowModel rightModel("B");
 
-    auto* webApp = new wg::ApplicationNode();
-    webApp->setTitle("SNF ScrollArea Example");
+    wg::ApplicationNode webApp;
+    webApp.setTitle("SNF ScrollArea Example");
 
-    auto* window = new wg::Window("ScrollArea A/B demo", webApp);
+    auto* window = new wg::Window("ScrollArea A/B demo", &webApp);
     window->setInitialSize(980.0f, 620.0f);
     window->setInitialPosition(28.0f, 28.0f);
     window->setResizable(true);
@@ -133,7 +133,7 @@ int main()
     rightTable->setStretchLastColumn(true);
     scrollArea->setWidget(rightTable);
 
-    auto* isolatedWindow = new wg::Window("ScrollArea + TableView only", webApp);
+    auto* isolatedWindow = new wg::Window("ScrollArea + TableView only", &webApp);
     isolatedWindow->setInitialSize(540.0f, 420.0f);
     isolatedWindow->setInitialPosition(1040.0f, 28.0f);
     isolatedWindow->setResizable(true);
@@ -155,9 +155,5 @@ int main()
     isolatedTable->setModel(&rightModel);
     isolatedTable->setSelectionBehavior(wg::TableSelectionBehavior::Rows);
     isolatedScrollArea->setWidget(isolatedTable);
-
-    webApp->run();
-    delete webApp;
-
-    return 0;
+    return app.run();
 }

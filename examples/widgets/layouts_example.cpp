@@ -20,16 +20,16 @@ int main()
 {
     snf::Application app(0, nullptr);
 
-    auto* appNode = new wg::ApplicationNode();
-    appNode->setTitle("SNF Layouts Example");
+    wg::ApplicationNode appNode;
+    appNode.setTitle("SNF Layouts Example");
 
     // IMGUI DEMO
-    new wg::ImGuiDemoWindow(appNode);
+    new wg::ImGuiDemoWindow(&appNode);
 
     // -----------------------------------------------------------------------
     // Main window
     // -----------------------------------------------------------------------
-    auto* window = new wg::Window("Layouts demo", appNode);
+    auto* window = new wg::Window("Layouts demo", &appNode);
     window->setInitialSize(520.0f, 400.0f);
     window->setInitialPosition(40.0f, 40.0f);
     window->setResizable(true);
@@ -201,8 +201,5 @@ int main()
         progressBar->setOverlayText("0 %");
         statusLabel->setText("Ready.");
     });
-
-    appNode->run();
-    delete appNode;
-    return 0;
+    return app.run();
 }

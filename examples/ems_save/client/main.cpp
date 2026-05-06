@@ -82,7 +82,5 @@ int main()
         // from, but on port 8765.
         ws.connectToCurrentHost(8765);
     });
-
-    webApp.run();
-    return 0;
+    return app.run();
 }

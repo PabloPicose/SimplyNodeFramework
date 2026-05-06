@@ -119,10 +119,10 @@ int main()
     snf::Application app(0, nullptr);
     DeviceModel deviceModel;
 
-    auto* webApp = new wg::ApplicationNode();
-    webApp->setTitle("SNF Tabs Example");
+    wg::ApplicationNode webApp;
+    webApp.setTitle("SNF Tabs Example");
 
-    auto* window = new wg::Window("Tabs demo", webApp);
+    auto* window = new wg::Window("Tabs demo", &webApp);
     window->setInitialSize(1180.0f, 720.0f);
     window->setInitialPosition(28.0f, 28.0f);
     window->setResizable(true);
@@ -270,9 +270,5 @@ int main()
         }
         tabs->removeTab(tabs->currentIndex());
     });
-
-    webApp->run();
-    delete webApp;
-
-    return 0;
+    return app.run();
 }

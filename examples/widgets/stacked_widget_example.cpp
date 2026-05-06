@@ -115,10 +115,10 @@ static wg::Widget* createProgressPage(wg::Window* win)
 int main(int argc, char** argv)
 {
     snf::Application app(argc, argv);
-    auto* appNode = new wg::ApplicationNode();
-    appNode->setTitle("SNF StackedWidget Example");
+    wg::ApplicationNode appNode;
+    appNode.setTitle("SNF StackedWidget Example");
 
-    auto* window = new wg::Window("StackedWidget demo", appNode);
+    auto* window = new wg::Window("StackedWidget demo", &appNode);
     window->setInitialSize(800.0f, 520.0f);
     window->setInitialPosition(40.0f, 40.0f);
     window->setResizable(true);
@@ -198,9 +198,5 @@ int main(int argc, char** argv)
             updateLabel();
         }
     });
-
-    appNode->run();
-    delete appNode;
-
-    return 0;
+    return app.run();
 }

@@ -132,8 +132,5 @@ int main()
     wg::TableView table(&window);
     table.setModel(&model);
     main_layout.addWidget(&table);
-    // run() enters the Emscripten main loop (does not return on web).
-    webApp.run();
-
-    return 0;
+    return app.run();
 }

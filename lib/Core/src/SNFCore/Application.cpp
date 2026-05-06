@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
+#include <utility>
 
 #include "CommandLineParser.h"
 #include "EventLoop.h"
@@ -66,6 +67,15 @@ void Application::loopOnce()
 
 int Application::run()
 {
+    RunLoopDriver driver;
+    {
+        std::lock_guard<std::mutex> lock(m_runLoopDriverMutex);
+        driver = m_runLoopDriver;
+    }
+    if (driver) {
+        return driver();
+    }
+
     if (EventLoop* loop = mainEventLoop()) {
         loop->run();
     }
@@ -254,6 +264,33 @@ bool Application::allEventLoopsIdle() const
 ThreadPool* Application::threadPool() const
 {
     return m_threadPool.get();
+}
+
+void Application::setRunLoopDriver(void* owner, RunLoopDriver driver)
+{
+    if (! owner) {
+        throw std::invalid_argument("Run loop driver owner must not be null");
+    }
+    if (! driver) {
+        throw std::invalid_argument("Run loop driver must not be empty");
+    }
+
+    std::lock_guard<std::mutex> lock(m_runLoopDriverMutex);
+    if (m_runLoopDriverOwner && m_runLoopDriverOwner != owner) {
+        throw std::runtime_error("Only one Application run loop driver can be registered");
+    }
+
+    m_runLoopDriverOwner = owner;
+    m_runLoopDriver = std::move(driver);
+}
+
+void Application::clearRunLoopDriver(void* owner)
+{
+    std::lock_guard<std::mutex> lock(m_runLoopDriverMutex);
+    if (m_runLoopDriverOwner == owner) {
+        m_runLoopDriver = nullptr;
+        m_runLoopDriverOwner = nullptr;
+    }
 }
 
 }  // namespace snf

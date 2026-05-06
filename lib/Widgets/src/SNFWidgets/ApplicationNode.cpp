@@ -71,10 +71,21 @@ void resizeToBrowser(GLFWwindow* window)
 
 // ── ApplicationNode ───────────────────────────────────────────────────────────
 
-ApplicationNode::ApplicationNode(snf::Node* parent) : snf::Node(parent) {}
+ApplicationNode::ApplicationNode(snf::Node* parent) : snf::Node(parent)
+{
+    if (snf::Application* app = snf::Application::instance()) {
+        app->setRunLoopDriver(this, [this]() {
+            run();
+            return 0;
+        });
+    }
+}
 
 ApplicationNode::~ApplicationNode()
 {
+    if (snf::Application* app = snf::Application::instance()) {
+        app->clearRunLoopDriver(this);
+    }
     destroyWindow();
 }
 

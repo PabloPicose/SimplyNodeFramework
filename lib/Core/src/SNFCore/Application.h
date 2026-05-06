@@ -7,6 +7,7 @@
  */
 
 #include <cstdint>
+#include <functional>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -46,6 +47,9 @@ class ThreadPool;
 class Application
 {
 public:
+    /** @brief Callable type used by modules that provide their own main loop. */
+    using RunLoopDriver = std::function<int()>;
+
     /**
      * @brief Constructs the Application singleton.
      * @param argc Argument count from `main()`.
@@ -77,9 +81,13 @@ public:
     void loopOnce();
 
     /**
-     * @brief Starts the main event loop and blocks until `quit()` is called
-     *        or the last EventLoop stops.
-     * @return Exit code (always 0 in the current implementation).
+     * @brief Starts the application main loop.
+     *
+     * If a module such as SNFWidgets has registered a run-loop driver, this
+     * delegates to that driver. Otherwise it runs the main SNFCore EventLoop
+     * until `quit()` is called or the loop stops.
+     *
+     * @return Exit code from the registered driver, or 0 for the default loop.
      */
     int run();
 
@@ -175,6 +183,24 @@ public:
     /** @brief Returns the Application-owned global ThreadPool. */
     ThreadPool* threadPool() const;
 
+    /**
+     * @brief Registers a module-owned main-loop driver used by `run()`.
+     *
+     * Framework modules such as SNFWidgets use this hook when the platform
+     * event loop is not the plain SNFCore EventLoop. End-user code should
+     * still call `Application::run()`, Qt-style, after constructing the
+     * application objects.
+     *
+     * @param owner Stable pointer that identifies the registering object.
+     * @param driver Main-loop callable invoked by `Application::run()`.
+     */
+    void setRunLoopDriver(void* owner, RunLoopDriver driver);
+
+    /**
+     * @brief Clears the registered main-loop driver if @p owner registered it.
+     */
+    void clearRunLoopDriver(void* owner);
+
 private:
     void pushRootNodeDeleteLater(Node* node);
 
@@ -216,6 +242,9 @@ private:
 
     std::unique_ptr<CommandLineParser> m_commandLineParser;
     std::unique_ptr<ThreadPool> m_threadPool;
+    RunLoopDriver m_runLoopDriver;
+    void* m_runLoopDriverOwner = nullptr;
+    mutable std::mutex m_runLoopDriverMutex;
 
     int m_argc = 0;
 

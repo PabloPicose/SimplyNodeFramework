@@ -53,9 +53,5 @@ int main()
     button.clicked.connect([&ticks]() {
         std::printf("Button clicked — ticks so far: %d\n", ticks);
     });
-
-    // run() enters the Emscripten main loop (does not return on web).
-    webApp.run();
-
-    return 0;
+    return app.run();
 }

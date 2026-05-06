@@ -62,9 +62,11 @@ git clone https://github.com/PabloPicose/SimplyNodeFramework.git
 
 ### `main.cpp`
 
-`ApplicationNode::run()` drives the entire loop — on Emscripten it hands control
-to `requestAnimationFrame`; on desktop it runs a standard GLFW while-loop.
-Application code never deals with either platform directly.
+`Application::run()` drives the entire application. When an
+`ApplicationNode` exists, it registers the widgets main loop with
+`Application`: on Emscripten it hands control to `requestAnimationFrame`; on
+desktop it runs a standard GLFW while-loop. Application code never deals with
+either platform directly.
 
 ```cpp
 #include <SNFCore/Application.h>
@@ -115,9 +117,7 @@ int main()
     ticker.start(std::chrono::milliseconds(1000));
 
     // Does not return on Emscripten; blocks until window close on desktop.
-    appNode.run();
-
-    return 0;
+    return app.run();
 }
 ```
 
@@ -249,9 +249,9 @@ Always run `emcmake cmake …` (not plain `cmake`) when targeting WebAssembly.
 You set the flag but forgot `emcmake`. Use `emcmake cmake …`.
 
 **Timers or signals don't fire**  
-Make sure you are using `ApplicationNode::run()`. Do **not** call
-`Application::run()` or `EventLoop::run()` manually — `ApplicationNode` handles
-the event loop internally.
+Make sure you create an `ApplicationNode` before calling `Application::run()`.
+Do **not** call `EventLoop::run()` manually — `ApplicationNode` handles the
+event loop internally.
 
 **Blank page in the browser**  
 Open the browser DevTools console (F12). Most startup errors (missing `.wasm`,

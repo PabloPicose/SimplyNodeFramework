@@ -76,6 +76,34 @@ TEST_F(CoreFixture, createNodeRoot)
     EXPECT_EQ(Application::instance()->getRootNodesCount(), 0);
 }
 
+TEST_F(CoreFixture, applicationRunUsesRegisteredRunLoopDriver)
+{
+    int owner = 0;
+    bool called = false;
+
+    Application::instance()->setRunLoopDriver(&owner, [&]() {
+        called = true;
+        return 7;
+    });
+
+    EXPECT_EQ(Application::instance()->run(), 7);
+    EXPECT_TRUE(called);
+
+    Application::instance()->clearRunLoopDriver(&owner);
+}
+
+TEST_F(CoreFixture, applicationAllowsOnlyOneRunLoopDriver)
+{
+    int firstOwner = 0;
+    int secondOwner = 0;
+
+    Application::instance()->setRunLoopDriver(&firstOwner, []() { return 0; });
+
+    EXPECT_THROW(Application::instance()->setRunLoopDriver(&secondOwner, []() { return 0; }), std::runtime_error);
+
+    Application::instance()->clearRunLoopDriver(&firstOwner);
+}
+
 TEST_F(CoreFixture, addChildConstructor)
 {
     EXPECT_EQ(Application::instance()->getRootNodesCount(), 0);

@@ -59,7 +59,7 @@ namespace widgets {
  * btn.clicked.connect([]() { std::printf("Apply!\n"); });
  *
  * // Does not return on Emscripten; blocks until window close on desktop.
- * appNode.run();
+ * return app.run();
  * @endcode
  */
 class ApplicationNode : public snf::Node
@@ -78,6 +78,10 @@ public:
 
     /**
      * @brief Starts the window and enters the main loop.
+     *
+     * Prefer calling `snf::Application::run()` from application code. This
+     * method remains available for lower-level integrations and backwards
+     * compatibility.
      *
      * On Emscripten this calls `emscripten_set_main_loop_arg()` and does
      * **not** return.  On desktop it runs a blocking GLFW while-loop that

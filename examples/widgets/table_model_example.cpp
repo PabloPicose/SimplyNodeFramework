@@ -122,10 +122,10 @@ int main()
     snf::Application app(0, nullptr);
     PeopleModel model;
 
-    auto* webApp = new wg::ApplicationNode();
-    webApp->setTitle("SNF Table Model Example");
+    wg::ApplicationNode webApp;
+    webApp.setTitle("SNF Table Model Example");
 
-    auto* window = new wg::Window("TableView 3-column model", webApp);
+    auto* window = new wg::Window("TableView 3-column model", &webApp);
     window->setInitialSize(900.0f, 560.0f);
     window->setInitialPosition(32.0f, 32.0f);
 
@@ -262,15 +262,9 @@ int main()
     mapper.setCurrentRow(0);
     applyEditMode();
 
-    webApp->initialized.connect([]() {
+    webApp.initialized.connect([]() {
         std::printf("SNFWidgets table/model example ready\n");
     });
 
-    webApp->run();
-
-    // ApplicationNode owns the Window, and the Window owns every widget/layout
-    // created above through the Node parent-child tree.
-    delete webApp;
-
-    return 0;
+    return app.run();
 }
