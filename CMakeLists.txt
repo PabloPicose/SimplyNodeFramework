@@ -23,10 +23,10 @@ option(SNF_EXPERIMENTAL
     OFF)
 option(SNF_ENABLE_SQLITE
     "Enable SQLite support in SNFDatabase"
-    ON)
+    OFF)
 option(SNF_ENABLE_SNMP
     "Build the SNFSnmp module (requires net-snmp / libsnmp-dev)"
-    ON)
+    OFF)
 
 # Safety checks: mismatching toolchain / option causes a clear configure error.
 if(EMSCRIPTEN AND NOT SNF_WEB_ASSEMBLY)

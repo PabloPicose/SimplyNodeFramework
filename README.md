@@ -8,10 +8,16 @@
 A modular C++ library providing an event-driven, node-based runtime.
 Requires **C++17**. Primary target is **Linux** (epoll); **WebAssembly** (Emscripten) is supported for `SNFCore`.
 
-| Package | Contents |
-|---|---|
-| **`SNFCore`** | Event loop, node ownership tree, timers, signals, cross-thread dispatch |
-| **`SNFNetwork`** | TCP/Unix sockets (non-blocking, epoll-based). Linux only. |
+| Package             | Contents                                                                         | Dependencies           |
+| ------------------- | -------------------------------------------------------------------------------- | ---------------------- |
+| **`SNFCore`**       | Event loop, node ownership tree, timers, signals, cross-thread dispatch          | pthread                |
+| **`SNFNetwork`**    | TCP/Unix sockets (non-blocking, epoll-based). Linux only.                        | SNFCore                |
+| **`SNFWidgets`**    | Dear ImGui + GLFW integration, main loop abstraction for desktop and WebAssembly | SNFCore, ImGui, GLFW   |
+| **`SNFDatabase`**   | SQLite wrapper and `SqlTableModel`                                               | SNFCore, SQLite        |
+| **`SNFSnmp`**       | SNMP client and agent implementation (Linux only)                                | SNFCore, net-snmp      |
+| **`SNFHttpServer`** | HTTP server and request/response parser (Linux only)                             | SNFCore                |
+| **`SNFWebSocket`**  | WebSocket client and server implementation (Linux and WebAssembly)               | SNFCore                |
+| **`SNFJson`**       | JSON wrapper around nlohmann/json                                                | SNFCore, nlohmann_json |
 
 ---
 
@@ -217,10 +223,10 @@ if (ptr) { ptr->doWork(); }
 
 ### Signals and connections
 
-| `ConnectionType` | Delivery |
-|---|---|
-| `Direct` *(default)* | Synchronous on the emitter's thread |
-| `Queued` | Posted to the receiver's `EventLoop` |
+| `ConnectionType`     | Delivery                             |
+| -------------------- | ------------------------------------ |
+| `Direct` *(default)* | Synchronous on the emitter's thread  |
+| `Queued`             | Posted to the receiver's `EventLoop` |
 
 ```cpp
 Signal<int> sig;
@@ -253,11 +259,13 @@ Timer::singleShot(1000ms, []() { /* once */ });
 
 ## Build options
 
-| CMake variable | Default | Description |
-|---|---|---|
-| `SNF_ENABLE_TESTS` | `ON` if top-level | Build unit tests (GoogleTest) |
-| `SNF_ENABLE_EXAMPLES` | `ON` if top-level | Build in-tree examples |
-| `SNF_WEB_ASSEMBLY` | `OFF` | Build `SNFCore` for WebAssembly (requires Emscripten toolchain) |
+| CMake variable        | Default           | Description                                                     |
+| --------------------- | ----------------- | --------------------------------------------------------------- |
+| `SNF_ENABLE_TESTS`    | `ON` if top-level | Build unit tests (GoogleTest)                                   |
+| `SNF_ENABLE_EXAMPLES` | `ON` if top-level | Build in-tree examples                                          |
+| `SNF_WEB_ASSEMBLY`    | `OFF`             | Build `SNFCore` for WebAssembly (requires Emscripten toolchain) |
+| `SNF_ENABLE_SQLITE`   | `OFF`             | Build `SNFDatabase` with SQLite support                         |
+| `SNF_ENABLE_SNMP`     | `OFF`             | Build `SNFSnmp` with net-snmp support (Linux only)              |
 
 ---
 
@@ -265,10 +273,10 @@ Timer::singleShot(1000ms, []() { /* once */ });
 
 Step-by-step documentation lives in [`docs/guides/`](docs/guides/):
 
-| Guide | Description |
-|---|---|
+| Guide                                                               | Description                                                                                                |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | [Building with Emscripten](docs/guides/building-with-emscripten.md) | Compile an SNFWidgets app to WebAssembly and run it in a browser or Node.js — no platform `#ifdef`s needed |
-| [Thread Affinity](docs/guides/thread-affinity.md) | Cross-thread signal delivery with `moveToThread()` and `Queued` connections |
+| [Thread Affinity](docs/guides/thread-affinity.md)                   | Cross-thread signal delivery with `moveToThread()` and `Queued` connections                                |
 
 ---
 
