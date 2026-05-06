@@ -9,4 +9,5 @@ target_link_libraries(SNFDatabaseTests
         GTest::gtest_main
 )
 
-add_test(NAME SNFDatabaseTests COMMAND SNFDatabaseTests)
+include(GoogleTest)
+gtest_discover_tests(SNFDatabaseTests)

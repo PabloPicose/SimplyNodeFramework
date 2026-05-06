@@ -18,4 +18,5 @@ target_include_directories(SNFNetworkTests
         "${CMAKE_CURRENT_SOURCE_DIR}/../src"
 )
 
-add_test(NAME SNFNetworkTests COMMAND SNFNetworkTests)
+include(GoogleTest)
+gtest_discover_tests(SNFNetworkTests)

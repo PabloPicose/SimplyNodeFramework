@@ -25,3 +25,6 @@ add_test(
     COMMAND SNFWebSocketTests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+include(GoogleTest)
+gtest_discover_tests(SNFWebSocketTests)

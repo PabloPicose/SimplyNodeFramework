@@ -18,4 +18,5 @@ target_link_libraries(SNFCoreTests
         GTest::gtest_main
 )
 
-add_test(NAME SNFCoreTests COMMAND SNFCoreTests)
+include(GoogleTest)
+gtest_discover_tests(SNFCoreTests)

@@ -17,3 +17,6 @@ target_include_directories(SNFSnmpTests
 )
 
 add_test(NAME SNFSnmpTests COMMAND SNFSnmpTests)
+
+include(GoogleTest)
+gtest_discover_tests(SNFSnmpTests)

@@ -16,4 +16,5 @@ target_include_directories(SNFJsonTests
         "${CMAKE_CURRENT_SOURCE_DIR}/../src"
 )
 
-add_test(NAME SNFJsonTests COMMAND SNFJsonTests)
+include(GoogleTest)
+gtest_discover_tests(SNFJsonTests)

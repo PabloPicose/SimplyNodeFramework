@@ -8,4 +8,5 @@ target_link_libraries(SNFExperimentalTests
         GTest::gtest_main
 )
 
-add_test(NAME SNFExperimentalTests COMMAND SNFExperimentalTests)
+include(GoogleTest)
+gtest_discover_tests(SNFExperimentalTests)

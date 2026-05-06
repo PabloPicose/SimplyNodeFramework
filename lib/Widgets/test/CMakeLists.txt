@@ -33,4 +33,5 @@ target_include_directories(SNFWidgetsTests
 
 target_compile_features(SNFWidgetsTests PRIVATE cxx_std_17)
 
-add_test(NAME SNFWidgetsTests COMMAND SNFWidgetsTests)
+include(GoogleTest)
+gtest_discover_tests(SNFWidgetsTests)
