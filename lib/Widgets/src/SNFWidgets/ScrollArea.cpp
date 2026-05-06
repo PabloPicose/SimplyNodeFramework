@@ -184,7 +184,7 @@ void ScrollArea::renderWithAvailableSize(float width, float height)
     ImGui::PushID(this);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::SetNextWindowContentSize(ImVec2(explicitContentWidth, explicitContentHeight));
-    if (ImGui::BeginChild("viewport", ImVec2(width, height), ImGuiChildFlags_None, scrollWindowFlags())) {
+    if (ImGui::BeginChild("viewport", ImVec2(width, height), ImGuiChildFlags_NavFlattened, scrollWindowFlags())) {
         renderContent(content.width, content.height);
     }
     ImGui::EndChild();

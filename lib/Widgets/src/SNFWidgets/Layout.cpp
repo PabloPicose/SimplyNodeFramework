@@ -33,6 +33,12 @@ float defaultVerticalSpacing()
 {
     return ImGui::GetCurrentContext() ? ImGui::GetStyle().ItemSpacing.y : 0.0f;
 }
+
+bool isMinimumItem(Layout::LayoutItemType type)
+{
+    return type == Layout::LayoutItemType::Widget
+        || type == Layout::LayoutItemType::FixedSpacer;
+}
 }  // namespace
 
 Layout::Layout(snf::Node* parent) : Widget(parent) {}
@@ -236,7 +242,11 @@ void Layout::renderImGuiConstrained(float width, float height)
 
     ImGui::PushID(this);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    const bool visible = ImGui::BeginChild("layout_bounds", ImVec2(childWidth, childHeight), ImGuiChildFlags_None, childFlags);
+    const bool visible = ImGui::BeginChild(
+        "layout_bounds",
+        ImVec2(childWidth, childHeight),
+        ImGuiChildFlags_NavFlattened,
+        childFlags);
     ImGui::PopStyleVar();
     if (visible) {
         renderImGui();
@@ -258,17 +268,23 @@ Size VBoxLayout::sizeHint() const
     float width = 0.0f;
     float height = 0.0f;
 
+    int minimumItemCount = 0;
     for (const auto& item : active) {
         if (item.type == LayoutItemType::Widget) {
             const Size hint = item.widget ? item.widget->sizeHint() : Size{};
             width = std::max(width, hint.width);
             height += std::max(0.0f, hint.height);
+            minimumItemCount++;
         } else if (item.type == LayoutItemType::FixedSpacer) {
             height += item.fixedSize;
+            minimumItemCount++;
         }
+        // StretchSpacer items have no minimum height and must not contribute
+        // an extra spacing gap.  Counting them here would inflate sizeHint()
+        // and cause the scroll threshold to be reached too early.
     }
 
-    height += effectiveSpacing * static_cast<float>(active.size() > 1 ? active.size() - 1 : 0);
+    height += effectiveSpacing * static_cast<float>(minimumItemCount > 1 ? minimumItemCount - 1 : 0);
     return Size{width, height};
 }
 
@@ -286,26 +302,39 @@ void VBoxLayout::renderImGui()
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, spacing()));
     }
 
+    const ImVec2 start = ImGui::GetCursorScreenPos();
+    const float availableWidth = ImGui::GetContentRegionAvail().x;
+    const float availableHeight = ImGui::GetContentRegionAvail().y;
+
     int totalStretch = 0;
     float fixedHeight = 0.0f;
+    int minimumItemCount = 0;
     for (const auto& item : active) {
         if (item.type == LayoutItemType::Widget) {
-            fixedHeight += item.widget ? item.widget->sizeHint().height : 0.0f;
+            fixedHeight += item.widget ? std::max(0.0f, item.widget->sizeHint().height) : 0.0f;
             totalStretch += item.stretch;
+            minimumItemCount++;
         } else if (item.type == LayoutItemType::FixedSpacer) {
-            fixedHeight += item.fixedSize;
+            fixedHeight += std::max(0.0f, item.fixedSize);
+            minimumItemCount++;
         } else if (item.type == LayoutItemType::StretchSpacer) {
             totalStretch += item.stretch;
         }
     }
 
-    const float availableHeight = ImGui::GetContentRegionAvail().y;
-    const float spacingHeight = effectiveSpacing * static_cast<float>(active.size() > 1 ? active.size() - 1 : 0);
+    const float spacingHeight = effectiveSpacing * static_cast<float>(minimumItemCount > 1 ? minimumItemCount - 1 : 0);
     const float stretchHeight = std::max(0.0f, availableHeight - fixedHeight - spacingHeight);
 
+    float y = start.y;
+    int renderedMinimumItems = 0;
     for (const auto& item : active) {
+        if (isMinimumItem(item.type) && renderedMinimumItems > 0) {
+            y += effectiveSpacing;
+        }
+
         if (item.type == LayoutItemType::FixedSpacer) {
-            ImGui::Dummy(ImVec2(0.0f, item.fixedSize));
+            y += std::max(0.0f, item.fixedSize);
+            ++renderedMinimumItems;
             continue;
         }
 
@@ -313,7 +342,7 @@ void VBoxLayout::renderImGui()
             const float height = totalStretch > 0
                 ? stretchHeight * static_cast<float>(item.stretch) / static_cast<float>(totalStretch)
                 : 0.0f;
-            ImGui::Dummy(ImVec2(0.0f, height));
+            y += std::max(0.0f, height);
             continue;
         }
 
@@ -322,9 +351,17 @@ void VBoxLayout::renderImGui()
         const float extraHeight = (totalStretch > 0 && item.stretch > 0)
             ? stretchHeight * static_cast<float>(item.stretch) / static_cast<float>(totalStretch)
             : 0.0f;
-        const float height = hint.height > 0.0f || extraHeight > 0.0f ? hint.height + extraHeight : -1.0f;
+        const float height = hint.height > 0.0f || extraHeight > 0.0f
+            ? std::max(0.0f, hint.height) + extraHeight
+            : -1.0f;
+        ImGui::SetCursorScreenPos(ImVec2(start.x, y));
         renderWidget(widget, -1.0f, height);
+        y += height > 0.0f ? height : std::max(0.0f, hint.height);
+        ++renderedMinimumItems;
     }
+
+    ImGui::SetCursorScreenPos(ImVec2(start.x, y));
+    ImGui::Dummy(ImVec2(std::max(0.0f, availableWidth), 0.0f));
 
     if (spacing() >= 0.0f) {
         ImGui::PopStyleVar();
@@ -346,17 +383,20 @@ Size HBoxLayout::sizeHint() const
     float width = 0.0f;
     float height = 0.0f;
 
+    int minimumItemCount = 0;
     for (const auto& item : active) {
         if (item.type == LayoutItemType::Widget) {
             const Size hint = item.widget ? item.widget->sizeHint() : Size{};
             width += std::max(0.0f, hint.width);
             height = std::max(height, hint.height);
+            minimumItemCount++;
         } else if (item.type == LayoutItemType::FixedSpacer) {
             width += item.fixedSize;
+            minimumItemCount++;
         }
     }
 
-    width += effectiveSpacing * static_cast<float>(active.size() > 1 ? active.size() - 1 : 0);
+    width += effectiveSpacing * static_cast<float>(minimumItemCount > 1 ? minimumItemCount - 1 : 0);
     return Size{width, height};
 }
 
@@ -376,6 +416,7 @@ void HBoxLayout::renderImGui()
     float fixedWidth = 0.0f;
     float maxHintHeight = 0.0f;
     int totalStretch = 0;
+    int minimumItemCount = 0;
     for (const auto& item : active) {
         if (item.type == LayoutItemType::Widget) {
             Widget* widget = item.widget.get();
@@ -383,19 +424,26 @@ void HBoxLayout::renderImGui()
             fixedWidth += std::max(0.0f, hint.width);
             maxHintHeight = std::max(maxHintHeight, hint.height);
             totalStretch += item.stretch;
+            minimumItemCount++;
         } else if (item.type == LayoutItemType::FixedSpacer) {
-            fixedWidth += item.fixedSize;
+            fixedWidth += std::max(0.0f, item.fixedSize);
+            minimumItemCount++;
         } else if (item.type == LayoutItemType::StretchSpacer) {
             totalStretch += item.stretch;
         }
     }
 
-    const float totalSpacing = effectiveSpacing * static_cast<float>(active.size() > 1 ? active.size() - 1 : 0);
+    const float totalSpacing = effectiveSpacing * static_cast<float>(minimumItemCount > 1 ? minimumItemCount - 1 : 0);
     const float remainingWidth = std::max(0.0f, availableWidth - fixedWidth - totalSpacing);
     const float layoutHeight = maxHintHeight > 0.0f ? maxHintHeight : ImGui::GetFrameHeight();
 
     float x = start.x;
+    int renderedMinimumItems = 0;
     for (const auto& item : active) {
+        if (isMinimumItem(item.type) && renderedMinimumItems > 0) {
+            x += effectiveSpacing;
+        }
+
         float itemWidth = 0.0f;
         if (item.type == LayoutItemType::Widget) {
             Widget* widget = item.widget.get();
@@ -406,19 +454,21 @@ void HBoxLayout::renderImGui()
             itemWidth = std::max(0.0f, hint.width) + extraWidth;
             ImGui::SetCursorScreenPos(ImVec2(x, start.y));
             renderWidget(widget, itemWidth > 0.0f ? itemWidth : -1.0f, -1.0f);
+            ++renderedMinimumItems;
         } else if (item.type == LayoutItemType::FixedSpacer) {
-            itemWidth = item.fixedSize;
+            itemWidth = std::max(0.0f, item.fixedSize);
+            ++renderedMinimumItems;
         } else if (item.type == LayoutItemType::StretchSpacer) {
             itemWidth = totalStretch > 0
                 ? remainingWidth * static_cast<float>(item.stretch) / static_cast<float>(totalStretch)
                 : 0.0f;
         }
 
-        x += itemWidth + effectiveSpacing;
+        x += itemWidth;
     }
 
     ImGui::SetCursorScreenPos(ImVec2(start.x, start.y + std::max(0.0f, layoutHeight)));
-    ImGui::Dummy(ImVec2(std::max(0.0f, availableWidth), 0.0f));
+    ImGui::Dummy(ImVec2(std::max(0.0f, std::max(availableWidth, x - start.x)), 0.0f));
 
     ImGui::PopID();
 }

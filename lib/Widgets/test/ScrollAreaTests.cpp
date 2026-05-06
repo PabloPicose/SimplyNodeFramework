@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "ImGuiInteractionHarness.h"
+#include "SNFWidgets/Layout.h"
 #include "SNFWidgets/TableView.h"
 #include "SNFWidgets/ScrollArea.h"
 
@@ -133,6 +134,75 @@ protected:
     void renderImGuiConstrained(float width, float height) override
     {
         TableView::renderImGuiConstrained(width, height);
+        m_lastScrollMaxX = ImGui::GetScrollMaxX();
+        m_lastScrollMaxY = ImGui::GetScrollMaxY();
+    }
+
+private:
+    float m_lastScrollMaxX = 0.0f;
+    float m_lastScrollMaxY = 0.0f;
+};
+
+class FixedSizeWidget final : public Widget
+{
+public:
+    FixedSizeWidget(float width, float height)
+        : m_width(width), m_height(height)
+    {
+    }
+
+    Size sizeHint() const override
+    {
+        return Size{m_width, m_height};
+    }
+
+protected:
+    void renderImGui() override
+    {
+        renderImGuiConstrained(m_width, m_height);
+    }
+
+    void renderImGuiConstrained(float width, float height) override
+    {
+        const float resolvedWidth = width > 0.0f ? width : m_width;
+        const float resolvedHeight = height > 0.0f ? height : m_height;
+        ImGui::Dummy(ImVec2(std::max(1.0f, resolvedWidth), std::max(1.0f, resolvedHeight)));
+    }
+
+private:
+    float m_width = 0.0f;
+    float m_height = 0.0f;
+};
+
+class RecordingVBoxLayout final : public VBoxLayout
+{
+public:
+    float lastScrollMaxX() const { return m_lastScrollMaxX; }
+    float lastScrollMaxY() const { return m_lastScrollMaxY; }
+
+protected:
+    void renderImGuiConstrained(float width, float height) override
+    {
+        VBoxLayout::renderImGuiConstrained(width, height);
+        m_lastScrollMaxX = ImGui::GetScrollMaxX();
+        m_lastScrollMaxY = ImGui::GetScrollMaxY();
+    }
+
+private:
+    float m_lastScrollMaxX = 0.0f;
+    float m_lastScrollMaxY = 0.0f;
+};
+
+class RecordingHBoxLayout final : public HBoxLayout
+{
+public:
+    float lastScrollMaxX() const { return m_lastScrollMaxX; }
+    float lastScrollMaxY() const { return m_lastScrollMaxY; }
+
+protected:
+    void renderImGuiConstrained(float width, float height) override
+    {
+        HBoxLayout::renderImGuiConstrained(width, height);
         m_lastScrollMaxX = ImGui::GetScrollMaxX();
         m_lastScrollMaxY = ImGui::GetScrollMaxY();
     }
@@ -315,4 +385,49 @@ TEST_F(ScrollAreaFixture, twentyRowTableFitsWithoutVerticalScrollWhenViewportIsT
 
     EXPECT_FLOAT_EQ(table.lastScrollMaxX(), 0.0f);
     EXPECT_FLOAT_EQ(table.lastScrollMaxY(), 0.0f);
+}
+
+TEST_F(ScrollAreaFixture, trailingVBoxStretchShrinksBeforeVerticalScrollAppears)
+{
+    test::ImGuiInteractionHarness harness;
+    TestScrollArea area;
+    RecordingVBoxLayout content;
+    FixedSizeWidget first(80.0f, 24.0f);
+    FixedSizeWidget second(80.0f, 24.0f);
+
+    content.setSpacing(4.0f);
+    content.addWidget(&first);
+    content.addWidget(&second);
+    content.addStretch(1);
+    area.setWidgetResizable(true);
+    area.setHorizontalScrollBarPolicy(ScrollArea::ScrollBarPolicy::AlwaysOff);
+    area.setWidget(&content);
+
+    renderScrollArea(harness, area, 120.0f, 84.0f);
+    renderScrollArea(harness, area, 120.0f, 84.0f);
+
+    EXPECT_FLOAT_EQ(content.lastScrollMaxX(), 0.0f);
+    EXPECT_FLOAT_EQ(content.lastScrollMaxY(), 0.0f);
+}
+
+TEST_F(ScrollAreaFixture, trailingHBoxStretchShrinksBeforeHorizontalScrollAppears)
+{
+    test::ImGuiInteractionHarness harness;
+    TestScrollArea area;
+    RecordingHBoxLayout content;
+    FixedSizeWidget first(32.0f, 24.0f);
+    FixedSizeWidget second(32.0f, 24.0f);
+
+    content.setSpacing(4.0f);
+    content.addWidget(&first);
+    content.addWidget(&second);
+    content.addStretch(1);
+    area.setWidgetResizable(true);
+    area.setWidget(&content);
+
+    renderScrollArea(harness, area, 96.0f, 64.0f);
+    renderScrollArea(harness, area, 96.0f, 64.0f);
+
+    EXPECT_FLOAT_EQ(content.lastScrollMaxX(), 0.0f);
+    EXPECT_FLOAT_EQ(content.lastScrollMaxY(), 0.0f);
 }
