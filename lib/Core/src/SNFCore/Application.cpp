@@ -18,16 +18,15 @@
 #include "NodePtr.h"
 #include "ThreadPool.h"
 
-#ifdef SNF_ENABLE_PROFILING
-// Weak default definitions — SNFProfiler provides strong overrides when linked.
-// Without SNFProfiler the calls are silent no-ops, so tests and apps that only
-// link SNFCore do not get unresolved-symbol linker errors.
+// Weak no-op fallbacks for the profiler integration points.
+// When SNFProfiler is NOT linked these are the actual definitions (no-ops).
+// When SNFProfiler IS linked its translation unit provides strong overrides
+// that replace these — the linker picks the strong symbol automatically.
 namespace snf::profiler::detail {
     __attribute__((weak)) void init() {}
     __attribute__((weak)) void shutdown() {}
     __attribute__((weak)) void disableMemoryTracker() {}
 }
-#endif
 
 namespace snf {
 
@@ -48,17 +47,13 @@ Application::Application(int argc, char** argv) : m_threadId(std::this_thread::g
     // Eagerly create the main-thread EventLoop so it is always available.
     getOrCreateCurrentThreadEventLoop();
     m_threadPool = std::make_unique<ThreadPool>();
-#ifdef SNF_ENABLE_PROFILING
     snf::profiler::detail::init();
-#endif
 }
 
 Application::~Application()
 {
     m_threadPool.reset();
-#ifdef SNF_ENABLE_PROFILING
     snf::profiler::detail::shutdown();
-#endif
     // Stop the logger after the thread pool so that pool tasks can still log,
     // but before clearing the event loops.
     m_logger->stop();
@@ -66,12 +61,10 @@ Application::~Application()
     // deletes its root nodes (and their subtrees) in the correct owner thread.
     // It also stops and joins each EventLoop's I/O thread.
     m_eventLoops.clear();
-#ifdef SNF_ENABLE_PROFILING
     // Disable the MemoryTracker only after all EventLoop I/O threads have been
     // joined — those threads may call operator new (recordAlloc) and must not
     // race with MemoryTracker::disable() destroying the tracker instance.
     snf::profiler::detail::disableMemoryTracker();
-#endif
     m_instance = nullptr;
 }
 

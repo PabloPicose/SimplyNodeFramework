@@ -42,6 +42,21 @@ target_compile_features(SNFProfiler PUBLIC cxx_std_17)
 
 target_compile_definitions(SNFProfiler PUBLIC SNF_ENABLE_PROFILING)
 
+# SNFProfiler provides strong definitions of init/shutdown/disableMemoryTracker
+# that override the weak no-ops compiled into SNFCore (Application.cpp).
+# With a STATIC library the linker only pulls in object files that resolve
+# undefined references; because Application.cpp already defines those symbols
+# (weakly) the SNFProfiler object files would be skipped unless we force them.
+# --whole-archive guarantees every object file in the library is included so
+# the strong symbols win.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    target_link_options(SNFProfiler INTERFACE
+        "LINKER:--whole-archive"
+        $<TARGET_FILE:SNFProfiler>
+        "LINKER:--no-whole-archive"
+    )
+endif()
+
 add_library(SNFProfiler::SNFProfiler ALIAS SNFProfiler)
 
 install(TARGETS SNFProfiler
