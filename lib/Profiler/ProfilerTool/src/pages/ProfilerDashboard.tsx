@@ -1,11 +1,17 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { useProfilerSocket } from '../hooks/useProfilerSocket';
+import { buildSpans } from '../spanUtils';
+import type { CompleteSpan } from '../spanUtils';
 import { TraceTimeline } from '../components/TraceTimeline';
 import { MemoryGraph } from '../components/MemoryGraph';
 import { SysMonitor } from '../components/SysMonitor';
+import { CallStackPanel } from '../components/CallStackPanel';
 
 export const ProfilerDashboard: React.FC = () => {
   const { spans, memSamples, sysSamples, connected } = useProfilerSocket();
+  const [selectedSpan, setSelectedSpan] = useState<CompleteSpan | null>(null);
+
+  const completeSpans = useMemo(() => buildSpans(spans), [spans]);
 
   return (
     <div style={{
@@ -30,29 +36,51 @@ export const ProfilerDashboard: React.FC = () => {
         </span>
       </div>
 
-      {/* Trace Timeline — full width */}
-      <section style={{ marginBottom: 20 }}>
-        <h2 style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 6px' }}>Trace Timeline</h2>
-        <div style={{ background: '#0f172a', borderRadius: 6, padding: 8, overflowX: 'auto' }}>
-          <TraceTimeline spans={spans} />
+      {/* Main layout: scrollable content + sticky side panel */}
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+
+          {/* Trace Timeline */}
+          <section style={{ marginBottom: 20 }}>
+            <h2 style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 6px' }}>Trace Timeline</h2>
+            <div style={{ background: '#0f172a', borderRadius: 6, padding: 8, overflowX: 'auto' }}>
+              <TraceTimeline
+                completeSpans={completeSpans}
+                selectedSpan={selectedSpan}
+                onSelectSpan={setSelectedSpan}
+              />
+            </div>
+          </section>
+
+          {/* Memory + Sys side by side */}
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <section style={{ flex: '1 1 460px' }}>
+              <h2 style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 6px' }}>Memory</h2>
+              <div style={{ background: '#0f172a', borderRadius: 6, padding: 8 }}>
+                <MemoryGraph samples={memSamples} />
+              </div>
+            </section>
+
+            <section style={{ flex: '1 1 360px' }}>
+              <h2 style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 6px' }}>System</h2>
+              <div style={{ background: '#0f172a', borderRadius: 6, padding: 8 }}>
+                <SysMonitor samples={sysSamples} />
+              </div>
+            </section>
+          </div>
         </div>
-      </section>
 
-      {/* Memory + Sys side by side */}
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-        <section style={{ flex: '1 1 460px' }}>
-          <h2 style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 6px' }}>Memory</h2>
-          <div style={{ background: '#0f172a', borderRadius: 6, padding: 8 }}>
-            <MemoryGraph samples={memSamples} />
+        {/* Call Stack side panel — slides in when a span is selected */}
+        {selectedSpan && (
+          <div style={{ position: 'sticky', top: 16 }}>
+            <h2 style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 6px' }}>Inspector</h2>
+            <CallStackPanel
+              selected={selectedSpan}
+              allSpans={completeSpans}
+              onClose={() => setSelectedSpan(null)}
+            />
           </div>
-        </section>
-
-        <section style={{ flex: '1 1 360px' }}>
-          <h2 style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 6px' }}>System</h2>
-          <div style={{ background: '#0f172a', borderRadius: 6, padding: 8 }}>
-            <SysMonitor samples={sysSamples} />
-          </div>
-        </section>
+        )}
       </div>
     </div>
   );
