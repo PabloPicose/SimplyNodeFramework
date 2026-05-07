@@ -33,7 +33,7 @@ export interface UseProfilerSocketResult {
   connected: boolean;
 }
 
-const MAX_SPANS   = 2000;
+const MAX_SPANS   = 8000;
 const MAX_SAMPLES = 300;
 const WS_URL      = 'ws://localhost:8765';
 

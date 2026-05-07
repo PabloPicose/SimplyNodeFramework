@@ -184,8 +184,8 @@ static void compute_chainMatrices(int steps)
 static void compute_heavyFrame(int seed)
 {
     TRACE_EVENT("compute", "heavy_frame");
-    // Recursive Fibonacci (depth 14 is fast but visible).
-    volatile double fib = compute_fibonacci(14 + (seed % 4));
+    // Recursive Fibonacci (depth 8–10: generates 41–109 spans, still shows deep nesting)
+    volatile double fib = compute_fibonacci(8 + (seed % 3));
     (void)fib;
     // Chain of matrix multiplications.
     compute_chainMatrices(8 + seed % 6);
