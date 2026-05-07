@@ -88,19 +88,19 @@ public:
                     "http://localhost:5173 to see live data.\n");
         std::fflush(stdout);
 
-        int elapsed = 0;
         auto* batchTimer = new Timer(this);
-        batchTimer->timeout.connect([this, &elapsed, batchTimer]() mutable {
+        auto elapsed = std::make_shared<int>(0);
+        batchTimer->timeout.connect([this, elapsed, batchTimer]() {
             TRACE_EVENT("frame", "tick");
 
-            loadBatch(elapsed);
+            loadBatch(*elapsed);
             computeResult();
 
-            ++elapsed;
-            std::printf("[WorkerNode] tick %d\n", elapsed);
+            ++(*elapsed);
+            std::printf("[WorkerNode] tick %d\n", *elapsed);
             std::fflush(stdout);
 
-            if (elapsed >= m_durationSeconds * 2) { // 500ms * 2 = 1s per second
+            if (*elapsed >= m_durationSeconds * 2) { // 500ms * 2 = 1s per second
                 batchTimer->stop();
                 if (auto* loop = ownerEventLoop())
                     loop->post([loop]() { loop->stop(); });
