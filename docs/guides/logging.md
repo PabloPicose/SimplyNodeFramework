@@ -67,7 +67,8 @@ destroyed at the end of the statement.
 
 The default configuration:
 - minimum level: **Debug** (all messages pass)
-- output: stderr, formatted as `<timestamp> [LEVEL] (thread-id) file:line func: text`
+- default sink: `ConsoleLogSink`
+- default console format: `[LEVEL] text` (no timestamp, no thread id, no file/line, no function)
 
 ---
 
@@ -129,7 +130,7 @@ can drain them, add a custom sink that writes asynchronously to a file.
 
 | Class | Header | Description |
 |---|---|---|
-| `ConsoleLogSink` | `<SNFCore/ConsoleLogSink.h>` | Writes to stderr (installed by default) |
+| `ConsoleLogSink` | `<SNFCore/ConsoleLogSink.h>` | Writes to stderr (installed by default), configurable fields |
 | `SignalLogSink` | `<SNFCore/SignalLogSink.h>` | Re-emits each message as `Signal<const LogMessage&>` |
 
 ### Writing a custom sink
@@ -183,6 +184,29 @@ app.logger().addSink(std::make_shared<FileSink>("new.log"));
 
 Sinks are stored as `shared_ptr`, so the logger releases ownership when the
 sink is removed but any external holder keeps it alive.
+
+### Configuring `ConsoleLogSink` fields
+
+By default, `ConsoleLogSink` prints only level + text:
+
+```text
+[INFO] service started
+```
+
+You can enable additional fields:
+
+```cpp
+snf::ConsoleLogSink::Options cfg;
+cfg.showTimestamp = true;
+cfg.showThreadId  = true;
+cfg.showFilePath  = true;
+cfg.showLine      = true;
+cfg.showFunction  = true;
+
+auto sink = std::make_shared<snf::ConsoleLogSink>(cfg);
+app.logger().clearSinks();
+app.logger().addSink(sink);
+```
 
 ---
 

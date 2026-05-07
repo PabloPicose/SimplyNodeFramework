@@ -1,9 +1,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <future>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -621,6 +623,44 @@ TEST_F(CoreFixture, childInheritsParentAffinity)
         NodePtr<TestNode> childPtr(child);
         EXPECT_FALSE(childPtr);
     }
+}
+
+TEST_F(CoreFixture, moveToThreadPoolUpdatesNodeThreadIdToWorker)
+{
+    ThreadPool* pool = Application::instance()->threadPool();
+    ASSERT_NE(pool, nullptr);
+
+    const std::vector<std::thread::id> workerIds = pool->workerThreadIds();
+    ASSERT_FALSE(workerIds.empty());
+
+    TestNode* node = new TestNode();
+    ASSERT_NE(node, nullptr);
+
+    const std::thread::id mainThreadId = std::this_thread::get_id();
+    ASSERT_EQ(node->threadId(), mainThreadId);
+
+    ASSERT_TRUE(node->moveToThreadPool());
+
+    const std::thread::id movedThreadId = node->threadId();
+    EXPECT_NE(movedThreadId, mainThreadId);
+    EXPECT_TRUE(std::find(workerIds.begin(), workerIds.end(), movedThreadId) != workerIds.end());
+
+    EventLoop* movedLoop = node->ownerEventLoop();
+    ASSERT_NE(movedLoop, nullptr);
+    EXPECT_EQ(movedLoop->ownerThreadId(), movedThreadId);
+
+    auto executedPromise = std::make_shared<std::promise<std::thread::id>>();
+    std::future<std::thread::id> executedFuture = executedPromise->get_future();
+
+    movedLoop->post([executedPromise]() {
+        executedPromise->set_value(std::this_thread::get_id());
+    });
+
+    ASSERT_EQ(executedFuture.wait_for(std::chrono::milliseconds(1000)), std::future_status::ready);
+    EXPECT_EQ(executedFuture.get(), movedThreadId);
+
+    node->deleteLater();
+    movedLoop->runPendingWork();
 }
 
 TEST_F(CoreFixture, deleteLaterOnChildAlsoDeletesGrandchild)

@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <ctime>
 #include <sstream>
+#include <string>
 
 namespace snf {
 
@@ -42,21 +43,76 @@ std::string formatTimestamp(std::chrono::system_clock::time_point tp)
 
 }  // anonymous namespace
 
+ConsoleLogSink::ConsoleLogSink() = default;
+
+ConsoleLogSink::ConsoleLogSink(const Options& options)
+    : m_options(options)
+{
+}
+
+void ConsoleLogSink::setOptions(const Options& options)
+{
+    std::lock_guard<std::mutex> lock(m_optionsMutex);
+    m_options = options;
+}
+
+ConsoleLogSink::Options ConsoleLogSink::options() const
+{
+    std::lock_guard<std::mutex> lock(m_optionsMutex);
+    return m_options;
+}
+
 void ConsoleLogSink::consume(const LogMessage& message)
 {
-    std::ostringstream oss;
-    oss << std::this_thread::get_id();
+    Options cfg;
+    {
+        std::lock_guard<std::mutex> lock(m_optionsMutex);
+        cfg = m_options;
+    }
+
+    std::ostringstream out;
+
+    if (cfg.showTimestamp) {
+        out << formatTimestamp(message.timestamp) << " ";
+    }
+
+    out << "[" << logLevelToString(message.level) << "] ";
+
+    if (cfg.showThreadId) {
+        out << "(" << message.threadId << ") ";
+    }
+
+    bool hasSourcePrefix = false;
+    if (cfg.showFilePath) {
+        out << message.file;
+        hasSourcePrefix = true;
+    }
+
+    if (cfg.showLine) {
+        if (hasSourcePrefix) {
+            out << ":" << message.line;
+        } else {
+            out << "line:" << message.line;
+        }
+        hasSourcePrefix = true;
+    }
+
+    if (cfg.showFunction) {
+        if (hasSourcePrefix) {
+            out << " ";
+        }
+        out << message.function;
+        hasSourcePrefix = true;
+    }
+
+    if (hasSourcePrefix) {
+        out << ": ";
+    }
+
+    out << message.text;
 
     // One atomic write via a single fprintf to avoid interleaving.
-    std::fprintf(stderr,
-                 "%s [%-8s] (%s) %s:%d %s: %s\n",
-                 formatTimestamp(message.timestamp).c_str(),
-                 logLevelToString(message.level),
-                 oss.str().c_str(),
-                 message.file,
-                 message.line,
-                 message.function,
-                 message.text.c_str());
+    std::fprintf(stderr, "%s\n", out.str().c_str());
 }
 
 }  // namespace snf

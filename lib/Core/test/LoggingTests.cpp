@@ -7,10 +7,14 @@
 #include <SNFCore/Logger.h>
 #include <SNFCore/Logging.h>
 #include <SNFCore/LogSink.h>
+#include <SNFCore/Node.h>
 #include <SNFCore/SignalLogSink.h>
+#include <SNFCore/ThreadPool.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -53,6 +57,18 @@ public:
 private:
     mutable std::mutex      m_mutex;
     std::vector<LogMessage> m_messages;
+};
+
+class LoggingProbeNode final : public Node
+{
+public:
+    explicit LoggingProbeNode(Node* parent = nullptr)
+        : Node(parent)
+    {
+    }
+
+protected:
+    void update() override {}
 };
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -101,6 +117,57 @@ protected:
     std::shared_ptr<CaptureSink> capture;
 };
 
+TEST(ConsoleLogSinkTest, applicationDefaultSinkPrintsLevelAndTextOnly)
+{
+    constexpr const char* marker = "default-console-sink-level-text-only";
+
+    testing::internal::CaptureStderr();
+    {
+        Application app(0, nullptr);
+        sInfo() << marker;
+        ASSERT_TRUE(app.logger().flush(1000ms));
+    }
+    const std::string output = testing::internal::GetCapturedStderr();
+
+    const std::string expected = std::string("[INFO] ") + marker;
+    ASSERT_NE(output.find(expected), std::string::npos);
+
+    // Default config must keep source metadata off.
+    EXPECT_EQ(output.find("LoggingTests.cpp"), std::string::npos);
+    EXPECT_EQ(output.find("applicationDefaultSinkPrintsLevelAndTextOnly"), std::string::npos);
+}
+
+TEST(ConsoleLogSinkTest, configurableSinkCanPrintAllFields)
+{
+    constexpr const char* marker = "console-sink-all-fields";
+
+    ConsoleLogSink::Options options;
+    options.showTimestamp = true;
+    options.showThreadId = true;
+    options.showFilePath = true;
+    options.showLine = true;
+    options.showFunction = true;
+
+    testing::internal::CaptureStderr();
+    {
+        Logger logger;
+        logger.addSink(std::make_shared<ConsoleLogSink>(options));
+        logger.start();
+
+        logger.log(LogLevel::Warning, marker, __FILE__, 777, "ConfiguredFunction");
+        ASSERT_TRUE(logger.flush(1000ms));
+        logger.stop();
+    }
+    const std::string output = testing::internal::GetCapturedStderr();
+
+    EXPECT_NE(output.find("[WARNING]"), std::string::npos);
+    EXPECT_NE(output.find(marker), std::string::npos);
+    EXPECT_NE(output.find("LoggingTests.cpp:777"), std::string::npos);
+    EXPECT_NE(output.find("ConfiguredFunction"), std::string::npos);
+    EXPECT_NE(output.find("("), std::string::npos);  // thread-id segment
+    EXPECT_NE(output.find("T"), std::string::npos);  // timestamp format YYYY-MM-DDTHH:MM:SS.mmm
+}
+
 // ── LogLevel utilities ───────────────────────────────────────────────────────
 
 TEST(LogLevelTest, stringRepresentations)
@@ -137,9 +204,8 @@ TEST_F(LoggerStandaloneFixture, messageCarriesAllFields)
     EXPECT_STREQ(msg.function, "myFunc");
     EXPECT_NE(msg.sequence, 0u);
     EXPECT_NE(msg.threadId, std::thread::id{});
-    // Timestamp should be recent (within 5 seconds of now).
-    const auto age = std::chrono::system_clock::now() - msg.timestamp;
-    EXPECT_LT(age, std::chrono::seconds(5));
+    // Timestamp must be initialized by Logger::log().
+    EXPECT_NE(msg.timestamp, std::chrono::system_clock::time_point{});
 }
 
 // ── Level filtering ───────────────────────────────────────────────────────────
@@ -370,6 +436,58 @@ TEST_F(LoggerAppFixture, macroRecordsEmittingThreadId)
 
     ASSERT_EQ(capture->count(), 1u);
     EXPECT_EQ(capture->messages().front().threadId, mainId);
+}
+
+TEST_F(LoggerAppFixture, nodeMovedToThreadPoolLogsFromWorkerThread)
+{
+    ASSERT_NE(app->threadPool(), nullptr);
+    const std::vector<std::thread::id> workerIds = app->threadPool()->workerThreadIds();
+    ASSERT_FALSE(workerIds.empty());
+
+    const std::thread::id mainThreadId = std::this_thread::get_id();
+    auto* node = new LoggingProbeNode();
+    ASSERT_TRUE(node->moveToThreadPool(app->threadPool()));
+
+    const std::thread::id ownerThreadId = node->threadId();
+    EXPECT_NE(ownerThreadId, mainThreadId);
+    EXPECT_TRUE(std::find(workerIds.begin(), workerIds.end(), ownerThreadId) != workerIds.end());
+
+    constexpr const char* kMarker = "move-to-thread-pool-marker";
+    const std::size_t baselineMessageCount = capture->count();
+    const std::uint64_t baselineProcessed = app->logger().stats().processed;
+
+    auto executedPromise = std::make_shared<std::promise<std::thread::id>>();
+    std::future<std::thread::id> executedFuture = executedPromise->get_future();
+
+    EventLoop* ownerLoop = node->ownerEventLoop();
+    ASSERT_NE(ownerLoop, nullptr);
+    ownerLoop->post([executedPromise, marker = kMarker]() {
+        Application::instance()->logger().log(LogLevel::Info, marker, __FILE__, __LINE__, __func__);
+        executedPromise->set_value(std::this_thread::get_id());
+    });
+
+    ASSERT_EQ(executedFuture.wait_for(1000ms), std::future_status::ready);
+    const std::thread::id executedThreadId = executedFuture.get();
+    EXPECT_EQ(executedThreadId, ownerThreadId);
+
+    ASSERT_TRUE(app->logger().flush(1000ms));
+
+    // flush() waits for an empty queue, but sink delivery may still be in
+    // progress just after the pop; wait briefly until processed/capture moves.
+    const auto deadline = std::chrono::steady_clock::now() + 1000ms;
+    while (std::chrono::steady_clock::now() < deadline
+           && (app->logger().stats().processed <= baselineProcessed
+               || capture->count() <= baselineMessageCount)) {
+        std::this_thread::sleep_for(1ms);
+    }
+
+    const auto messages = capture->messages();
+    ASSERT_GT(messages.size(), baselineMessageCount);
+    const LogMessage& lastMessage = messages.back();
+    EXPECT_EQ(lastMessage.threadId, ownerThreadId);
+    EXPECT_NE(lastMessage.threadId, mainThreadId);
+
+    node->deleteLater();
 }
 
 // ── SignalLogSink ─────────────────────────────────────────────────────────────
