@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import type { CompleteSpan } from '../spanUtils';
 import { fmtNs, spanColor, spanKey } from '../spanUtils';
 
@@ -70,12 +70,22 @@ export const TraceTimeline: React.FC<Props> = ({ completeSpans, selectedSpan, on
   const safeVertOffset = Math.min(vertOffset, maxVertOffset);
 
   const minTs = useMemo(() =>
-    completeSpans.length ? Math.min(...completeSpans.map(s => s.beginNs)) : 0,
+    completeSpans.reduce((m, s) => Math.min(m, s.beginNs), completeSpans[0]?.beginNs ?? 0),
     [completeSpans]);
   const maxTs = useMemo(() =>
-    completeSpans.length ? Math.max(...completeSpans.map(s => s.endNs)) : 1,
+    completeSpans.reduce((m, s) => Math.max(m, s.endNs), completeSpans[0]?.endNs ?? 1),
     [completeSpans]);
   const totalRangeNs = maxTs - minTs || 1;
+
+  // Pre-group by tid — avoids O(n) filter inside the render for every thread
+  const spansByTid = useMemo(() => {
+    const m = new Map<number, CompleteSpan[]>();
+    for (const s of completeSpans) {
+      const arr = m.get(s.tid);
+      if (arr) arr.push(s); else m.set(s.tid, [s]);
+    }
+    return m;
+  }, [completeSpans]);
 
   // ── Time viewport ─────────────────────────────────────────────────────────
   const canPan      = zoom > 1 + 1e-9;
@@ -99,8 +109,36 @@ export const TraceTimeline: React.FC<Props> = ({ completeSpans, selectedSpan, on
   }, [viewStartNs, viewEndNs, viewRangeNs]);
 
   const xForTs       = (ts: number) => LABEL_W + ((ts - viewStartNs) / viewRangeNs) * chartW;
-  const xForTsFull   = (ts: number) => LABEL_W + ((ts - minTs) / totalRangeNs) * chartW;
   const selectedKey  = selectedSpan ? spanKey(selectedSpan) : null;
+
+  // Canvas overview — draw with 2D canvas instead of thousands of SVG rects
+  const overviewCanvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = overviewCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (const s of completeSpans) {
+      const x = ((s.beginNs - minTs) / totalRangeNs) * chartW;
+      const w = Math.max(1, ((s.endNs - s.beginNs) / totalRangeNs) * chartW);
+      ctx.fillStyle = spanColor(s.cat, s.name);
+      ctx.globalAlpha = 0.7;
+      ctx.fillRect(x, 0, w, OVERVIEW_H - 4);
+    }
+    if (canPan) {
+      const vx = ((viewStartNs - minTs) / totalRangeNs) * chartW;
+      const vw = Math.max(4, ((viewEndNs - viewStartNs) / totalRangeNs) * chartW);
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, vx, OVERVIEW_H - 4);
+      ctx.fillRect(vx + vw, 0, chartW - vx - vw, OVERVIEW_H - 4);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(vx + 0.75, 0.75, Math.max(2, vw - 1.5), OVERVIEW_H - 5.5);
+    }
+  }, [completeSpans, minTs, totalRangeNs, chartW, canPan, viewStartNs, viewEndNs]);
 
   // SVG y-coordinates for fixed sections
   const contentGroupY = RULER_H - safeVertOffset;  // translate so rows appear in RULER_H..RULER_H+CONTENT_VIS_H
@@ -189,7 +227,7 @@ export const TraceTimeline: React.FC<Props> = ({ completeSpans, selectedSpan, on
               <g clipPath="url(#snf-chart-clip)">
                 {tids.map(tid => {
                   const baseY    = threadBaseY.get(tid) ?? 0;
-                  const rowSpans = completeSpans.filter(s =>
+                  const rowSpans = (spansByTid.get(tid) ?? []).filter(s =>
                     s.tid === tid && s.endNs >= viewStartNs && s.beginNs <= viewEndNs);
                   return (
                     <g key={`spans-${tid}`}>
@@ -232,33 +270,17 @@ export const TraceTimeline: React.FC<Props> = ({ completeSpans, selectedSpan, on
             </g>
           </g>
 
-          {/* ── Overview strip (fixed at bottom) ────────────────────── */}
+          {/* ── Overview strip (fixed at bottom) — canvas for perf ──── */}
           <rect x={0} y={overviewY} width={SVG_W} height={OVERVIEW_H + 1} fill="#060d1a" />
           <line x1={0} y1={overviewY} x2={SVG_W} y2={overviewY} stroke="#1e293b" strokeWidth={1} />
-          {completeSpans.map((s, i) => (
-            <rect key={i}
-              x={xForTsFull(s.beginNs)}
-              y={overviewY + 2}
-              width={Math.max(1, ((s.endNs - s.beginNs) / totalRangeNs) * chartW)}
+          <foreignObject x={LABEL_W} y={overviewY + 2} width={chartW} height={OVERVIEW_H - 4}>
+            <canvas
+              ref={overviewCanvasRef}
+              width={chartW}
               height={OVERVIEW_H - 4}
-              fill={spanColor(s.cat, s.name)} opacity={0.6} />
-          ))}
-          {canPan && (() => {
-            const vx = xForTsFull(viewStartNs);
-            const vw = Math.max(4, ((viewEndNs - viewStartNs) / totalRangeNs) * chartW);
-            return (
-              <>
-                <rect x={LABEL_W} y={overviewY}
-                  width={Math.max(0, vx - LABEL_W)} height={OVERVIEW_H}
-                  fill="rgba(0,0,0,0.55)" />
-                <rect x={vx + vw} y={overviewY}
-                  width={Math.max(0, LABEL_W + chartW - vx - vw)} height={OVERVIEW_H}
-                  fill="rgba(0,0,0,0.55)" />
-                <rect x={vx} y={overviewY} width={vw} height={OVERVIEW_H}
-                  fill="none" stroke="#38bdf8" strokeWidth={1.5} rx={1} />
-              </>
-            );
-          })()}
+              style={{ display: 'block' }}
+            />
+          </foreignObject>
         </svg>
 
         {/* ── Right-side sliders ─────────────────────────────────────── */}

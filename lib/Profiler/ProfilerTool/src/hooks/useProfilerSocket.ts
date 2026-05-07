@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 
 export interface SpanMessage {
   type: 'span';
-  ts: number;      // nanoseconds
+  ts: number;
   tid: number;
   cat: string;
   name: string;
@@ -36,6 +36,7 @@ export interface UseProfilerSocketResult {
 const MAX_SPANS   = 8000;
 const MAX_SAMPLES = 300;
 const WS_URL      = 'ws://localhost:8765';
+const FLUSH_MS    = 100;   // batch messages → max 10 React re-renders/sec
 
 export function useProfilerSocket(): UseProfilerSocketResult {
   const [spans,      setSpans]      = useState<SpanMessage[]>([]);
@@ -47,6 +48,11 @@ export function useProfilerSocket(): UseProfilerSocketResult {
   const retryDelay = useRef(1000);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mounted    = useRef(true);
+
+  // Accumulate incoming messages here; drain every FLUSH_MS
+  const spanBuf = useRef<SpanMessage[]>([]);
+  const memBuf  = useRef<MemMessage[]>([]);
+  const sysBuf  = useRef<SysMessage[]>([]);
 
   const connect = useCallback(() => {
     if (!mounted.current) return;
@@ -63,22 +69,9 @@ export function useProfilerSocket(): UseProfilerSocketResult {
       if (!mounted.current) return;
       try {
         const msg = JSON.parse(ev.data as string) as SpanMessage | MemMessage | SysMessage | { type: string };
-        if (msg.type === 'span') {
-          setSpans(prev => {
-            const next = [...prev, msg as SpanMessage];
-            return next.length > MAX_SPANS ? next.slice(next.length - MAX_SPANS) : next;
-          });
-        } else if (msg.type === 'mem') {
-          setMemSamples(prev => {
-            const next = [...prev, msg as MemMessage];
-            return next.length > MAX_SAMPLES ? next.slice(next.length - MAX_SAMPLES) : next;
-          });
-        } else if (msg.type === 'sys') {
-          setSysSamples(prev => {
-            const next = [...prev, msg as SysMessage];
-            return next.length > MAX_SAMPLES ? next.slice(next.length - MAX_SAMPLES) : next;
-          });
-        }
+        if      (msg.type === 'span') spanBuf.current.push(msg as SpanMessage);
+        else if (msg.type === 'mem')  memBuf.current.push(msg as MemMessage);
+        else if (msg.type === 'sys')  sysBuf.current.push(msg as SysMessage);
       } catch { /* ignore malformed */ }
     };
 
@@ -93,6 +86,35 @@ export function useProfilerSocket(): UseProfilerSocketResult {
     };
 
     ws.onerror = () => { ws.close(); };
+  }, []);
+
+  // Flush buffers → state at a fixed cadence (not on every message)
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!mounted.current) return;
+      if (spanBuf.current.length) {
+        const batch = spanBuf.current.splice(0);
+        setSpans(prev => {
+          const next = [...prev, ...batch];
+          return next.length > MAX_SPANS ? next.slice(-MAX_SPANS) : next;
+        });
+      }
+      if (memBuf.current.length) {
+        const batch = memBuf.current.splice(0);
+        setMemSamples(prev => {
+          const next = [...prev, ...batch];
+          return next.length > MAX_SAMPLES ? next.slice(-MAX_SAMPLES) : next;
+        });
+      }
+      if (sysBuf.current.length) {
+        const batch = sysBuf.current.splice(0);
+        setSysSamples(prev => {
+          const next = [...prev, ...batch];
+          return next.length > MAX_SAMPLES ? next.slice(-MAX_SAMPLES) : next;
+        });
+      }
+    }, FLUSH_MS);
+    return () => clearInterval(id);
   }, []);
 
   useEffect(() => {
