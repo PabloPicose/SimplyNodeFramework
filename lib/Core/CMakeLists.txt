@@ -36,6 +36,8 @@ target_sources(SNFCore
         "${SNFCORE_DIR}/CommandLineOption.cpp"
         "${SNFCORE_DIR}/CommandLineParser.cpp"
         "${SNFCORE_DIR}/IniParser.cpp"
+        "${SNFCORE_DIR}/Logger.cpp"
+        "${SNFCORE_DIR}/ConsoleLogSink.cpp"
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS "${SRC_DIR}"
@@ -58,6 +60,13 @@ target_sources(SNFCore
             "${SNFCORE_DIR}/CommandLineOption.h"
             "${SNFCORE_DIR}/CommandLineParser.h"
             "${SNFCORE_DIR}/IniParser.h"
+            "${SNFCORE_DIR}/LogLevel.h"
+            "${SNFCORE_DIR}/LogMessage.h"
+            "${SNFCORE_DIR}/LogSink.h"
+            "${SNFCORE_DIR}/Logger.h"
+            "${SNFCORE_DIR}/ConsoleLogSink.h"
+            "${SNFCORE_DIR}/SignalLogSink.h"
+            "${SNFCORE_DIR}/Logging.h"
 )
 
 # Expose the web-platform flag only to SNFCore's own translation units.

@@ -12,6 +12,7 @@ add_executable(SNFCoreTests
     ThreadPoolTests.cpp
     FileTests.cpp
     TempFileTests.cpp
+    LoggingTests.cpp
 )
 
 target_link_libraries(SNFCoreTests

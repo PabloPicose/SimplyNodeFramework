@@ -1,5 +1,8 @@
 #include "SNFCore/Application.h"
 
+#include "ConsoleLogSink.h"
+#include "Logger.h"
+
 #if !defined(SNF_PLATFORM_WEB)
 #include <unistd.h>
 #endif
@@ -26,6 +29,11 @@ Application::Application(int argc, char** argv) : m_threadId(std::this_thread::g
     } else {
         m_instance = this;
     }
+    // Construct and start the central logger before anything else so that
+    // nodes created during construction can already emit log messages.
+    m_logger = std::make_unique<Logger>();
+    m_logger->addSink(std::make_shared<ConsoleLogSink>());
+    m_logger->start();
     // Eagerly create the main-thread EventLoop so it is always available.
     getOrCreateCurrentThreadEventLoop();
     m_threadPool = std::make_unique<ThreadPool>();
@@ -34,6 +42,9 @@ Application::Application(int argc, char** argv) : m_threadId(std::this_thread::g
 Application::~Application()
 {
     m_threadPool.reset();
+    // Stop the logger after the thread pool so that pool tasks can still log,
+    // but before clearing the event loops.
+    m_logger->stop();
     // Clearing the event-loops map destroys each EventLoop, whose destructor
     // deletes its root nodes (and their subtrees) in the correct owner thread.
     m_eventLoops.clear();
@@ -312,6 +323,11 @@ void Application::clearRunLoopDriver(void* owner)
         m_runLoopDriver = nullptr;
         m_runLoopDriverOwner = nullptr;
     }
+}
+
+Logger& Application::logger()
+{
+    return *m_logger;
 }
 
 }  // namespace snf

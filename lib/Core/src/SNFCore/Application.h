@@ -24,6 +24,7 @@ class Node;
 class EventLoop;
 class CommandLineParser;
 class ThreadPool;
+class Logger;
 
 /**
  * @class Application
@@ -186,6 +187,14 @@ public:
     ThreadPool* threadPool() const;
 
     /**
+     * @brief Returns the central Logger owned by this Application.
+     *
+     * The logger is started (worker thread running) when the Application is
+     * constructed and stopped before its destructor returns.
+     */
+    Logger& logger();
+
+    /**
      * @brief Registers a module-owned main-loop driver used by `run()`.
      *
      * Framework modules such as SNFWidgets use this hook when the platform
@@ -254,6 +263,7 @@ private:
 
     std::unique_ptr<CommandLineParser> m_commandLineParser;
     std::unique_ptr<ThreadPool> m_threadPool;
+    std::unique_ptr<Logger> m_logger;
     RunLoopDriver m_runLoopDriver;
     void* m_runLoopDriverOwner = nullptr;
     mutable std::mutex m_runLoopDriverMutex;

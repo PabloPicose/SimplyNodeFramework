@@ -1,0 +1,423 @@
+#include <gtest/gtest.h>
+
+#include <SNFCore/Application.h>
+#include <SNFCore/ConsoleLogSink.h>
+#include <SNFCore/LogLevel.h>
+#include <SNFCore/LogMessage.h>
+#include <SNFCore/Logger.h>
+#include <SNFCore/Logging.h>
+#include <SNFCore/LogSink.h>
+#include <SNFCore/SignalLogSink.h>
+
+#include <atomic>
+#include <chrono>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+using namespace snf;
+using namespace std::chrono_literals;
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Capturing sink: collects all received messages for assertions.
+class CaptureSink : public LogSink
+{
+public:
+    void consume(const LogMessage& msg) override
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_messages.push_back(msg);
+    }
+
+    std::vector<LogMessage> messages() const
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_messages;
+    }
+
+    std::size_t count() const
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_messages.size();
+    }
+
+    void clear()
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_messages.clear();
+    }
+
+private:
+    mutable std::mutex      m_mutex;
+    std::vector<LogMessage> m_messages;
+};
+
+// ── Fixtures ─────────────────────────────────────────────────────────────────
+
+/// Logger tests that do NOT require an Application (standalone usage).
+class LoggerStandaloneFixture : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        capture = std::make_shared<CaptureSink>();
+        logger  = std::make_unique<Logger>(/*queueCapacity=*/4096);
+        logger->addSink(capture);
+        logger->start();
+    }
+
+    void TearDown() override
+    {
+        logger->stop();
+    }
+
+    std::shared_ptr<CaptureSink> capture;
+    std::unique_ptr<Logger>      logger;
+};
+
+/// Logger tests that exercise the Application integration path.
+class LoggerAppFixture : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        app     = new Application(0, nullptr);
+        capture = std::make_shared<CaptureSink>();
+        // Replace the default ConsoleLogSink so tests don't flood stderr.
+        app->logger().clearSinks();
+        app->logger().addSink(capture);
+    }
+
+    void TearDown() override
+    {
+        delete app;
+        app = nullptr;
+    }
+
+    Application*                 app     = nullptr;
+    std::shared_ptr<CaptureSink> capture;
+};
+
+// ── LogLevel utilities ───────────────────────────────────────────────────────
+
+TEST(LogLevelTest, stringRepresentations)
+{
+    EXPECT_STREQ(logLevelToString(LogLevel::Debug),    "DEBUG");
+    EXPECT_STREQ(logLevelToString(LogLevel::Info),     "INFO");
+    EXPECT_STREQ(logLevelToString(LogLevel::Warning),  "WARNING");
+    EXPECT_STREQ(logLevelToString(LogLevel::Error),    "ERROR");
+    EXPECT_STREQ(logLevelToString(LogLevel::Critical), "CRITICAL");
+}
+
+TEST(LogLevelTest, ordering)
+{
+    EXPECT_LT(static_cast<int>(LogLevel::Debug),    static_cast<int>(LogLevel::Info));
+    EXPECT_LT(static_cast<int>(LogLevel::Info),     static_cast<int>(LogLevel::Warning));
+    EXPECT_LT(static_cast<int>(LogLevel::Warning),  static_cast<int>(LogLevel::Error));
+    EXPECT_LT(static_cast<int>(LogLevel::Error),    static_cast<int>(LogLevel::Critical));
+}
+
+// ── LogMessage fields ────────────────────────────────────────────────────────
+
+TEST_F(LoggerStandaloneFixture, messageCarriesAllFields)
+{
+    const int expectedLine = __LINE__ + 1;
+    logger->log(LogLevel::Warning, "hello", __FILE__, expectedLine, "myFunc");
+    ASSERT_TRUE(logger->flush(500ms));
+
+    ASSERT_EQ(capture->count(), 1u);
+    const LogMessage& msg = capture->messages().front();
+
+    EXPECT_EQ(msg.level,    LogLevel::Warning);
+    EXPECT_EQ(msg.text,     "hello");
+    EXPECT_EQ(msg.line,     expectedLine);
+    EXPECT_STREQ(msg.function, "myFunc");
+    EXPECT_NE(msg.sequence, 0u);
+    EXPECT_NE(msg.threadId, std::thread::id{});
+    // Timestamp should be recent (within 5 seconds of now).
+    const auto age = std::chrono::system_clock::now() - msg.timestamp;
+    EXPECT_LT(age, std::chrono::seconds(5));
+}
+
+// ── Level filtering ───────────────────────────────────────────────────────────
+
+TEST_F(LoggerStandaloneFixture, messagesAboveMinLevelAreAccepted)
+{
+    logger->setLevel(LogLevel::Warning);
+    logger->log(LogLevel::Warning, "w", __FILE__, __LINE__, __func__);
+    logger->log(LogLevel::Critical,"c", __FILE__, __LINE__, __func__);
+    ASSERT_TRUE(logger->flush(500ms));
+    EXPECT_EQ(capture->count(), 2u);
+}
+
+TEST_F(LoggerStandaloneFixture, messagesBelowMinLevelAreDropped)
+{
+    logger->setLevel(LogLevel::Warning);
+    logger->log(LogLevel::Debug, "d", __FILE__, __LINE__, __func__);
+    logger->log(LogLevel::Info,  "i", __FILE__, __LINE__, __func__);
+    ASSERT_TRUE(logger->flush(500ms));
+    EXPECT_EQ(capture->count(), 0u);
+    EXPECT_EQ(logger->stats().dropped, 0u); // Dropped at call site, not counted.
+}
+
+// ── FIFO ordering ─────────────────────────────────────────────────────────────
+
+TEST_F(LoggerStandaloneFixture, messagesDeliveredInFIFOOrder)
+{
+    constexpr int N = 100;
+    for (int i = 0; i < N; ++i) {
+        logger->log(LogLevel::Info, std::to_string(i), __FILE__, __LINE__, __func__);
+    }
+    ASSERT_TRUE(logger->flush(1000ms));
+
+    const auto msgs = capture->messages();
+    ASSERT_EQ(msgs.size(), static_cast<std::size_t>(N));
+    for (int i = 0; i < N; ++i) {
+        EXPECT_EQ(msgs[i].text, std::to_string(i));
+    }
+}
+
+// ── Sequence numbers ──────────────────────────────────────────────────────────
+
+TEST_F(LoggerStandaloneFixture, sequenceNumbersAreMonotonicallyIncreasing)
+{
+    for (int i = 0; i < 10; ++i) {
+        logger->log(LogLevel::Debug, "s", __FILE__, __LINE__, __func__);
+    }
+    ASSERT_TRUE(logger->flush(500ms));
+
+    const auto msgs = capture->messages();
+    ASSERT_EQ(msgs.size(), 10u);
+    for (std::size_t i = 1; i < msgs.size(); ++i) {
+        EXPECT_GT(msgs[i].sequence, msgs[i - 1].sequence);
+    }
+}
+
+// ── Drop policy ───────────────────────────────────────────────────────────────
+
+TEST_F(LoggerStandaloneFixture, droppedCounterIncreasesWhenQueueFull)
+{
+    // Use a tiny capacity logger.
+    auto tinyLogger  = std::make_unique<Logger>(/*queueCapacity=*/4);
+    auto tinySink    = std::make_shared<CaptureSink>();
+
+    // Pausing sink: consume() blocks briefly so the queue fills up.
+    std::atomic_bool pause{true};
+    class PausingSink : public LogSink {
+    public:
+        std::atomic_bool& pauseFlag;
+        explicit PausingSink(std::atomic_bool& f) : pauseFlag(f) {}
+        void consume(const LogMessage&) override {
+            while (pauseFlag.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+    };
+
+    tinyLogger->addSink(std::make_shared<PausingSink>(pause));
+    tinyLogger->start();
+
+    // Flood with more messages than the capacity.
+    for (int i = 0; i < 20; ++i) {
+        tinyLogger->log(LogLevel::Debug, "x", __FILE__, __LINE__, __func__);
+    }
+
+    const auto stats = tinyLogger->stats();
+    EXPECT_GT(stats.dropped, 0u);
+    EXPECT_LE(stats.enqueued, 4u);
+
+    // Release the sink and shut down cleanly.
+    pause.store(false);
+    tinyLogger->stop();
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+
+TEST_F(LoggerStandaloneFixture, statsEnqueuedAndProcessedMatch)
+{
+    constexpr int N = 50;
+    for (int i = 0; i < N; ++i) {
+        logger->log(LogLevel::Info, "x", __FILE__, __LINE__, __func__);
+    }
+    ASSERT_TRUE(logger->flush(1000ms));
+
+    const auto s = logger->stats();
+    EXPECT_EQ(s.enqueued,  static_cast<std::uint64_t>(N));
+    EXPECT_EQ(s.processed, static_cast<std::uint64_t>(N));
+    EXPECT_EQ(s.dropped,   0u);
+}
+
+// ── Multi-sink fan-out ────────────────────────────────────────────────────────
+
+TEST_F(LoggerStandaloneFixture, messagesDeliveredToAllSinks)
+{
+    auto sink2 = std::make_shared<CaptureSink>();
+    logger->addSink(sink2);
+
+    logger->log(LogLevel::Info, "broadcast", __FILE__, __LINE__, __func__);
+    ASSERT_TRUE(logger->flush(500ms));
+
+    EXPECT_EQ(capture->count(), 1u);
+    EXPECT_EQ(sink2->count(),   1u);
+    EXPECT_EQ(capture->messages().front().text, "broadcast");
+    EXPECT_EQ(sink2->messages().front().text,   "broadcast");
+}
+
+TEST_F(LoggerStandaloneFixture, removeSinkStopsDelivery)
+{
+    auto sink2 = std::make_shared<CaptureSink>();
+    logger->addSink(sink2);
+    logger->removeSink(sink2);
+
+    logger->log(LogLevel::Info, "solo", __FILE__, __LINE__, __func__);
+    ASSERT_TRUE(logger->flush(500ms));
+
+    EXPECT_EQ(capture->count(), 1u);
+    EXPECT_EQ(sink2->count(),   0u);
+}
+
+TEST_F(LoggerStandaloneFixture, clearSinksStopsAllDelivery)
+{
+    logger->clearSinks();
+    logger->log(LogLevel::Info, "nobody", __FILE__, __LINE__, __func__);
+    ASSERT_TRUE(logger->flush(500ms));
+    EXPECT_EQ(capture->count(), 0u);
+}
+
+// ── Concurrency: multiple producers ──────────────────────────────────────────
+
+TEST_F(LoggerStandaloneFixture, multipleProducersDontBlock)
+{
+    constexpr int kThreads  = 8;
+    constexpr int kPerThread = 200;
+
+    std::vector<std::thread> producers;
+    producers.reserve(kThreads);
+    for (int t = 0; t < kThreads; ++t) {
+        producers.emplace_back([&, t]() {
+            for (int i = 0; i < kPerThread; ++i) {
+                logger->log(LogLevel::Debug,
+                            "t" + std::to_string(t) + "/" + std::to_string(i),
+                            __FILE__, __LINE__, __func__);
+            }
+        });
+    }
+    for (auto& th : producers) {
+        th.join();
+    }
+
+    ASSERT_TRUE(logger->flush(2000ms));
+
+    const auto s = logger->stats();
+    // All enqueued messages must have been processed (no drops in an
+    // adequately-sized queue).
+    EXPECT_EQ(s.enqueued, s.processed);
+    EXPECT_EQ(s.dropped,  0u);
+    EXPECT_EQ(capture->count(), static_cast<std::size_t>(kThreads * kPerThread));
+}
+
+// ── Application integration ───────────────────────────────────────────────────
+
+TEST_F(LoggerAppFixture, macrosSendMessagesToLogger)
+{
+    sDebug()    << "debug message " << 1;
+    sInfo()     << "info message";
+    sWarning()  << "warning " << 3.14;
+    sError()    << "error";
+    sCritical() << "critical";
+
+    ASSERT_TRUE(app->logger().flush(500ms));
+
+    const auto msgs = capture->messages();
+    ASSERT_EQ(msgs.size(), 5u);
+    EXPECT_EQ(msgs[0].level, LogLevel::Debug);
+    EXPECT_EQ(msgs[1].level, LogLevel::Info);
+    EXPECT_EQ(msgs[2].level, LogLevel::Warning);
+    EXPECT_EQ(msgs[3].level, LogLevel::Error);
+    EXPECT_EQ(msgs[4].level, LogLevel::Critical);
+}
+
+TEST_F(LoggerAppFixture, macroStreamConcatenatesMultipleValues)
+{
+    sInfo() << "x=" << 42 << " y=" << 3.14f;
+    ASSERT_TRUE(app->logger().flush(500ms));
+
+    ASSERT_EQ(capture->count(), 1u);
+    EXPECT_EQ(capture->messages().front().text, "x=42 y=3.14");
+}
+
+TEST_F(LoggerAppFixture, macroRecordsCorrectFileAndLine)
+{
+    const int expectedLine = __LINE__ + 1;
+    sWarning() << "check source";
+    ASSERT_TRUE(app->logger().flush(500ms));
+
+    ASSERT_EQ(capture->count(), 1u);
+    const LogMessage& msg = capture->messages().front();
+    EXPECT_EQ(msg.line, expectedLine);
+    // __FILE__ varies; just verify it is non-empty.
+    EXPECT_GT(std::string(msg.file).size(), 0u);
+}
+
+TEST_F(LoggerAppFixture, macroRecordsEmittingThreadId)
+{
+    const std::thread::id mainId = std::this_thread::get_id();
+    sInfo() << "thread check";
+    ASSERT_TRUE(app->logger().flush(500ms));
+
+    ASSERT_EQ(capture->count(), 1u);
+    EXPECT_EQ(capture->messages().front().threadId, mainId);
+}
+
+// ── SignalLogSink ─────────────────────────────────────────────────────────────
+
+TEST_F(LoggerStandaloneFixture, signalLogSinkEmitsMessages)
+{
+    auto signalSink = std::make_shared<SignalLogSink>();
+
+    std::vector<LogMessage> received;
+    std::mutex              receivedMutex;
+
+    signalSink->messageLogged.connect([&](const LogMessage& msg) {
+        std::lock_guard<std::mutex> lock(receivedMutex);
+        received.push_back(msg);
+    });
+
+    logger->addSink(signalSink);
+    logger->log(LogLevel::Info, "signal-test", __FILE__, __LINE__, __func__);
+    ASSERT_TRUE(logger->flush(500ms));
+
+    std::lock_guard<std::mutex> lock(receivedMutex);
+    ASSERT_EQ(received.size(), 1u);
+    EXPECT_EQ(received.front().text, "signal-test");
+}
+
+// ── Shutdown / flush ──────────────────────────────────────────────────────────
+
+TEST_F(LoggerStandaloneFixture, stopDrainsQueueBeforeReturning)
+{
+    constexpr int N = 300;
+    for (int i = 0; i < N; ++i) {
+        logger->log(LogLevel::Debug, "drain", __FILE__, __LINE__, __func__);
+    }
+    // stop() must drain the queue before joining the worker.
+    logger->stop();
+
+    // After stop(), all enqueued messages must have been processed.
+    const auto s = logger->stats();
+    EXPECT_EQ(s.enqueued,  static_cast<std::uint64_t>(N));
+    EXPECT_EQ(s.processed, static_cast<std::uint64_t>(N));
+}
+
+TEST_F(LoggerAppFixture, applicationDestructorStopsLogger)
+{
+    // Enqueue some messages, then let TearDown (delete app) stop the logger.
+    for (int i = 0; i < 10; ++i) {
+        sDebug() << "shutdown-" << i;
+    }
+    // TearDown will delete the Application; verify no crash/hang occurs.
+    // (The test passes if we reach here without blocking.)
+}

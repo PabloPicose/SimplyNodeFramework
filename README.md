@@ -277,6 +277,7 @@ Step-by-step documentation lives in [`docs/guides/`](docs/guides/):
 | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | [Building with Emscripten](docs/guides/building-with-emscripten.md) | Compile an SNFWidgets app to WebAssembly and run it in a browser or Node.js — no platform `#ifdef`s needed |
 | [Thread Affinity](docs/guides/thread-affinity.md)                   | Cross-thread signal delivery with `moveToThread()` and `Queued` connections                                |
+| [Logging](docs/guides/logging.md)                                   | Emit structured log messages, configure the central logger, and plug in custom sinks                       |
 
 ---
 
@@ -305,7 +306,7 @@ doxygen docs/Doxyfile
 - [ ] Process management (spawn, stdout/stderr capture)
 - [ ] Plugin system (runtime shared-library loading)
 - [ ] Per-node update flag (skip `update()` when no work is pending)
-- [ ] Logging framework (log levels, formatting, file output)
+- [x] Logging framework (log levels, formatting, file output)
 
 ### Profiling
 - [ ] Classes and macros for measuring execution time, memory usage, and other metrics
