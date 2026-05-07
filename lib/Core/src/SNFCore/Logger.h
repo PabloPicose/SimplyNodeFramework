@@ -99,11 +99,12 @@ public:
     void stop();
 
     /**
-     * @brief Waits until the queue is empty or the timeout elapses.
+     * @brief Waits until queued messages are fully delivered or timeout elapses.
      *
      * @param timeout Maximum wait duration. Pass `std::chrono::milliseconds(0)`
      *                for a non-blocking poll.
-     * @return `true` if the queue was empty before the timeout expired.
+     * @return `true` if all messages accepted up to the call have been
+     *         delivered to sinks before timeout.
      */
     bool flush(std::chrono::milliseconds timeout = std::chrono::milliseconds(500));
 
