@@ -432,6 +432,60 @@ TEST_F(CoreFixture, deleteLaterIsIdempotent)
     }
 }
 
+TEST_F(CoreFixture, deleteLaterFromManyThreadsDestroysNodeOnlyOnce)
+{
+    class CountingDeleteNode final : public Node
+    {
+    public:
+        explicit CountingDeleteNode(std::atomic<int>* destructionCount)
+            : Node(), m_destructionCount(destructionCount)
+        {
+        }
+
+        ~CountingDeleteNode() override
+        {
+            if (m_destructionCount) {
+                m_destructionCount->fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+
+    protected:
+        void update() override {}
+
+    private:
+        std::atomic<int>* m_destructionCount = nullptr;
+    };
+
+    std::atomic<int> destructionCount{0};
+    auto* node = new CountingDeleteNode(&destructionCount);
+    NodePtr<CountingDeleteNode> nodePtr(node);
+
+    constexpr int kThreads = 8;
+    constexpr int kCallsPerThread = 200;
+
+    std::vector<std::thread> callers;
+    callers.reserve(kThreads);
+
+    for (int i = 0; i < kThreads; ++i) {
+        callers.emplace_back([&]() {
+            for (int j = 0; j < kCallsPerThread; ++j) {
+                node->deleteLater();
+            }
+        });
+    }
+
+    for (auto& caller : callers) {
+        caller.join();
+    }
+
+    // All deleteLater posts are now queued on the owner loop. Running one
+    // pass must destroy the node exactly once.
+    Application::instance()->loopOnce();
+
+    EXPECT_EQ(destructionCount.load(std::memory_order_relaxed), 1);
+    EXPECT_FALSE(nodePtr);
+}
+
 TEST_F(CoreFixture, eventLoopStopWakesBlockedRun)
 {
     using namespace std::chrono_literals;
@@ -1420,6 +1474,164 @@ TEST_F(CoreFixture, applicationDestructionDeletesNodesMovedToThreadPool)
 
     EXPECT_EQ(destroyedCount.load(std::memory_order_relaxed), 2);
     EXPECT_EQ(Application::instance(), nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// Stress tests — lock-free control block and sharded registry
+// ---------------------------------------------------------------------------
+
+// Verifies that many concurrent NodePtr liveness checks (previously serialised
+// on a single global mutex) are correct under load while the main thread
+// concurrently marks and destroys nodes.
+TEST_F(CoreFixture, stressTestConcurrentNodePtrChecksWhileDeleting)
+{
+    constexpr int kNodes         = 300;
+    constexpr int kReaderThreads = 8;
+
+    std::vector<TestNode*>          rawNodes;
+    std::vector<NodePtr<TestNode>>  ptrs;
+    rawNodes.reserve(kNodes);
+    ptrs.reserve(kNodes);
+
+    for (int i = 0; i < kNodes; ++i) {
+        auto* n = new TestNode();
+        rawNodes.push_back(n);
+        ptrs.emplace_back(n);
+    }
+
+    // Reader threads spin-check liveness of every NodePtr concurrently.
+    // With the old design each check took m_aliveNodesMutex (global exclusive
+    // lock). With the control block the checks are lock-free atomic loads.
+    std::atomic<bool>    stopReaders{false};
+    std::atomic<int64_t> totalChecks{0};
+    std::vector<std::thread> readers;
+
+    for (int t = 0; t < kReaderThreads; ++t) {
+        readers.emplace_back([&]() {
+            int64_t localChecks = 0;
+            while (! stopReaders.load(std::memory_order_relaxed)) {
+                for (const auto& ptr : ptrs) {
+                    (void)static_cast<bool>(ptr);  // isAlive — lock-free atomic
+                    (void)ptr.isMarkedToDelete();  // lock-free atomic
+                    ++localChecks;
+                }
+            }
+            totalChecks.fetch_add(localChecks, std::memory_order_relaxed);
+        });
+    }
+
+    // Give readers a moment to spin up before we start deleting.
+    std::this_thread::yield();
+
+    // Delete all nodes while the reader threads are running.
+    for (auto* n : rawNodes) {
+        n->deleteLater();
+    }
+    // loopOnce() runs the destructor of every node, setting alive=false on
+    // each control block — observable immediately by the reader threads.
+    app->loopOnce();
+
+    stopReaders.store(true, std::memory_order_release);
+    for (auto& th : readers) {
+        th.join();
+    }
+
+    // Every NodePtr must now report dead without accessing freed memory.
+    for (const auto& ptr : ptrs) {
+        EXPECT_FALSE(static_cast<bool>(ptr));
+        EXPECT_TRUE(ptr.isMarkedToDelete());
+    }
+
+    // Sanity: at least one full pass across all nodes happened.
+    EXPECT_GT(totalChecks.load(), static_cast<int64_t>(kNodes));
+    EXPECT_EQ(Application::instance()->getAliveNodesCount(), 0);
+}
+
+// Verifies that Queued signal slots are delivered correctly to many nodes
+// living on a separate EventLoop under substantial concurrent post load.
+// The test posts kReceiverCount * kEmitCount tasks to the worker's EventLoop
+// and verifies every single one is executed without loss or duplication.
+TEST_F(CoreFixture, stressTestQueuedSignalDeliveryUnderLoad)
+{
+    using namespace std::chrono_literals;
+
+    constexpr int kReceiverCount = 100;
+    constexpr int kEmitCount     = 200;
+    const int     kExpectedTotal = kReceiverCount * kEmitCount;
+
+    class CountingReceiver final : public Node
+    {
+    public:
+        explicit CountingReceiver(std::atomic<int>& counter, Node* parent = nullptr)
+            : Node(parent), m_counter(counter)
+        {
+        }
+
+        void onValue(int) { m_counter.fetch_add(1, std::memory_order_relaxed); }
+
+    protected:
+        void update() override {}
+
+    private:
+        std::atomic<int>& m_counter;
+    };
+
+    std::atomic<int> totalReceived{0};
+
+    std::mutex              mutex;
+    std::condition_variable cv;
+    bool                    workerReady = false;
+    std::thread::id         workerThreadId;
+
+    Signal<int> signal;
+
+    std::thread worker([&]() {
+        EventLoop* loop = app->getOrCreateCurrentThreadEventLoop();
+        workerThreadId  = std::this_thread::get_id();
+
+        // Create all receivers on the worker thread so their ownerEventLoop
+        // is this loop. Queued signals will be posted here.
+        for (int i = 0; i < kReceiverCount; ++i) {
+            auto* r = new CountingReceiver(totalReceived);
+            signal.connect(
+                NodePtr<CountingReceiver>(r), &CountingReceiver::onValue, ConnectionType::Queued);
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            workerReady = true;
+        }
+        cv.notify_one();
+
+        // Safety net: stop after 10 s even if something goes wrong.
+        Timer keepAlive;
+        keepAlive.setSingleShot(true);
+        keepAlive.start(10s);
+
+        loop->run();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&] { return workerReady; });
+    }
+
+    // Emit kEmitCount times from the main thread; every Queued slot posts a
+    // task to the worker's queue. All posts come from this thread and are
+    // therefore ordered with respect to each other.
+    for (int i = 0; i < kEmitCount; ++i) {
+        signal.emit(i);
+    }
+
+    // Post a stop task AFTER all emission tasks. The worker's FIFO queue
+    // guarantees the stop runs only after all kExpectedTotal tasks finish.
+    EventLoop* workerLoop = app->getEventLoopByThreadId(workerThreadId);
+    ASSERT_NE(workerLoop, nullptr);
+    workerLoop->post([workerLoop] { workerLoop->stop(); });
+
+    worker.join();
+
+    EXPECT_EQ(totalReceived.load(), kExpectedTotal);
 }
 
 int main(int argc, char** argv)

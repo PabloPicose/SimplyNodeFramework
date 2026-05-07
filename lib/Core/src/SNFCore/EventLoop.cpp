@@ -37,6 +37,15 @@ void EventLoop::enqueueDelete(Node* node)
 {
     {
         std::lock_guard<std::mutex> lock(m_mutex);
+        // Idempotent: prevent the same node from appearing in the queue twice.
+        // This covers the case where deleteLater() is called more than once on
+        // the same node. Without this guard, the second processing attempt would
+        // construct NodePtr(node) on already-freed memory.
+        for (const Node* queued : m_nodesToDelete) {
+            if (queued == node) {
+                return;
+            }
+        }
         m_nodesToDelete.push_back(node);
     }
     m_condition.notify_one();

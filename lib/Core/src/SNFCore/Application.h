@@ -6,11 +6,13 @@
  * @ingroup SNFCore_Application
  */
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <list>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -228,10 +230,20 @@ private:
         bool markedForDelete = false;
     };
 
-    //! This map is used to keep the nodes alive. The NodeEntry stores the
-    //! generation ID and whether the node is marked for deletion.
-    std::unordered_map<Node*, NodeEntry> m_aliveNodes;
-    mutable std::mutex m_aliveNodesMutex;
+    //! The alive-node registry is split into N independent shards.
+    //! Each shard has its own shared_mutex so reads (isNodeAlive,
+    //! isNodeMarkedToDelete) proceed concurrently across shards, while
+    //! writes (register, markToDelete, unregister) only lock a single shard.
+    static constexpr std::size_t kAliveNodeShardCount = 16;
+
+    struct AliveNodeShard {
+        mutable std::shared_mutex mutex;
+        std::unordered_map<Node*, NodeEntry> nodes;
+    };
+
+    std::array<AliveNodeShard, kAliveNodeShardCount> m_aliveNodeShards;
+
+    std::size_t aliveNodeShardIndex(Node* node) const noexcept;
 
     std::unordered_map<std::thread::id, std::unique_ptr<EventLoop>> m_eventLoops;
     mutable std::mutex m_eventLoopsMutex;

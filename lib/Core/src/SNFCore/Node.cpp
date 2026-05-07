@@ -13,6 +13,11 @@
 namespace snf {
 Node::~Node()
 {
+    // Signal all NodePtr holders that this node is gone immediately,
+    // before touching any framework state. Lock-free: the atomic store
+    // is seen by any concurrent NodePtr::isAlive() check.
+    m_lifetimeBlock->alive.store(false, std::memory_order_release);
+
     const auto app = Application::instance();
     if (m_isRoot && m_ownerEventLoop) {
         m_ownerEventLoop->removeRootNode(this);
@@ -86,6 +91,11 @@ void Node::deleteLater()
     if (! app) {
         throw std::runtime_error("Application instance not exists");
     }
+
+    // Mark the control block immediately so any concurrent NodePtr check
+    // (e.g. canInvokeReceiver in a Queued signal) sees this as pending
+    // deletion without taking a lock.
+    m_lifetimeBlock->markedForDelete.store(true, std::memory_order_release);
 
     if (m_ownerEventLoop && ! m_ownerEventLoop->isInThisThread()) {
         m_ownerEventLoop->post([ownerLoop = m_ownerEventLoop, node = this]() { ownerLoop->enqueueDelete(node); });
@@ -169,6 +179,8 @@ Node::Node(Node* parent) : m_parent(parent)
     static std::atomic<std::uint64_t> s_nextGeneration{1};
     m_generation = s_nextGeneration.fetch_add(1, std::memory_order_relaxed);
 
+    m_lifetimeBlock = std::make_shared<NodeLifetimeBlock>();
+
     const auto app = Application::instance();
     if (! app) {
         throw std::runtime_error("Application instance not created");
@@ -207,6 +219,11 @@ void Node::pushDeleteChild(Node* child)
 void Node::onAboutToMoveToThread(EventLoop* /*newLoop*/) {}
 
 void Node::onMovedToThread(EventLoop* /*oldLoop*/) {}
+
+std::shared_ptr<NodeLifetimeBlock> Node::lifetimeBlock() const
+{
+    return m_lifetimeBlock;
+}
 
 // ── Thread migration ────────────────────────────────────────────────────────
 

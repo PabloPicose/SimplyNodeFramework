@@ -6,7 +6,10 @@
  * @ingroup SNFCore_Nodes
  */
 
+#include <SNFCore/NodeLifetimeBlock.h>
+
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -153,13 +156,23 @@ public:
     bool moveToThreadPool(ThreadPool* pool = nullptr);
 
     /**
-     * @brief Returns the generation counter used by `NodePtr<T>` to detect
-     *        stale references.
+     * @brief Returns the generation counter used by the Application registry.
      *
      * The counter is unique per node allocation and is incremented when the
      * node is registered with the `Application`.
      */
     std::uint64_t generation() const;
+
+    /**
+     * @brief Returns the lifetime control block shared with all `NodePtr<T>`
+     *        copies of this node.
+     *
+     * The block is heap-allocated separately from the node and survives
+     * node destruction as long as at least one `NodePtr<T>` exists.
+     * All liveness checks in `NodePtr` use this block atomically,
+     * without taking any global lock.
+     */
+    std::shared_ptr<NodeLifetimeBlock> lifetimeBlock() const;
 
 protected:
     /**
@@ -217,6 +230,7 @@ private:
     std::thread::id m_ownerThreadId;
     EventLoop* m_ownerEventLoop = nullptr;
     std::uint64_t m_generation = 0;
+    std::shared_ptr<NodeLifetimeBlock> m_lifetimeBlock;
 };
 
 }  // namespace snf

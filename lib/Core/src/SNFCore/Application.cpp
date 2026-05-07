@@ -107,11 +107,18 @@ Node* Application::getRootNode(const std::size_t index) const
     return nullptr;
 }
 
+std::size_t Application::aliveNodeShardIndex(Node* node) const noexcept
+{
+    return std::hash<Node*>{}(node) % kAliveNodeShardCount;
+}
+
 bool Application::isNodeAlive(Node* node, std::uint64_t generation) const
 {
-    std::lock_guard<std::mutex> lock(m_aliveNodesMutex);
-    auto it = m_aliveNodes.find(node);
-    if (it == m_aliveNodes.cend()) {
+    const std::size_t idx = aliveNodeShardIndex(node);
+    const AliveNodeShard& shard = m_aliveNodeShards[idx];
+    std::shared_lock<std::shared_mutex> lock(shard.mutex);
+    auto it = shard.nodes.find(node);
+    if (it == shard.nodes.cend()) {
         return false;
     }
     return it->second.generation == generation;
@@ -119,9 +126,11 @@ bool Application::isNodeAlive(Node* node, std::uint64_t generation) const
 
 bool Application::isNodeMarkedToDelete(Node* node, std::uint64_t generation) const
 {
-    std::lock_guard<std::mutex> lock(m_aliveNodesMutex);
-    auto it = m_aliveNodes.find(node);
-    if (it == m_aliveNodes.cend()) {
+    const std::size_t idx = aliveNodeShardIndex(node);
+    const AliveNodeShard& shard = m_aliveNodeShards[idx];
+    std::shared_lock<std::shared_mutex> lock(shard.mutex);
+    auto it = shard.nodes.find(node);
+    if (it == shard.nodes.cend()) {
         return true;
     }
     if (it->second.generation != generation) {
@@ -140,17 +149,23 @@ size_t Application::getRootNodesToDeleteCount() const
 
 size_t Application::getAliveNodesCount() const
 {
-    std::lock_guard<std::mutex> lock(m_aliveNodesMutex);
-    return m_aliveNodes.size();
+    size_t count = 0;
+    for (const AliveNodeShard& shard : m_aliveNodeShards) {
+        std::shared_lock<std::shared_mutex> lock(shard.mutex);
+        count += shard.nodes.size();
+    }
+    return count;
 }
 
 size_t Application::getAliveNodesToDeleteCount() const
 {
-    std::lock_guard<std::mutex> lock(m_aliveNodesMutex);
     size_t count = 0;
-    for (const auto& [node, entry] : m_aliveNodes) {
-        if (entry.markedForDelete) {
-            count++;
+    for (const AliveNodeShard& shard : m_aliveNodeShards) {
+        std::shared_lock<std::shared_mutex> lock(shard.mutex);
+        for (const auto& [node, entry] : shard.nodes) {
+            if (entry.markedForDelete) {
+                ++count;
+            }
         }
     }
     return count;
@@ -227,15 +242,19 @@ void Application::pushRootNodeDeleteLater(Node* node)
 
 void Application::registerAliveNode(Node* node)
 {
-    std::lock_guard<std::mutex> lock(m_aliveNodesMutex);
-    m_aliveNodes[node] = NodeEntry{node->generation(), false};
+    const std::size_t idx = aliveNodeShardIndex(node);
+    AliveNodeShard& shard = m_aliveNodeShards[idx];
+    std::unique_lock<std::shared_mutex> lock(shard.mutex);
+    shard.nodes[node] = NodeEntry{node->generation(), false};
 }
 
 void Application::markToDelete(Node* node)
 {
-    std::lock_guard<std::mutex> lock(m_aliveNodesMutex);
-    auto it = m_aliveNodes.find(node);
-    if (it == m_aliveNodes.cend()) {
+    const std::size_t idx = aliveNodeShardIndex(node);
+    AliveNodeShard& shard = m_aliveNodeShards[idx];
+    std::unique_lock<std::shared_mutex> lock(shard.mutex);
+    auto it = shard.nodes.find(node);
+    if (it == shard.nodes.cend()) {
         throw std::runtime_error("Node not found in the alive nodes");
     }
     it->second.markedForDelete = true;
@@ -243,11 +262,13 @@ void Application::markToDelete(Node* node)
 
 void Application::unregisterAliveNode(Node* node)
 {
-    std::lock_guard<std::mutex> lock(m_aliveNodesMutex);
-    if (m_aliveNodes.find(node) == m_aliveNodes.cend()) {
+    const std::size_t idx = aliveNodeShardIndex(node);
+    AliveNodeShard& shard = m_aliveNodeShards[idx];
+    std::unique_lock<std::shared_mutex> lock(shard.mutex);
+    if (shard.nodes.find(node) == shard.nodes.cend()) {
         throw std::runtime_error("Node not found in the alive nodes");
     }
-    m_aliveNodes.erase(node);
+    shard.nodes.erase(node);
 }
 
 bool Application::allEventLoopsIdle() const

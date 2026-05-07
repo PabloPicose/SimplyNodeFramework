@@ -8,6 +8,7 @@
 
 #include <SNFCore/Application.h>
 #include <SNFCore/Node.h>
+#include <SNFCore/NodeLifetimeBlock.h>
 
 #include <stdexcept>
 #include <type_traits>
@@ -42,11 +43,14 @@ class NodePtr
     static_assert(std::is_base_of_v<Node, T>, "T must be a subclass of Node");
 
     T* m_node = nullptr;
-    std::uint64_t m_generation = 0;
+    std::shared_ptr<NodeLifetimeBlock> m_block;
 
 public:
-    /** @brief Constructs a NodePtr wrapping @p node, capturing its current generation. */
-    explicit NodePtr(T* node) : m_node(node), m_generation(node ? node->generation() : 0) {}
+    /** @brief Constructs a NodePtr wrapping @p node, sharing its lifetime block. */
+    explicit NodePtr(T* node)
+        : m_node(node), m_block(node ? node->lifetimeBlock() : nullptr)
+    {
+    }
 
     ~NodePtr() = default;
 
@@ -59,19 +63,27 @@ public:
     /**
      * @brief Returns `true` if the node memory is accessible.
      *
-     * Does **not** check whether the node is marked for deferred deletion.
+     * Uses a lock-free atomic load on the control block. Does **not** check
+     * whether the node is marked for deferred deletion.
      * Use `isMarkedToDelete()` for that check.
      */
-    bool isAlive() const { return Application::instance()->isNodeAlive(m_node, m_generation); }
+    bool isAlive() const
+    {
+        return m_block && m_block->alive.load(std::memory_order_acquire);
+    }
 
     /**
      * @brief Returns `true` if the node is marked for deferred deletion or
      *        is no longer memory-accessible.
      *
-     * A `NodePtr` for which `isMarkedToDelete()` returns `true` should be
-     * treated as expired and must not be dereferenced.
+     * Uses lock-free atomic loads on the control block.
      */
-    bool isMarkedToDelete() const { return Application::instance()->isNodeMarkedToDelete(m_node, m_generation); }
+    bool isMarkedToDelete() const
+    {
+        return ! m_block
+            || ! m_block->alive.load(std::memory_order_acquire)
+            || m_block->markedForDelete.load(std::memory_order_acquire);
+    }
 
     /**
      * @brief Dereferences the pointer.
@@ -99,7 +111,7 @@ public:
         throw std::runtime_error("Node is not alive");
     }
 
-    /** @brief Returns `true` if the node is alive (not deleted and generation matches). */
+    /** @brief Returns `true` if the node is alive (not deleted and not marked for deletion). */
     explicit operator bool() const { return m_node && isAlive(); }
 
     /** @brief Returns `true` if both pointers refer to the same node instance. */
@@ -108,20 +120,47 @@ public:
     /** @brief Returns `true` if this pointer refers to @p other. */
     bool operator==(const Node* other) const { return m_node == other; }
 
-    /** @brief Resets the pointer to @p pObj (or null). Captures the new node's generation. */
-    void reset(T* pObj = nullptr) { m_node = pObj; }
+    /** @brief Resets the pointer to @p pObj, sharing its lifetime block. */
+    void reset(T* pObj = nullptr)
+    {
+        m_node = pObj;
+        m_block = pObj ? pObj->lifetimeBlock() : nullptr;
+    }
 
     /**
      * @brief Performs a `dynamic_cast` to `NodePtr<U>`.
      * @tparam U Target node type.
-     * @return A `NodePtr<U>` wrapping the cast result; evaluates to `false`
-     *         if the cast fails or the node is not alive.
+     * @return A `NodePtr<U>` wrapping the cast result, sharing the same
+     *         lifetime block; evaluates to `false` if the cast fails or
+     *         the node is not alive.
+     *
+     * The same control block is reused so the cast does not touch the
+     * node's memory when it is already known to be dead.
      */
     template <typename U>
     NodePtr<U> dynamicCast() const
     {
-        return NodePtr<U>(dynamic_cast<U*>(m_node));
+        if (! m_node) {
+            return NodePtr<U>(nullptr);
+        }
+        auto* castPtr = dynamic_cast<U*>(m_node);
+        if (! castPtr) {
+            return NodePtr<U>(nullptr);
+        }
+        // Share the existing block rather than calling castPtr->lifetimeBlock()
+        // to avoid accessing potentially-freed node memory.
+        return NodePtr<U>(castPtr, m_block);
     }
+private:
+    // Used by dynamicCast() to share an existing control block without
+    // accessing the (potentially dead) node object's memory.
+    NodePtr(T* node, std::shared_ptr<NodeLifetimeBlock> block)
+        : m_node(node), m_block(std::move(block))
+    {
+    }
+
+    template <typename U>
+    friend class NodePtr;
 };
 
 }  // namespace snf
