@@ -27,6 +27,9 @@ option(SNF_ENABLE_SQLITE
 option(SNF_ENABLE_SNMP
     "Build the SNFSnmp module (requires net-snmp / libsnmp-dev)"
     OFF)
+option(SNF_ENABLE_PROFILING
+    "Build the SNFProfiler module (profiling with WebSocket dashboard)"
+    OFF)
 
 # Safety checks: mismatching toolchain / option causes a clear configure error.
 if(EMSCRIPTEN AND NOT SNF_WEB_ASSEMBLY)
@@ -85,6 +88,12 @@ endif()
 # SNFWebSocket provides non-TLS ws:// client support on all platforms.
 # Its server and manual framing backend are native-only.
 add_subdirectory(lib/WebSocket)
+
+if(SNF_ENABLE_PROFILING AND NOT SNF_WEB_ASSEMBLY)
+    add_subdirectory(lib/Profiler)
+    target_compile_definitions(SNFCore PRIVATE SNF_ENABLE_PROFILING)
+    target_include_directories(SNFCore PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/lib/Profiler/include")
+endif()
 
 # SNFWidgets provides the GLFW+ImGui integration layer.
 # On web (SNF_WEB_ASSEMBLY=ON) it uses the Emscripten contrib.glfw3 port and OpenGL ES 3.
@@ -159,4 +168,8 @@ if(NOT SNF_WEB_ASSEMBLY)
     if(TARGET SNFSnmp)
         snf_install_package_config(SNFSnmp)
     endif()
+endif()
+
+if(SNF_ENABLE_PROFILING AND NOT SNF_WEB_ASSEMBLY)
+    snf_install_package_config(SNFProfiler)
 endif()

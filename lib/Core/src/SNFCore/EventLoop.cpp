@@ -97,6 +97,10 @@ std::size_t EventLoop::getRootNodesToDeleteCount() const { return pendingDeleteC
 
 void EventLoop::run()
 {
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_stop = false;
+    }
     for (;;) {
         // Drain task queue.
         Task task;
@@ -149,8 +153,13 @@ void EventLoop::run()
                 return m_stop || ! m_tasks.empty() || ! m_nodesToDelete.empty() || ! m_readyIO.empty();
             });
         } else {
+            // A timer may be added from another thread between the
+            // nextTimerDeadlineLocked check and this wait.  Include
+            // !m_timers.empty() in the predicate so that the notify_one()
+            // inside scheduleTimer() breaks us out — the next iteration will
+            // then use wait_until with the proper deadline.
             m_condition.wait(lock, [this]() {
-                return m_stop || ! m_tasks.empty() || ! m_nodesToDelete.empty() || ! m_readyIO.empty();
+                return m_stop || ! m_tasks.empty() || ! m_nodesToDelete.empty() || ! m_readyIO.empty() || ! m_timers.empty();
             });
         }
     }
