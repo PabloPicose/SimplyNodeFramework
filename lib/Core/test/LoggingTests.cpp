@@ -287,13 +287,30 @@ TEST_F(LoggerStandaloneFixture, droppedCounterIncreasesWhenQueueFull)
     tinyLogger->start();
 
     // Flood with more messages than the capacity.
-    for (int i = 0; i < 20; ++i) {
+    constexpr int kLogsToSend = 20;
+    for (int i = 0; i < kLogsToSend; ++i) {
         tinyLogger->log(LogLevel::Debug, "x", __FILE__, __LINE__, __func__);
     }
 
+    // Wait for the queue to fill up by polling dropped counter.
+    // Under load (especially in CI containers), this may take longer.
+    bool queue_filled = false;
+    for (int attempts = 0; attempts < 100; ++attempts) {
+        const auto s = tinyLogger->stats();
+        if (s.dropped > 0) {
+            queue_filled = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    ASSERT_TRUE(queue_filled) << "Queue did not fill up after 100ms";
+
     const auto stats = tinyLogger->stats();
-    EXPECT_GT(stats.dropped, 0u);
-    EXPECT_LE(stats.enqueued, 4u);
+    EXPECT_GT(stats.dropped, 0u) << "Expected some messages to be dropped due to full queue";
+    EXPECT_EQ(stats.enqueued + stats.dropped, static_cast<std::uint64_t>(kLogsToSend))
+        << "Total of enqueued and dropped should equal total logs sent";
+    EXPECT_LE(stats.enqueued, 5u)
+        << "With capacity 4, one extra message may be in-flight in the worker thread";
 
     // Release the sink and shut down cleanly.
     pause.store(false);
