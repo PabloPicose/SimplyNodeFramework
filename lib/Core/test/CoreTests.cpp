@@ -659,8 +659,15 @@ TEST_F(CoreFixture, moveToThreadPoolUpdatesNodeThreadIdToWorker)
     ASSERT_EQ(executedFuture.wait_for(std::chrono::milliseconds(1000)), std::future_status::ready);
     EXPECT_EQ(executedFuture.get(), movedThreadId);
 
-    node->deleteLater();
-    movedLoop->runPendingWork();
+    auto deletedPromise = std::make_shared<std::promise<void>>();
+    std::future<void> deletedFuture = deletedPromise->get_future();
+
+    movedLoop->post([node, deletedPromise]() {
+        delete node;
+        deletedPromise->set_value();
+    });
+
+    ASSERT_EQ(deletedFuture.wait_for(std::chrono::milliseconds(1000)), std::future_status::ready);
 }
 
 TEST_F(CoreFixture, deleteLaterOnChildAlsoDeletesGrandchild)
