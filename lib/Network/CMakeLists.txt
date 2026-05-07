@@ -43,7 +43,7 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/SNFNetwork
 )
 
-if (SNF_ENABLE_TESTS)
+if(SNF_ENABLE_TESTS)
     add_subdirectory(test)
 endif()
 

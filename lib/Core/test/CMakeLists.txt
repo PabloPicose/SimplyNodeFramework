@@ -1,3 +1,5 @@
+cmake_minimum_required(VERSION 3.26)
+
 add_executable(SNFCoreTests
     CoreTests.cpp
     ConnectionTests.cpp
@@ -19,4 +21,4 @@ target_link_libraries(SNFCoreTests
 )
 
 include(GoogleTest)
-gtest_discover_tests(SNFCoreTests)
+gtest_discover_tests(SNFCoreTests TEST_PREFIX "SNFCoreTests.")

@@ -49,6 +49,6 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/SNFHttpServer
 )
 
-if (SNF_ENABLE_TESTS)
+if(SNF_ENABLE_TESTS)
     add_subdirectory(test)
 endif()

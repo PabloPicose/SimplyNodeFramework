@@ -17,4 +17,4 @@ target_include_directories(SNFJsonTests
 )
 
 include(GoogleTest)
-gtest_discover_tests(SNFJsonTests)
+gtest_discover_tests(SNFJsonTests TEST_PREFIX "SNFJsonTests.")

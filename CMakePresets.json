@@ -100,6 +100,10 @@
       "configurePreset": "native-debug",
       "output": {
         "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 4,
+        "timeout": 60
       }
     },
     {
@@ -107,6 +111,10 @@
       "configurePreset": "native-release",
       "output": {
         "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 4,
+        "timeout": 60
       }
     },
     {
@@ -114,6 +122,10 @@
       "configurePreset": "native-debug-experimental",
       "output": {
         "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 4,
+        "timeout": 60
       }
     }
   ]

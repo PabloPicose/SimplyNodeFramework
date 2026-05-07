@@ -106,6 +106,6 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/SNFCore
 )
 
-if (SNF_ENABLE_TESTS)
+if(SNF_ENABLE_TESTS)
     add_subdirectory(test)
 endif()

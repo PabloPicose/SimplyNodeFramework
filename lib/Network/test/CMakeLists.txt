@@ -19,4 +19,4 @@ target_include_directories(SNFNetworkTests
 )
 
 include(GoogleTest)
-gtest_discover_tests(SNFNetworkTests)
+gtest_discover_tests(SNFNetworkTests TEST_PREFIX "SNFNetworkTests.")

@@ -6,14 +6,8 @@ add_executable(SNFHttpServerTests
 target_link_libraries(SNFHttpServerTests
     PRIVATE
         SNFHttpServer
-        gtest
-        gtest_main
+        GTest::gtest_main
 )
 
-target_compile_features(SNFHttpServerTests PRIVATE cxx_std_17)
-
-add_test(
-    NAME SNFHttpServerTests
-    COMMAND SNFHttpServerTests
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-)
+include(GoogleTest)
+gtest_discover_tests(SNFHttpServerTests TEST_PREFIX "SNFHttpServerTests.")

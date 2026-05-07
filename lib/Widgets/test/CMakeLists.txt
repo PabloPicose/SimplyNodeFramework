@@ -31,7 +31,5 @@ target_include_directories(SNFWidgetsTests
         ${snf_imgui_SOURCE_DIR}
 )
 
-target_compile_features(SNFWidgetsTests PRIVATE cxx_std_17)
-
 include(GoogleTest)
-gtest_discover_tests(SNFWidgetsTests)
+gtest_discover_tests(SNFWidgetsTests TEST_PREFIX "SNFWidgetsTests.")

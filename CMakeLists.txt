@@ -120,124 +120,43 @@ if(SNF_WEB_ASSEMBLY AND SNF_ENABLE_WEB_TESTS)
     add_test(NAME SNFWebAssemblySmokeTests COMMAND SNFWebAssemblySmokeTests)
 endif()
 
-# ── Package config: SNFCore (always) ─────────────────────────────────────────
-configure_package_config_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SNFCoreConfig.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/SNFCoreConfig.cmake"
-    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFCore"
-)
-
-write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/SNFCoreConfigVersion.cmake"
-    VERSION "${PROJECT_VERSION}"
-    COMPATIBILITY SameMajorVersion
-)
-
-install(
-    FILES
-        "${CMAKE_CURRENT_BINARY_DIR}/SNFCoreConfig.cmake"
-        "${CMAKE_CURRENT_BINARY_DIR}/SNFCoreConfigVersion.cmake"
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFCore"
-)
-
-# ── Package config: SNFNetwork ───────────────────────────────────────────────
+# ── Package config helpers ───────────────────────────────────────────────────
+function(snf_install_package_config module_name)
     configure_package_config_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SNFNetworkConfig.cmake.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/SNFNetworkConfig.cmake"
-        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFNetwork"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/${module_name}Config.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/${module_name}Config.cmake"
+        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${module_name}"
     )
 
     write_basic_package_version_file(
-        "${CMAKE_CURRENT_BINARY_DIR}/SNFNetworkConfigVersion.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/${module_name}ConfigVersion.cmake"
         VERSION "${PROJECT_VERSION}"
         COMPATIBILITY SameMajorVersion
     )
 
     install(
         FILES
-            "${CMAKE_CURRENT_BINARY_DIR}/SNFNetworkConfig.cmake"
-            "${CMAKE_CURRENT_BINARY_DIR}/SNFNetworkConfigVersion.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFNetwork"
+            "${CMAKE_CURRENT_BINARY_DIR}/${module_name}Config.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/${module_name}ConfigVersion.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${module_name}"
     )
+endfunction()
 
-# ── Package config: SNFJson ──────────────────────────────────────────────────
-    configure_package_config_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SNFJsonConfig.cmake.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/SNFJsonConfig.cmake"
-        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFJson"
-    )
+# ── Package config: always-on modules ────────────────────────────────────────
+snf_install_package_config(SNFCore)
+snf_install_package_config(SNFNetwork)
+snf_install_package_config(SNFJson)
+snf_install_package_config(SNFDatabase)
+snf_install_package_config(SNFWebSocket)
 
-    write_basic_package_version_file(
-        "${CMAKE_CURRENT_BINARY_DIR}/SNFJsonConfigVersion.cmake"
-        VERSION "${PROJECT_VERSION}"
-        COMPATIBILITY SameMajorVersion
-    )
-
-    install(
-        FILES
-            "${CMAKE_CURRENT_BINARY_DIR}/SNFJsonConfig.cmake"
-            "${CMAKE_CURRENT_BINARY_DIR}/SNFJsonConfigVersion.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFJson"
-    )
-
-# ── Package config: SNFDatabase ─────────────────────────────────────────────
-    configure_package_config_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SNFDatabaseConfig.cmake.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/SNFDatabaseConfig.cmake"
-        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFDatabase"
-    )
-
-    write_basic_package_version_file(
-        "${CMAKE_CURRENT_BINARY_DIR}/SNFDatabaseConfigVersion.cmake"
-        VERSION "${PROJECT_VERSION}"
-        COMPATIBILITY SameMajorVersion
-    )
-
-    install(
-        FILES
-            "${CMAKE_CURRENT_BINARY_DIR}/SNFDatabaseConfig.cmake"
-            "${CMAKE_CURRENT_BINARY_DIR}/SNFDatabaseConfigVersion.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFDatabase"
-    )
-
+# ── Package config: native-only modules ──────────────────────────────────────
 if(NOT SNF_WEB_ASSEMBLY)
-    # ── Package config: SNFHttpServer (native Linux only) ────────────────────────────
-    configure_package_config_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SNFHttpServerConfig.cmake.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/SNFHttpServerConfig.cmake"
-        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFHttpServer"
-    )
+    snf_install_package_config(SNFHttpServer)
 
-    write_basic_package_version_file(
-        "${CMAKE_CURRENT_BINARY_DIR}/SNFHttpServerConfigVersion.cmake"
-        VERSION "${PROJECT_VERSION}"
-        COMPATIBILITY SameMajorVersion
-    )
-
-    install(
-        FILES
-            "${CMAKE_CURRENT_BINARY_DIR}/SNFHttpServerConfig.cmake"
-            "${CMAKE_CURRENT_BINARY_DIR}/SNFHttpServerConfigVersion.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFHttpServer"
-    )
+    # Only install SNFSnmp package config if the target exists.
+    # This avoids installing a config that references missing export files
+    # when net-snmp is unavailable and lib/Snmp returns early.
+    if(TARGET SNFSnmp)
+        snf_install_package_config(SNFSnmp)
+    endif()
 endif()
-
-# ── Package config: SNFWebSocket ─────────────────────────────────────────────
-    configure_package_config_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SNFWebSocketConfig.cmake.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/SNFWebSocketConfig.cmake"
-        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFWebSocket"
-    )
-
-    write_basic_package_version_file(
-        "${CMAKE_CURRENT_BINARY_DIR}/SNFWebSocketConfigVersion.cmake"
-        VERSION "${PROJECT_VERSION}"
-        COMPATIBILITY SameMajorVersion
-    )
-
-    install(
-        FILES
-            "${CMAKE_CURRENT_BINARY_DIR}/SNFWebSocketConfig.cmake"
-            "${CMAKE_CURRENT_BINARY_DIR}/SNFWebSocketConfigVersion.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SNFWebSocket"
-    )

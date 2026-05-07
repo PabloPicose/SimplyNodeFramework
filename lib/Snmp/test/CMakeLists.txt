@@ -16,7 +16,5 @@ target_include_directories(SNFSnmpTests
         "${CMAKE_CURRENT_SOURCE_DIR}/../src"
 )
 
-add_test(NAME SNFSnmpTests COMMAND SNFSnmpTests)
-
 include(GoogleTest)
-gtest_discover_tests(SNFSnmpTests)
+gtest_discover_tests(SNFSnmpTests TEST_PREFIX "SNFSnmpTests.")

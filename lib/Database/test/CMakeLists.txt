@@ -10,4 +10,4 @@ target_link_libraries(SNFDatabaseTests
 )
 
 include(GoogleTest)
-gtest_discover_tests(SNFDatabaseTests)
+gtest_discover_tests(SNFDatabaseTests TEST_PREFIX "SNFDatabaseTests.")
