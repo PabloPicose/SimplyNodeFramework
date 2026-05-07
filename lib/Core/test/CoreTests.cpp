@@ -1634,6 +1634,94 @@ TEST_F(CoreFixture, stressTestQueuedSignalDeliveryUnderLoad)
     EXPECT_EQ(totalReceived.load(), kExpectedTotal);
 }
 
+// Verifies that emitting a Queued signal from multiple threads concurrently:
+//   1. Delivers every invocation (count matches total emits across all threads).
+//   2. Each invocation runs on the receiver's owner thread, not the emitter's.
+TEST_F(CoreFixture, queuedSignalFromManyThreadsDeliversOnReceiverThread)
+{
+    using namespace std::chrono_literals;
+
+    constexpr int kEmitterCount = 8;
+    constexpr int kEmitsPerThread = 50;
+    const int     kExpectedTotal  = kEmitterCount * kEmitsPerThread;
+
+    struct TrackingReceiver final : Node
+    {
+        std::atomic<int>  count{0};
+        std::atomic<bool> wrongThread{false};
+
+        TrackingReceiver() : Node() {}
+
+        void onValue(int)
+        {
+            if (std::this_thread::get_id() != threadId()) {
+                wrongThread.store(true, std::memory_order_relaxed);
+            }
+            count.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        void update() override {}
+    };
+
+    std::mutex              mutex;
+    std::condition_variable cv;
+    bool                    workerReady  = false;
+    std::thread::id         workerThreadId;
+    EventLoop*              workerLoop   = nullptr;
+
+    // Receiver lives on a dedicated worker thread.
+    TrackingReceiver* receiver = nullptr;
+
+    std::thread worker([&]() {
+        workerLoop     = app->getOrCreateCurrentThreadEventLoop();
+        workerThreadId = std::this_thread::get_id();
+        receiver       = new TrackingReceiver();
+
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            workerReady = true;
+        }
+        cv.notify_one();
+
+        Timer keepAlive;
+        keepAlive.setSingleShot(true);
+        keepAlive.start(10s);
+
+        workerLoop->run();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&] { return workerReady; });
+    }
+
+    Signal<int> signal;
+    signal.connect(NodePtr<TrackingReceiver>(receiver), &TrackingReceiver::onValue, ConnectionType::Queued);
+
+    // Launch kEmitterCount threads, each emitting kEmitsPerThread times.
+    std::vector<std::thread> emitters;
+    emitters.reserve(kEmitterCount);
+    for (int i = 0; i < kEmitterCount; ++i) {
+        emitters.emplace_back([&signal, i]() {
+            for (int j = 0; j < kEmitsPerThread; ++j) {
+                signal.emit(i * kEmitsPerThread + j);
+            }
+        });
+    }
+    for (auto& t : emitters) {
+        t.join();
+    }
+
+    // All emits have been posted. Stop the worker after the queue drains.
+    workerLoop->post([workerLoop] { workerLoop->stop(); });
+    worker.join();
+
+    EXPECT_EQ(receiver->count.load(), kExpectedTotal);
+    EXPECT_FALSE(receiver->wrongThread.load());
+
+    delete receiver;
+}
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
