@@ -1,13 +1,18 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <csignal>
 #include <cstdint>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <SNFCore/Application.h>
 #include <SNFCore/EventLoop.h>
+#include <SNFCore/ThreadPool.h>
 #include <SNFCore/Timer.h>
 #include <SNFNetwork/TcpServer.h>
 #include <SNFNetwork/TcpSocket.h>
@@ -297,6 +302,127 @@ TEST_F(TcpServerFixture, acceptedSocketCanEchoToClient)
         accepted->close();
         delete accepted;
     }
+}
+
+TEST_F(TcpServerFixture, acceptedSocketsMovedToThreadPoolReceiveClientMessages)
+{
+    constexpr std::size_t kClientCount = 4;
+
+    TcpServer server;
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+    const std::uint16_t port = server.serverPort();
+    ASSERT_GT(port, 0);
+
+    ThreadPool* pool = app->threadPool();
+    ASSERT_NE(pool, nullptr);
+    const std::vector<std::thread::id> workerThreadIds = pool->workerThreadIds();
+    ASSERT_FALSE(workerThreadIds.empty());
+
+    std::vector<std::unique_ptr<TcpSocket>> clients;
+    clients.reserve(kClientCount);
+
+    std::vector<TcpSocket*> acceptedSockets;
+    acceptedSockets.reserve(kClientCount);
+
+    std::vector<std::string> expectedMessages;
+    std::vector<std::string> receivedMessages(kClientCount);
+    std::vector<std::thread::id> serverCallbackThreads(kClientCount);
+    expectedMessages.reserve(kClientCount);
+
+    std::mutex receivedMutex;
+    std::string clientError;
+    std::string serverError;
+
+    auto stopWhenDone = [&]() {
+        for (std::size_t i = 0; i < kClientCount; ++i) {
+            if (receivedMessages[i] != expectedMessages[i]) {
+                return;
+            }
+        }
+        app->quit();
+    };
+
+    server.newConnection.connect([&]() {
+        while (TcpSocket* peer = server.nextPendingConnection()) {
+            const std::size_t index = acceptedSockets.size();
+            acceptedSockets.push_back(peer);
+
+            peer->readyRead.connect([&, peer, index]() {
+                const std::vector<std::uint8_t> data = peer->readAll();
+                std::lock_guard<std::mutex> lock(receivedMutex);
+                receivedMessages[index].append(data.begin(), data.end());
+                serverCallbackThreads[index] = std::this_thread::get_id();
+                stopWhenDone();
+            });
+
+            peer->errorOccurred.connect([&](const std::string& error) {
+                std::lock_guard<std::mutex> lock(receivedMutex);
+                serverError = error;
+                app->quit();
+            });
+
+            if (!peer->moveToThreadPool()) {
+                serverError = "moveToThreadPool failed";
+                app->quit();
+                return;
+            }
+
+            if (acceptedSockets.size() == kClientCount) {
+                for (std::size_t i = 0; i < kClientCount; ++i) {
+                    clients[i]->write(expectedMessages[i]);
+                }
+            }
+        }
+    });
+
+    server.errorOccurred.connect([&](const std::string& error) {
+        std::lock_guard<std::mutex> lock(receivedMutex);
+        serverError = error;
+        app->quit();
+    });
+
+    for (std::size_t i = 0; i < kClientCount; ++i) {
+        expectedMessages.push_back("client-" + std::to_string(i) + "-payload");
+
+        auto client = std::make_unique<TcpSocket>(false);
+        TcpSocket* clientPtr = client.get();
+        clientPtr->errorOccurred.connect([&](const std::string& error) {
+            std::lock_guard<std::mutex> lock(receivedMutex);
+            clientError = error;
+            app->quit();
+        });
+
+        clients.push_back(std::move(client));
+    }
+
+    Timer shutdown;
+    armShutdown(shutdown, 4s);
+
+    for (const auto& client : clients) {
+        client->connectToHost(HostAddress::LocalHost, port);
+    }
+
+    app->run();
+
+    EXPECT_TRUE(clientError.empty());
+    EXPECT_TRUE(serverError.empty());
+    ASSERT_EQ(acceptedSockets.size(), kClientCount);
+
+    for (std::size_t i = 0; i < kClientCount; ++i) {
+        EXPECT_EQ(receivedMessages[i], expectedMessages[i]);
+        EXPECT_TRUE(std::find(workerThreadIds.begin(), workerThreadIds.end(), acceptedSockets[i]->threadId())
+                    != workerThreadIds.end());
+        EXPECT_EQ(serverCallbackThreads[i], acceptedSockets[i]->threadId());
+    }
+
+    for (const auto& client : clients) {
+        client->close();
+    }
+    for (TcpSocket* peer : acceptedSockets) {
+        peer->close();
+        peer->deleteLater();
+    }
+    app->loopOnce();
 }
 
 TEST_F(TcpServerFixture, queueOverflowBehavior)

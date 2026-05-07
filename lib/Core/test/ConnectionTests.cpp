@@ -187,7 +187,7 @@ TEST_F(ConnectionFixture, queuedConnectionSkipsReceiverMarkedToDelete)
 
     receiver->deleteLater();
     signal.emit(11);
-    app->run();
+    app->loopOnce();
 
     EXPECT_EQ(externalInvocations, 0);
     NodePtr<ValueReceiver> receiverPtr(receiver);

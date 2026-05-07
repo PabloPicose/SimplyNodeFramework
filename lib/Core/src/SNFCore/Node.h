@@ -14,6 +14,7 @@
 namespace snf {
 
 class EventLoop;
+class ThreadPool;
 
 /**
  * @class Node
@@ -110,6 +111,9 @@ public:
     /** @brief Returns the thread ID of the thread that constructed this node. */
     std::thread::id ownerThreadId() const;
 
+    /** @brief Returns the thread ID of the thread this node currently lives on. */
+    std::thread::id threadId() const;
+
     /**
      * @brief Returns the EventLoop of the owner thread.
      *
@@ -138,6 +142,15 @@ public:
      *         `false` if the preconditions were not met.
      */
     bool moveToThread(std::thread::id targetThreadId);
+
+    /**
+     * @brief Migrates this node and its descendants to any worker in @p pool.
+     *
+     * If @p pool is null, the Application-owned global ThreadPool is used.
+     * Throws if the Application-owned global ThreadPool does not exist.
+     * Returns false when no worker EventLoop is available.
+     */
+    bool moveToThreadPool(ThreadPool* pool = nullptr);
 
     /**
      * @brief Returns the generation counter used by `NodePtr<T>` to detect

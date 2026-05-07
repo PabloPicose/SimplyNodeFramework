@@ -40,6 +40,9 @@ TEST_F(TimerFixture, singleShotTimerFiresOnOwnerThread)
     timer.timeout.connect([&]() {
         ++timeoutCount;
         callbackThread = std::this_thread::get_id();
+        if (EventLoop* loop = timer.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
     });
 
     timer.start(15);
@@ -87,7 +90,12 @@ TEST_F(TimerFixture, disconnectedTimeoutDoesNotInvokeSlot)
     int disconnectedCount = 0;
     Connection connection = timer.timeout.connect([&]() { ++disconnectedCount; });
     int emitted = 0;
-    timer.timeout.connect([&]() { ++emitted; });
+    timer.timeout.connect([&]() {
+        ++emitted;
+        if (EventLoop* loop = timer.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
 
     connection.disconnect();
     EXPECT_FALSE(connection.connected());
@@ -107,6 +115,9 @@ TEST_F(TimerFixture, staticSingleShotExecutesOnCreationThread)
     Timer::singleShot(10ms, [&]() {
         ++timeoutCount;
         callbackThread = std::this_thread::get_id();
+        if (EventLoop* loop = app->getOrCreateCurrentThreadEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
     });
 
     app->run();
@@ -123,7 +134,12 @@ TEST_F(TimerFixture, multipleTimersFireInCorrectOrder)
 
     // Timer 1: 30ms (should fire last)
     timer1.setSingleShot(true);
-    timer1.timeout.connect([&]() { executionOrder.push_back(1); });
+    timer1.timeout.connect([&]() {
+        executionOrder.push_back(1);
+        if (EventLoop* loop = timer1.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    });
 
     // Timer 2: 10ms (should fire first)
     timer2.setSingleShot(true);
@@ -283,6 +299,9 @@ TEST_F(TimerFixture, startWithoutArgumentsUsesConfiguredInterval)
     timer.timeout.connect([&]() {
         ++timeoutCount;
         callbackThread = std::this_thread::get_id();
+        if (EventLoop* loop = timer.ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
     });
 
     timer.start();

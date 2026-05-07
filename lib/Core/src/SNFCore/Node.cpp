@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <atomic>
 #include <iostream>
+#include <stdexcept>
 
 #include "SNFCore/Application.h"
 #include "SNFCore/EventLoop.h"
 #include "SNFCore/NodePtr.h"
+#include "SNFCore/ThreadPool.h"
 
 namespace snf {
 Node::~Node()
@@ -156,6 +158,8 @@ size_t Node::childrenToDeleteCount() const { return m_childrenToDelete.size(); }
 
 std::thread::id Node::ownerThreadId() const { return m_ownerThreadId; }
 
+std::thread::id Node::threadId() const { return ownerThreadId(); }
+
 EventLoop* Node::ownerEventLoop() const { return m_ownerEventLoop; }
 
 std::uint64_t Node::generation() const { return m_generation; }
@@ -243,6 +247,28 @@ bool Node::moveToThread(std::thread::id targetThreadId)
         }
     });
     return true;
+}
+
+bool Node::moveToThreadPool(ThreadPool* pool)
+{
+    if (! pool) {
+        pool = ThreadPool::globalInstance();
+    }
+    if (! pool) {
+        throw std::runtime_error("Application global ThreadPool does not exist");
+    }
+
+    const std::vector<std::thread::id> workerThreadIds = pool->workerThreadIds();
+    if (workerThreadIds.empty()) {
+        return false;
+    }
+
+    for (const std::thread::id workerThreadId : workerThreadIds) {
+        if (moveToThread(workerThreadId)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void Node::applyMoveToThread(EventLoop* targetLoop)

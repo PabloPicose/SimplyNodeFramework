@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "SNFCore/Application.h"
+#include "SNFCore/EventLoop.h"
 #include "SNFCore/Runnable.h"
 #include "SNFCore/ThreadPool.h"
 
@@ -55,6 +56,22 @@ TEST_F(ThreadPoolFixture, applicationOwnsGlobalThreadPool)
     ASSERT_NE(app->threadPool(), nullptr);
     EXPECT_EQ(snf::ThreadPool::globalInstance(), app->threadPool());
     EXPECT_GE(app->threadPool()->maxThreadCount(), 1U);
+}
+
+TEST_F(ThreadPoolFixture, workersRegisterIdleEventLoops)
+{
+    snf::ThreadPool* pool = app->threadPool();
+    ASSERT_NE(pool, nullptr);
+
+    const std::vector<std::thread::id> workerThreadIds = pool->workerThreadIds();
+    ASSERT_FALSE(workerThreadIds.empty());
+
+    for (const std::thread::id workerThreadId : workerThreadIds) {
+        snf::EventLoop* loop = app->getEventLoopByThreadId(workerThreadId);
+        ASSERT_NE(loop, nullptr);
+        EXPECT_EQ(loop->ownerThreadId(), workerThreadId);
+        EXPECT_FALSE(loop->hasPendingWork());
+    }
 }
 
 TEST(ThreadPoolTests, twoThreadPoolDoesNotRunMoreThanTwoTasksConcurrently)

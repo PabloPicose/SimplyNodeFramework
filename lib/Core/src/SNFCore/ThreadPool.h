@@ -12,11 +12,12 @@
 #include <cstddef>
 #include <memory>
 #include <mutex>
-#include <queue>
 #include <thread>
 #include <vector>
 
 namespace snf {
+
+class EventLoop;
 
 /**
  * @class ThreadPool
@@ -65,10 +66,12 @@ private:
     void workerLoop();
 
     mutable std::mutex m_mutex;
-    std::condition_variable m_workAvailable;
+    std::condition_variable m_workersReady;
     std::condition_variable m_done;
-    std::queue<std::shared_ptr<Runnable>> m_tasks;
     std::vector<std::thread> m_workers;
+    std::vector<EventLoop*> m_workerLoops;
+    std::size_t m_nextWorker = 0;
+    std::size_t m_queuedTasks = 0;
     std::size_t m_activeTasks = 0;
     bool m_stopping = false;
 };

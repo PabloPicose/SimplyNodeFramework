@@ -1,6 +1,7 @@
 #include "SNFCore/ThreadPool.h"
 
 #include "SNFCore/Application.h"
+#include "SNFCore/EventLoop.h"
 
 #include <algorithm>
 
@@ -19,6 +20,9 @@ ThreadPool::ThreadPool(std::size_t maxThreadCount)
     for (std::size_t i = 0; i < maxThreadCount; ++i) {
         m_workers.emplace_back([this]() { workerLoop(); });
     }
+
+    std::unique_lock<std::mutex> lock(m_mutex);
+    m_workersReady.wait(lock, [this, maxThreadCount]() { return m_workerLoops.size() == maxThreadCount; });
 #endif
 }
 
@@ -49,41 +53,73 @@ bool ThreadPool::start(std::shared_ptr<Runnable> runnable)
         return false;
     }
 
+    EventLoop* targetLoop = nullptr;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        if (m_stopping) {
+        if (m_stopping || m_workerLoops.empty()) {
             return false;
         }
-        m_tasks.push(std::move(runnable));
+        targetLoop = m_workerLoops[m_nextWorker % m_workerLoops.size()];
+        ++m_nextWorker;
+        ++m_queuedTasks;
     }
 
-    m_workAvailable.notify_one();
+    targetLoop->post([this, runnable = std::move(runnable)]() {
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            --m_queuedTasks;
+            ++m_activeTasks;
+        }
+
+        runnable->execute();
+
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            --m_activeTasks;
+            if (m_queuedTasks == 0 && m_activeTasks == 0) {
+                m_done.notify_all();
+            }
+        }
+    });
     return true;
 }
 
 void ThreadPool::waitForDone()
 {
     std::unique_lock<std::mutex> lock(m_mutex);
-    m_done.wait(lock, [this]() { return m_tasks.empty() && m_activeTasks == 0; });
+    m_done.wait(lock, [this]() { return m_queuedTasks == 0 && m_activeTasks == 0; });
 }
 
 void ThreadPool::shutdown()
 {
+    std::vector<EventLoop*> workerLoops;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         if (m_stopping) {
             return;
         }
         m_stopping = true;
+        workerLoops = m_workerLoops;
     }
 
-    m_workAvailable.notify_all();
+    for (EventLoop* loop : workerLoops) {
+        if (loop) {
+            loop->stop();
+        }
+    }
+
     for (std::thread& worker : m_workers) {
         if (worker.joinable()) {
             worker.join();
         }
     }
-    m_workers.clear();
+
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_workers.clear();
+        m_workerLoops.clear();
+        m_nextWorker = 0;
+    }
 }
 
 std::size_t ThreadPool::maxThreadCount() const
@@ -112,35 +148,28 @@ std::size_t ThreadPool::activeThreadCount() const
 std::size_t ThreadPool::queuedTaskCount() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    return m_tasks.size();
+    return m_queuedTasks;
 }
 
 void ThreadPool::workerLoop()
 {
-    while (true) {
-        std::shared_ptr<Runnable> runnable;
-        {
-            std::unique_lock<std::mutex> lock(m_mutex);
-            m_workAvailable.wait(lock, [this]() { return m_stopping || ! m_tasks.empty(); });
-            if (m_stopping && m_tasks.empty()) {
-                return;
-            }
+    std::unique_ptr<EventLoop> standaloneLoop;
+    EventLoop* loop = nullptr;
 
-            runnable = std::move(m_tasks.front());
-            m_tasks.pop();
-            ++m_activeTasks;
-        }
-
-        runnable->execute();
-
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            --m_activeTasks;
-            if (m_tasks.empty() && m_activeTasks == 0) {
-                m_done.notify_all();
-            }
-        }
+    if (Application* app = Application::instance()) {
+        loop = app->getOrCreateCurrentThreadEventLoop();
+    } else {
+        standaloneLoop = std::make_unique<EventLoop>();
+        loop = standaloneLoop.get();
     }
+
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_workerLoops.push_back(loop);
+    }
+    m_workersReady.notify_all();
+
+    loop->run();
 }
 
 }  // namespace snf

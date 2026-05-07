@@ -134,10 +134,6 @@ void EventLoop::run()
             break;
         }
 
-        if (! hasPendingWorkLocked()) {
-            break;
-        }
-
         std::chrono::steady_clock::time_point nextDeadline;
         if (nextTimerDeadlineLocked(nextDeadline)) {
             m_condition.wait_until(lock, nextDeadline, [this]() {

@@ -12,6 +12,7 @@
 #include "SNFCore/EventLoop.h"
 #include "SNFCore/Node.h"
 #include "SNFCore/NodePtr.h"
+#include "SNFCore/ThreadPool.h"
 #include "SNFCore/Timer.h"
 
 using namespace snf;
@@ -23,6 +24,28 @@ public:
 
 protected:
     void update() override {}
+};
+
+class DestructionCountingNode final : public snf::Node
+{
+public:
+    explicit DestructionCountingNode(std::atomic<int>* destroyedCount, Node* parent = nullptr)
+        : Node(parent), m_destroyedCount(destroyedCount)
+    {
+    }
+
+    ~DestructionCountingNode() override
+    {
+        if (m_destroyedCount) {
+            m_destroyedCount->fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+
+protected:
+    void update() override {}
+
+private:
+    std::atomic<int>* m_destroyedCount = nullptr;
 };
 
 class CoreFixtureNoApp : public ::testing::Test
@@ -208,7 +231,7 @@ TEST_F(CoreFixture, childDeleteLaterQueuesUnderParent)
     // Cleanup root parent.
     parent->run();
     parent->deleteLater();
-    Application::instance()->run();
+    Application::instance()->loopOnce();
 }
 
 TEST_F(CoreFixture, parentRunDeletesQueuedChild)
@@ -228,7 +251,7 @@ TEST_F(CoreFixture, parentRunDeletesQueuedChild)
     }
 
     parent->deleteLater();
-    Application::instance()->run();
+    Application::instance()->loopOnce();
 }
 
 TEST_F(CoreFixture, applicationRunDeletesRootMarkedDeleteLater)
@@ -249,7 +272,7 @@ TEST_F(CoreFixture, applicationRunDeletesRootMarkedDeleteLater)
         EXPECT_TRUE(nodePtr.isMarkedToDelete());
     }
 
-    Application::instance()->run();
+    Application::instance()->loopOnce();
 
     EXPECT_EQ(Application::instance()->getRootNodesToDeleteCount(), 0);
     EXPECT_EQ(Application::instance()->getRootNodesCount(), 0);
@@ -278,7 +301,7 @@ TEST_F(CoreFixture, stackChildDeleteLaterDoesNotQueueParentDelete)
     EXPECT_EQ(parent->childrenCount(), 0);
 
     parent->deleteLater();
-    Application::instance()->run();
+    Application::instance()->loopOnce();
 }
 
 TEST_F(CoreFixture, nodePtrStateTransitionsForRootNode)
@@ -303,7 +326,7 @@ TEST_F(CoreFixture, nodePtrStateTransitionsForRootNode)
         EXPECT_TRUE(nodePtr.isMarkedToDelete());
     }
 
-    Application::instance()->run();
+    Application::instance()->loopOnce();
 
     {
         NodePtr nodePtr(parent);
@@ -319,8 +342,10 @@ TEST_F(CoreFixture, nodePtrStateTransitionsForRootNode)
 
 TEST_F(CoreFixture, nodeCreatesEventLoopForCreationThread)
 {
-    // Application constructor creates the main-thread EventLoop eagerly.
-    EXPECT_EQ(Application::instance()->getEventLoopCount(), 1);
+    // Application constructor creates the main-thread EventLoop eagerly plus
+    // the Application-owned ThreadPool worker loops.
+    const std::size_t initialLoopCount = Application::instance()->getEventLoopCount();
+    EXPECT_GE(initialLoopCount, std::size_t{1});
 
     std::thread::id createdThreadId;
     std::thread::id ownerThreadId;
@@ -336,8 +361,7 @@ TEST_F(CoreFixture, nodeCreatesEventLoopForCreationThread)
 
     EXPECT_EQ(ownerThreadId, createdThreadId);
     EXPECT_TRUE(hasThreadEventLoop);
-    // Main-thread loop + worker-thread loop.
-    EXPECT_EQ(Application::instance()->getEventLoopCount(), 2);
+    EXPECT_EQ(Application::instance()->getEventLoopCount(), initialLoopCount + 1);
 }
 
 TEST_F(CoreFixture, deleteLaterFromOtherThreadDeletesOnOwnerEventLoopRun)
@@ -360,7 +384,7 @@ TEST_F(CoreFixture, deleteLaterFromOtherThreadDeletesOnOwnerEventLoopRun)
         EXPECT_TRUE(nodePtr.isMarkedToDelete());
     }
 
-    ownerLoop->run();
+    ownerLoop->runPendingWork();
 
     {
         NodePtr<TestNode> nodePtr(node);
@@ -370,21 +394,20 @@ TEST_F(CoreFixture, deleteLaterFromOtherThreadDeletesOnOwnerEventLoopRun)
 
 TEST_F(CoreFixture, eventLoopIsReusedWithinSameThread)
 {
-    // Application constructor creates the main-thread EventLoop eagerly: count is 1.
-    EXPECT_EQ(Application::instance()->getEventLoopCount(), 1);
+    const std::size_t initialLoopCount = Application::instance()->getEventLoopCount();
+    EXPECT_GE(initialLoopCount, std::size_t{1});
 
     TestNode first;
     const std::thread::id firstOwner = first.ownerThreadId();
     EventLoop* firstLoop = first.ownerEventLoop();
-    // Still 1: no new loop created for main thread.
-    EXPECT_EQ(Application::instance()->getEventLoopCount(), 1);
+    EXPECT_EQ(Application::instance()->getEventLoopCount(), initialLoopCount);
 
     TestNode second;
     const std::thread::id secondOwner = second.ownerThreadId();
     EventLoop* secondLoop = second.ownerEventLoop();
     EXPECT_EQ(firstOwner, secondOwner);
     EXPECT_EQ(firstLoop, secondLoop);
-    EXPECT_EQ(Application::instance()->getEventLoopCount(), 1);
+    EXPECT_EQ(Application::instance()->getEventLoopCount(), initialLoopCount);
 }
 
 TEST_F(CoreFixture, deleteLaterIsIdempotent)
@@ -401,7 +424,7 @@ TEST_F(CoreFixture, deleteLaterIsIdempotent)
         EXPECT_TRUE(nodePtr.isMarkedToDelete());
     }
 
-    Application::instance()->run();
+    Application::instance()->loopOnce();
 
     {
         NodePtr<TestNode> nodePtr(node);
@@ -457,6 +480,68 @@ TEST_F(CoreFixture, eventLoopStopWakesBlockedRun)
     EXPECT_LT(runDuration, 1s);
 }
 
+TEST_F(CoreFixture, eventLoopRunSleepsWhenInitiallyIdleAndProcessesPostedWork)
+{
+    using namespace std::chrono_literals;
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool workerReady = false;
+    bool postedTaskRan = false;
+    bool runReturned = false;
+    std::thread::id loopThreadId;
+
+    std::thread loopThread([&]() {
+        EventLoop* loop = Application::instance()->getOrCreateCurrentThreadEventLoop();
+        ASSERT_NE(loop, nullptr);
+        loopThreadId = std::this_thread::get_id();
+
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            workerReady = true;
+        }
+        cv.notify_one();
+
+        loop->run();
+
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            runReturned = true;
+        }
+        cv.notify_one();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&]() { return workerReady; });
+    }
+
+    std::this_thread::sleep_for(50ms);
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        EXPECT_FALSE(runReturned);
+    }
+
+    EventLoop* loop = Application::instance()->getEventLoopByThreadId(loopThreadId);
+    ASSERT_NE(loop, nullptr);
+    loop->post([&]() {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            postedTaskRan = true;
+        }
+        cv.notify_one();
+        loop->stop();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait(lock, [&]() { return postedTaskRan; });
+    }
+
+    loopThread.join();
+    EXPECT_TRUE(runReturned);
+}
+
 TEST_F(CoreFixture, childInheritsParentAffinity)
 {
     TestNode* parent = new TestNode();
@@ -472,7 +557,7 @@ TEST_F(CoreFixture, childInheritsParentAffinity)
     EXPECT_EQ(child->ownerEventLoop(), parentLoop);
 
     parent->deleteLater();
-    Application::instance()->run();
+    Application::instance()->loopOnce();
 
     {
         NodePtr<TestNode> parentPtr(parent);
@@ -526,7 +611,7 @@ TEST_F(CoreFixture, deleteLaterOnChildAlsoDeletesGrandchild)
 
     // Clean up parent
     parent->deleteLater();
-    Application::instance()->run();
+    Application::instance()->loopOnce();
 }
 
 TEST_F(CoreFixture, eventLoopHasPendingWorkWithTask)
@@ -540,7 +625,7 @@ TEST_F(CoreFixture, eventLoopHasPendingWorkWithTask)
 
     EXPECT_TRUE(loop->hasPendingWork());
 
-    loop->run();
+    loop->runPendingWork();
 
     EXPECT_FALSE(loop->hasPendingWork());
 }
@@ -557,7 +642,7 @@ TEST_F(CoreFixture, eventLoopHasPendingWorkWithDelete)
 
     EXPECT_TRUE(loop->hasPendingWork());
 
-    loop->run();
+    loop->runPendingWork();
 
     EXPECT_FALSE(loop->hasPendingWork());
 }
@@ -595,7 +680,7 @@ TEST_F(CoreFixture, allEventLoopsIdleReturnsFalseWhenWorkerHasWork)
         EventLoop* loop = Application::instance()->getOrCreateCurrentThreadEventLoop();
         {
             std::lock_guard<std::mutex> lock(mutex);
-            loop->post([]() {});
+            loop->post([loop]() { loop->stop(); });
             posted = true;
         }
         cv.notify_one();
@@ -756,7 +841,7 @@ TEST_F(CoreFixture, nodeHasNonZeroGeneration)
     EXPECT_GT(node->generation(), 0u);
 
     node->deleteLater();
-    Application::instance()->run();
+    Application::instance()->loopOnce();
 }
 
 TEST_F(CoreFixture, differentNodesHaveDistinctGenerations)
@@ -768,7 +853,7 @@ TEST_F(CoreFixture, differentNodesHaveDistinctGenerations)
 
     a->deleteLater();
     b->deleteLater();
-    Application::instance()->run();
+    Application::instance()->loopOnce();
 }
 
 TEST_F(CoreFixture, nodePtrCapturesGenerationAtCreation)
@@ -782,7 +867,7 @@ TEST_F(CoreFixture, nodePtrCapturesGenerationAtCreation)
     EXPECT_EQ(capturedGen, node->generation());
 
     node->deleteLater();
-    Application::instance()->run();
+    Application::instance()->loopOnce();
 
     // After deletion the ptr must be dead even though we still hold the raw pointer.
     EXPECT_FALSE(ptr);
@@ -802,7 +887,7 @@ TEST_F(CoreFixture, nodePtrDeadAfterABAAddressReuse)
     EXPECT_TRUE(ptrA);
 
     nodeA->deleteLater();
-    Application::instance()->run();
+    Application::instance()->loopOnce();
 
     EXPECT_FALSE(ptrA);
 
@@ -815,7 +900,7 @@ TEST_F(CoreFixture, nodePtrDeadAfterABAAddressReuse)
     EXPECT_FALSE(ptrA);
 
     nodeB->deleteLater();
-    Application::instance()->run();
+    Application::instance()->loopOnce();
 }
 
 TEST_F(CoreFixture, nodePtrIsAliveReflectsMarkedToDeleteState)
@@ -835,7 +920,7 @@ TEST_F(CoreFixture, nodePtrIsAliveReflectsMarkedToDeleteState)
     EXPECT_TRUE(ptr.isMarkedToDelete());
     EXPECT_TRUE(ptr);
 
-    Application::instance()->run();
+    Application::instance()->loopOnce();
 
     // After run: dead.
     EXPECT_FALSE(ptr.isAlive());
@@ -859,7 +944,14 @@ TEST_F(CoreFixture, moveToThreadSameThreadIsNoOp)
     EXPECT_EQ(node->ownerEventLoop(), originalLoop);
 
     node->deleteLater();
-    Application::instance()->run();
+    Application::instance()->loopOnce();
+}
+
+TEST_F(CoreFixture, nodeThreadIdTracksCurrentAffinity)
+{
+    TestNode node;
+    EXPECT_EQ(node.threadId(), std::this_thread::get_id());
+    EXPECT_EQ(node.threadId(), node.ownerThreadId());
 }
 
 TEST_F(CoreFixture, moveToThreadToUnknownThreadReturnsFalse)
@@ -875,7 +967,7 @@ TEST_F(CoreFixture, moveToThreadToUnknownThreadReturnsFalse)
     EXPECT_FALSE(node->moveToThread(unknownId));
 
     node->deleteLater();
-    Application::instance()->run();
+    Application::instance()->loopOnce();
 }
 
 TEST_F(CoreFixture, moveToThreadChangesOwnerThreadId)
@@ -1118,7 +1210,7 @@ TEST_F(CoreFixture, moveToThreadRejectsNodeWhoseParentIsOnDifferentThread)
     EXPECT_FALSE(child->moveToThread(workerThreadId));
 
     parent->deleteLater();
-    Application::instance()->run();
+    Application::instance()->loopOnce();
 }
 
 TEST_F(CoreFixture, moveToThreadFromOtherThreadIsAsynchronous)
@@ -1168,7 +1260,7 @@ TEST_F(CoreFixture, moveToThreadFromOtherThreadIsAsynchronous)
     caller.join();
 
     // The migration is now enqueued on the main loop. Run the main loop to apply it.
-    mainLoop->run();
+    mainLoop->runPendingWork();
 
     // Check the node is now on the worker thread.
     EXPECT_EQ(node->ownerThreadId(), workerThreadId);
@@ -1257,6 +1349,77 @@ TEST_F(CoreFixture, queuedConnectionStillDeliversOnNewThreadAfterMigration)
     EXPECT_EQ(callbackThreadId, workerThreadId);
 
     delete receiver;
+}
+
+TEST_F(CoreFixture, moveToThreadPoolMovesToWorkerAndProcessesPostedWork)
+{
+    using namespace std::chrono_literals;
+
+    ThreadPool* pool = Application::instance()->threadPool();
+    ASSERT_NE(pool, nullptr);
+
+    const std::vector<std::thread::id> workerThreadIds = pool->workerThreadIds();
+    ASSERT_FALSE(workerThreadIds.empty());
+
+    TestNode* node = new TestNode();
+    EXPECT_EQ(node->threadId(), std::this_thread::get_id());
+
+    ASSERT_TRUE(node->moveToThreadPool());
+    EXPECT_NE(node->threadId(), std::this_thread::get_id());
+    EXPECT_TRUE(std::find(workerThreadIds.begin(), workerThreadIds.end(), node->threadId()) != workerThreadIds.end());
+
+    EventLoop* workerLoop = node->ownerEventLoop();
+    ASSERT_NE(workerLoop, nullptr);
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool taskProcessed = false;
+    bool deleted = false;
+    std::thread::id taskThreadId;
+
+    workerLoop->post([&]() {
+        std::lock_guard<std::mutex> lock(mutex);
+        taskThreadId = std::this_thread::get_id();
+        taskProcessed = true;
+        cv.notify_one();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        EXPECT_TRUE(cv.wait_for(lock, 1s, [&]() { return taskProcessed; }));
+    }
+
+    EXPECT_EQ(taskThreadId, node->threadId());
+
+    workerLoop->post([&]() {
+        delete node;
+        std::lock_guard<std::mutex> lock(mutex);
+        deleted = true;
+        cv.notify_one();
+    });
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        EXPECT_TRUE(cv.wait_for(lock, 1s, [&]() { return deleted; }));
+    }
+}
+
+TEST_F(CoreFixture, applicationDestructionDeletesNodesMovedToThreadPool)
+{
+    std::atomic<int> destroyedCount{0};
+
+    auto* root = new DestructionCountingNode(&destroyedCount);
+    auto* child = new DestructionCountingNode(&destroyedCount, root);
+
+    ASSERT_TRUE(root->moveToThreadPool());
+    EXPECT_EQ(child->threadId(), root->threadId());
+    EXPECT_NE(root->threadId(), std::this_thread::get_id());
+
+    delete app;
+    app = nullptr;
+
+    EXPECT_EQ(destroyedCount.load(std::memory_order_relaxed), 2);
+    EXPECT_EQ(Application::instance(), nullptr);
 }
 
 int main(int argc, char** argv)
