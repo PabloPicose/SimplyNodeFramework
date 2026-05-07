@@ -1,7 +1,6 @@
 # SimplyNodeFramework
 
 [![Ubuntu](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-single-platform.yml/badge.svg)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-single-platform.yml)
-[![Coverage](https://codecov.io/gh/PabloPicose/SimplyNodeFramework/graph/badge.svg)](https://codecov.io/gh/PabloPicose/SimplyNodeFramework)
 [![Rocky Linux 8](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-rockylinux8.yml/badge.svg)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-rockylinux8.yml)
 [![Debian 12](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-debian12.yml/badge.svg)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-debian12.yml)
 

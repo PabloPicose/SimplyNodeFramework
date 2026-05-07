@@ -50,18 +50,6 @@
       }
     },
     {
-      "name": "actions-coverage",
-      "displayName": "GitHub Actions Coverage",
-      "inherits": "actions",
-      "binaryDir": "${sourceDir}/build/actions-coverage",
-      "cacheVariables": {
-        "CMAKE_C_FLAGS": "--coverage",
-        "CMAKE_CXX_FLAGS": "--coverage",
-        "CMAKE_EXE_LINKER_FLAGS": "--coverage",
-        "CMAKE_SHARED_LINKER_FLAGS": "--coverage"
-      }
-    },
-    {
       "name": "native-debug-experimental",
       "displayName": "Native Debug Experimental",
       "inherits": "native-debug",
@@ -105,10 +93,6 @@
     {
       "name": "actions",
       "configurePreset": "actions"
-    },
-    {
-      "name": "actions-coverage",
-      "configurePreset": "actions-coverage"
     },
     {
       "name": "native-release",
@@ -159,17 +143,6 @@
       "execution": {
         "jobs": 4,
         "timeout": 60
-      }
-    },
-    {
-      "name": "actions-coverage",
-      "configurePreset": "actions-coverage",
-      "output": {
-        "outputOnFailure": true
-      },
-      "execution": {
-        "jobs": 4,
-        "timeout": 180
       }
     },
     {
