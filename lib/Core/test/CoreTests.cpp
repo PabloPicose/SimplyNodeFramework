@@ -1762,6 +1762,54 @@ TEST_F(CoreFixture, queuedSignalFromManyThreadsDeliversOnReceiverThread)
     delete receiver;
 }
 
+TEST_F(CoreFixture, applicationDestructionDeletesRootAndMovedToThreadPoolNodes)
+{
+    using namespace std::chrono_literals;
+
+    std::vector<NodePtr<TestNode>> nodePtrs;
+
+    // Create some root nodes
+    TestNode* root1 = new TestNode();
+    TestNode* root2 = new TestNode();
+
+    // Create a child node under root1
+    TestNode* child = new TestNode(root1);
+
+    // Move root2 to thread pool
+    ASSERT_TRUE(root2->moveToThreadPool());
+
+    // Store NodePtrs to verify deletion later
+    nodePtrs.push_back(NodePtr<TestNode>(root1));
+    nodePtrs.push_back(NodePtr<TestNode>(root2));
+    nodePtrs.push_back(NodePtr<TestNode>(child));
+
+    // Verify all nodes are alive before destruction
+    EXPECT_TRUE(nodePtrs[0].isAlive());
+    EXPECT_TRUE(nodePtrs[1].isAlive());
+    EXPECT_TRUE(nodePtrs[2].isAlive());
+
+    // Verify thread ownership
+    EXPECT_EQ(root1->threadId(), std::this_thread::get_id());
+    EXPECT_NE(root2->threadId(), std::this_thread::get_id());
+    EXPECT_EQ(child->threadId(), root1->threadId());
+
+    // Verify node count: root2 moved to thread pool, so only root1 is in main thread
+    EXPECT_EQ(Application::instance()->getRootNodesCount(), 1);
+
+    // Delete the Application, which should delete all nodes
+    // (both main-thread roots and thread-pool nodes)
+    delete app;
+    app = nullptr;
+
+
+    // Verify all nodes have been deleted
+    EXPECT_FALSE(nodePtrs[0].isAlive());
+    EXPECT_FALSE(nodePtrs[1].isAlive());
+    EXPECT_FALSE(nodePtrs[2].isAlive());
+
+    EXPECT_EQ(Application::instance(), nullptr);
+}
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
