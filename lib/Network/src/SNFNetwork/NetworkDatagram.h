@@ -6,9 +6,10 @@
  * @ingroup SNFNetwork_UDP
  */
 
+#include "SNFNetwork/ByteArray.h"
+
 #include <cstdint>
 #include <string>
-#include <vector>
 
 namespace snf {
 
@@ -34,12 +35,12 @@ public:
      * @param senderHost The IP address of the sender.
      * @param senderPort The port of the sender.
      */
-    NetworkDatagram(std::vector<std::uint8_t> data, std::string senderHost, std::uint16_t senderPort);
+    NetworkDatagram(ByteArray data, std::string senderHost, std::uint16_t senderPort);
 
     /**
      * @brief Returns the datagram payload.
      */
-    const std::vector<std::uint8_t>& data() const;
+    const ByteArray& data() const;
 
     /**
      * @brief Returns the IP address of the sender.
@@ -52,7 +53,7 @@ public:
     std::uint16_t senderPort() const;
 
 private:
-    std::vector<std::uint8_t> m_data;
+    ByteArray m_data;
     std::string m_senderHost;
     std::uint16_t m_senderPort = 0;
 };

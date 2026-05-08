@@ -54,6 +54,7 @@ target_sources(SNFCore
             "${SNFCORE_DIR}/ModelIndex.h"
             "${SNFCORE_DIR}/AbstractTableModel.h"
             "${SNFCORE_DIR}/Variant.h"
+            "${SNFCORE_DIR}/Span.h"
             "${SNFCORE_DIR}/ByteArray.h"
             "${SNFCORE_DIR}/File.h"
             "${SNFCORE_DIR}/TempFile.h"

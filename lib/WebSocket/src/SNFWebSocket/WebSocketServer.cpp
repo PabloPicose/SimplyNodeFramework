@@ -119,8 +119,8 @@ void WebSocketServer::handlePendingReadyRead(const std::shared_ptr<PendingUpgrad
         return;
     }
 
-    const auto data = pending->socket->readAll();
-    pending->buffer.append(data.begin(), data.end());
+    const ByteArray data = pending->socket->readAll();
+    pending->buffer += data.toString();
 
     const auto headerEnd = pending->buffer.find("\r\n\r\n");
     if (headerEnd == std::string::npos) {

@@ -258,8 +258,8 @@ TEST_F(TcpServerFixture, acceptedSocketCanEchoToClient)
         ASSERT_NE(accepted, nullptr);
 
         accepted->readyRead.connect([&]() {
-            const std::vector<std::uint8_t> input = accepted->readAll();
-            std::string text(input.begin(), input.end());
+            const ByteArray input = accepted->readAll();
+            std::string text = input.toString();
             accepted->write(text);
         });
     });
@@ -274,8 +274,8 @@ TEST_F(TcpServerFixture, acceptedSocketCanEchoToClient)
     client.connected.connect([&]() { client.write(payload); });
 
     client.readyRead.connect([&]() {
-        const std::vector<std::uint8_t> data = client.readAll();
-        receivedByClient.assign(data.begin(), data.end());
+        const ByteArray data = client.readAll();
+        receivedByClient = data.toString();
         if (EventLoop* loop = client.ownerEventLoop()) {
             loop->post([loop]() { loop->stop(); });
         }
@@ -348,9 +348,9 @@ TEST_F(TcpServerFixture, acceptedSocketsMovedToThreadPoolReceiveClientMessages)
             acceptedSockets.push_back(peer);
 
             peer->readyRead.connect([&, peer, index]() {
-                const std::vector<std::uint8_t> data = peer->readAll();
+                const ByteArray data = peer->readAll();
                 std::lock_guard<std::mutex> lock(receivedMutex);
-                receivedMessages[index].append(data.begin(), data.end());
+                receivedMessages[index] += data.toString();
                 serverCallbackThreads[index] = std::this_thread::get_id();
                 stopWhenDone();
             });
@@ -620,13 +620,15 @@ TEST_F(TcpServerFixture, largeDataTransferIntegrity)
 
     // 1MB payload
     const std::size_t payloadSize = 1024 * 1024;
-    std::vector<std::uint8_t> largePayload;
-    largePayload.reserve(payloadSize);
+    std::vector<std::uint8_t> largePayloadVec;
+    largePayloadVec.reserve(payloadSize);
     for (std::size_t i = 0; i < payloadSize; ++i) {
-        largePayload.push_back(static_cast<std::uint8_t>(i % 256));
+        largePayloadVec.push_back(static_cast<std::uint8_t>(i % 256));
     }
+    const std::string largePayload(reinterpret_cast<const char*>(largePayloadVec.data()), largePayloadVec.size());
 
-    std::vector<std::uint8_t> receivedByClient;
+    std::string receivedByClient;
+    receivedByClient.reserve(payloadSize);
     std::string clientError;
     std::string serverError;
     std::size_t bytesEchoed = 0;
@@ -638,11 +640,12 @@ TEST_F(TcpServerFixture, largeDataTransferIntegrity)
         ASSERT_NE(accepted, nullptr);
 
         accepted->readyRead.connect([&]() {
-            const std::vector<std::uint8_t> input = accepted->readAll();
-            if (!input.empty()) {
-                accepted->write(input);
-                bytesEchoed += input.size();
+            const ByteArray input = accepted->readAll();
+            if (!input.remainingSize()) {
+                return;
             }
+            accepted->write(input);
+            bytesEchoed += input.remainingSize();
         });
     });
 
@@ -657,9 +660,9 @@ TEST_F(TcpServerFixture, largeDataTransferIntegrity)
 
     std::size_t totalReceived = 0;
     client.readyRead.connect([&]() {
-        const std::vector<std::uint8_t> data = client.readAll();
-        receivedByClient.insert(receivedByClient.end(), data.begin(), data.end());
-        totalReceived += data.size();
+        const ByteArray data = client.readAll();
+        receivedByClient += data.toString();
+        totalReceived += data.remainingSize();
 
         // Stop when we've received everything
         if (totalReceived >= payloadSize) {

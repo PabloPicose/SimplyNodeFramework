@@ -109,7 +109,7 @@ public:
      * Typically called from a `readyRead` slot. Returns an empty vector if
      * no data is available.
      */
-    std::vector<std::uint8_t> readAll();
+    ByteArray readAll();
 
     /** @brief Returns the current connection state. */
     TcpSocketState state() const;
@@ -151,7 +151,7 @@ private:
     mutable std::mutex m_mutex;
     bool m_blocking = false;
     TcpSocketState m_state = TcpSocketState::Disconnected;
-    std::vector<std::uint8_t> m_readBuffer;
+    ByteArray::Storage m_readBuffer;
     std::deque<ByteArray> m_writeQueue;
 };
 

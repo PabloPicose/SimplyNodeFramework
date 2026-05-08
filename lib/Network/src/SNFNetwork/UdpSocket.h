@@ -6,6 +6,7 @@
  * @ingroup SNFNetwork_UDP
  */
 
+#include "SNFNetwork/ByteArray.h"
 #include "SNFNetwork/HostAddress.h"
 #include "SNFNetwork/IOEvent.h"
 #include "SNFNetwork/NetworkDatagram.h"
@@ -102,6 +103,11 @@ public:
                              const HostAddress& destAddress,
                              std::uint16_t destPort);
 
+    /** @brief Overload accepting a raw byte span. */
+    std::size_t sendDatagram(Span<const std::byte> data,
+                             const HostAddress& destAddress,
+                             std::uint16_t destPort);
+
     /** @brief Overload accepting a UTF-8 string payload. */
     std::size_t sendDatagram(const std::string& data, const HostAddress& destAddress, std::uint16_t destPort);
 
@@ -151,7 +157,7 @@ protected:
     /** @endcond */
 
 private:
-    bool sendDatagramToAddress(const std::vector<std::uint8_t>& data,
+    bool sendDatagramToAddress(Span<const std::byte> data,
                                const sockaddr_storage& destAddress);
     void handleReadable();
     void handleWritable();

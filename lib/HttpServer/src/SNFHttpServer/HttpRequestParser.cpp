@@ -10,10 +10,15 @@ HttpRequestParser::HttpRequestParser() = default;
 
 void HttpRequestParser::feed(const uint8_t* data, std::size_t size)
 {
+    feed(Span<const std::byte>(reinterpret_cast<const std::byte*>(data), size));
+}
+
+void HttpRequestParser::feed(Span<const std::byte> data)
+{
     if (hasError())
         return;
 
-    _buffer.append(reinterpret_cast<const char*>(data), size);
+    _buffer.append(reinterpret_cast<const char*>(data.data()), data.size());
 
     if (_state == State::RequestLine)
     {
@@ -33,7 +38,7 @@ void HttpRequestParser::feed(const uint8_t* data, std::size_t size)
 
 void HttpRequestParser::feed(const std::string& data)
 {
-    feed(reinterpret_cast<const uint8_t*>(data.data()), data.size());
+    feed(Span<const std::byte>(reinterpret_cast<const std::byte*>(data.data()), data.size()));
 }
 
 bool HttpRequestParser::isComplete() const

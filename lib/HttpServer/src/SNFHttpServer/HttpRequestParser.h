@@ -8,6 +8,8 @@
 
 #include "SNFHttpServer/HttpRequest.h"
 
+#include <SNFCore/Span.h>
+
 #include <cstddef>
 #include <string>
 
@@ -35,8 +37,8 @@ namespace snf {
  * @code
  * HttpRequestParser parser;
  * while (hasData()) {
- *     std::vector<uint8_t> chunk = recv();
- *     parser.feed(chunk);
+ *     ByteArray chunk = socket.readAll();
+ *     parser.feed(chunk.bytesView());
  *     if (parser.isComplete()) {
  *         HttpRequest req = parser.parse();
  *         handleRequest(req);
@@ -57,6 +59,9 @@ public:
      * @details Updates internal state. Does nothing if an error has occurred.
      */
     void feed(const uint8_t* data, std::size_t size);
+
+    /** @brief Overload accepting a non-owning byte span. */
+    void feed(Span<const std::byte> data);
 
     /** @brief Convenience overload: feeds a string. */
     void feed(const std::string& data);

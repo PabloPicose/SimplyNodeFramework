@@ -167,7 +167,7 @@ TEST_F(UdpSocketFixture, sendAndReceiveLoopback)
     receiver.readyRead.connect([&]() {
         if (receiver.hasPendingDatagram()) {
             NetworkDatagram dgram = receiver.pendingDatagram();
-            receivedPayload.append(dgram.data().begin(), dgram.data().end());
+            receivedPayload += dgram.data().toString();
             senderAddress = dgram.senderHost();
             senderPort = dgram.senderPort();
             receiverGotData = true;
@@ -210,14 +210,14 @@ TEST_F(UdpSocketFixture, sendAndReceiveWithVectorData)
     ASSERT_TRUE(sender.bind(HostAddress::LocalHost, 0));
 
     bool receiverGotData = false;
-    std::vector<std::uint8_t> receivedData;
+    ByteArray receivedData;
 
     const std::vector<std::uint8_t> testPayload = {0x01, 0x02, 0x03, 0x04, 0x05};
 
     receiver.readyRead.connect([&]() {
         if (receiver.hasPendingDatagram()) {
             NetworkDatagram dgram = receiver.pendingDatagram();
-            receivedData = dgram.data();
+            receivedData = dgram.data();  // copy ByteArray
             receiverGotData = true;
 
             if (EventLoop* loop = receiver.ownerEventLoop()) {
@@ -234,7 +234,7 @@ TEST_F(UdpSocketFixture, sendAndReceiveWithVectorData)
     app->run();
 
     EXPECT_TRUE(receiverGotData);
-    EXPECT_EQ(receivedData, testPayload);
+    EXPECT_EQ(receivedData.bytes(), ByteArray(testPayload).bytes());
 }
 
 TEST_F(UdpSocketFixture, sendMultipleDatagramsReceiveAll)
@@ -253,7 +253,7 @@ TEST_F(UdpSocketFixture, sendMultipleDatagramsReceiveAll)
     receiver.readyRead.connect([&]() {
         while (receiver.hasPendingDatagram()) {
             NetworkDatagram dgram = receiver.pendingDatagram();
-            std::string payload(dgram.data().begin(), dgram.data().end());
+            std::string payload = dgram.data().toString();
             receivedPayloads.push_back(payload);
             datagrams_received++;
         }
@@ -335,13 +335,14 @@ TEST_F(UdpSocketFixture, sendToUnboundSocketFails)
 
 TEST_F(UdpSocketFixture, networkDatagramProperties)
 {
-    const std::vector<std::uint8_t> data = {0x01, 0x02, 0x03};
+    const std::vector<std::uint8_t> dataVec = {0x01, 0x02, 0x03};
+    const ByteArray data(dataVec);
     const std::string host = "192.168.1.1";
     const std::uint16_t port = 5678;
 
     NetworkDatagram dgram(data, host, port);
 
-    EXPECT_EQ(dgram.data(), data);
+    EXPECT_EQ(dgram.data().bytes(), ByteArray(dataVec).bytes());
     EXPECT_EQ(dgram.senderHost(), host);
     EXPECT_EQ(dgram.senderPort(), port);
 }
@@ -446,7 +447,7 @@ TEST_F(UdpSocketFixture, sendDatagramFromDifferentThreadDeliversData)
     receiver.readyRead.connect([&]() {
         while (receiver.hasPendingDatagram()) {
             NetworkDatagram dgram = receiver.pendingDatagram();
-            received.append(dgram.data().begin(), dgram.data().end());
+            received += dgram.data().toString();
         }
 
         if (received.size() >= payload.size()) {

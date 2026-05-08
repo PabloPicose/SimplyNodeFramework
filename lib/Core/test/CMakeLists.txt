@@ -13,6 +13,7 @@ add_executable(SNFCoreTests
     FileTests.cpp
     TempFileTests.cpp
     ByteArrayTests.cpp
+    SpanTests.cpp
     LoggingTests.cpp
     ProcessTests.cpp
 )

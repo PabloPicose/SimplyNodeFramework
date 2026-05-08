@@ -99,7 +99,7 @@ public:
      *
      * Typically called from a `readyRead` slot.
      */
-    std::vector<std::uint8_t> readAll();
+    ByteArray readAll();
 
     /** @brief Returns the current connection state. */
     LocalSocketState state() const;
@@ -135,7 +135,7 @@ private:
     mutable std::mutex m_mutex;
     bool m_blocking = false;
     LocalSocketState m_state = LocalSocketState::Disconnected;
-    std::vector<std::uint8_t> m_readBuffer;
+    ByteArray::Storage m_readBuffer;
     std::deque<ByteArray> m_writeQueue;
 };
 
