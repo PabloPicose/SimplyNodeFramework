@@ -6,6 +6,7 @@ add_executable(SNFProfilerTests
     ProfilerNodeTests.cpp
     ProfilerServerTests.cpp
     SysMonitorTests.cpp
+    EventLoopProfilingTests.cpp
 )
 
 target_link_libraries(SNFProfilerTests

@@ -8,6 +8,13 @@
 #include <algorithm>
 #include <utility>
 
+namespace snf::profiler::detail {
+    // Weak no-ops used by EventLoop when SNFProfiler is not linked.
+    // The profiler library provides strong overrides that emit trace events.
+    __attribute__((weak)) void onEventLoopProcessingBegin() {}
+    __attribute__((weak)) void onEventLoopProcessingEnd() {}
+}
+
 namespace snf {
 
 EventLoop::EventLoop() : m_ioPoller(std::make_unique<EpollPoller>()), m_owner(std::this_thread::get_id()) {}
@@ -102,6 +109,9 @@ void EventLoop::run()
         m_stop = false;
     }
     for (;;) {
+        // ── Active processing phase (measured by the profiler) ────────────
+        snf::profiler::detail::onEventLoopProcessingBegin();
+
         // Drain task queue.
         Task task;
         while (popNextTask(task)) {
@@ -139,28 +149,39 @@ void EventLoop::run()
             node->run();
         }
 
+        snf::profiler::detail::onEventLoopProcessingEnd();
+        // ── End of active processing phase ───────────────────────────────
+
         // Block until there is work, a timer deadline, or a stop request.
         // File-descriptor readiness is handled by the dedicated I/O thread,
         // which posts tasks back to this owner loop.
-        std::unique_lock<std::mutex> lock(m_mutex);
-        if (m_stop) {
-            break;
+        bool stopRequested = false;
+        {
+            std::unique_lock<std::mutex> lock(m_mutex);
+            if (m_stop) {
+                stopRequested = true;
+            } else {
+                std::chrono::steady_clock::time_point nextDeadline;
+                if (nextTimerDeadlineLocked(nextDeadline)) {
+                    m_condition.wait_until(lock, nextDeadline, [this]() {
+                        return m_stop || ! m_tasks.empty() || ! m_nodesToDelete.empty() || ! m_readyIO.empty();
+                    });
+                } else {
+                    // A timer may be added from another thread between the
+                    // nextTimerDeadlineLocked check and this wait.  Include
+                    // !m_timers.empty() in the predicate so that the notify_one()
+                    // inside scheduleTimer() breaks us out — the next iteration will
+                    // then use wait_until with the proper deadline.
+                    m_condition.wait(lock, [this]() {
+                        return m_stop || ! m_tasks.empty() || ! m_nodesToDelete.empty() || ! m_readyIO.empty() || ! m_timers.empty();
+                    });
+                }
+                stopRequested = m_stop;
+            }
         }
 
-        std::chrono::steady_clock::time_point nextDeadline;
-        if (nextTimerDeadlineLocked(nextDeadline)) {
-            m_condition.wait_until(lock, nextDeadline, [this]() {
-                return m_stop || ! m_tasks.empty() || ! m_nodesToDelete.empty() || ! m_readyIO.empty();
-            });
-        } else {
-            // A timer may be added from another thread between the
-            // nextTimerDeadlineLocked check and this wait.  Include
-            // !m_timers.empty() in the predicate so that the notify_one()
-            // inside scheduleTimer() breaks us out — the next iteration will
-            // then use wait_until with the proper deadline.
-            m_condition.wait(lock, [this]() {
-                return m_stop || ! m_tasks.empty() || ! m_nodesToDelete.empty() || ! m_readyIO.empty() || ! m_timers.empty();
-            });
+        if (stopRequested) {
+            break;
         }
     }
 }
@@ -177,6 +198,8 @@ void EventLoop::stop()
 
 void EventLoop::runPendingWork()
 {
+    snf::profiler::detail::onEventLoopProcessingBegin();
+
     // Drain task queue.
     Task task;
     while (popNextTask(task)) {
@@ -215,6 +238,8 @@ void EventLoop::runPendingWork()
     for (Node* node : roots) {
         node->run();
     }
+
+    snf::profiler::detail::onEventLoopProcessingEnd();
 }
 
 void EventLoop::post(EventLoop::Task t)
@@ -332,6 +357,7 @@ bool EventLoop::hasIOWatch(int fd) const
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_ioWatches.find(fd) != m_ioWatches.end();
 }
+
 
 bool EventLoop::hasPendingWork() const
 {

@@ -14,18 +14,22 @@
 
 namespace snf::profiler {
 
+/**
+ * @brief Drains profiler buffers and serializes them for the dashboard.
+ */
 class ProfilerNode : public snf::Node {
 public:
+    /// Creates a profiler node attached to @p parent.
     explicit ProfilerNode(snf::Node* parent = nullptr);
     ~ProfilerNode() override;
 
     void update() override {}
 
-    // Ingests events from ring buffers; called by the drain timer
+    /// Ingests events from ring buffers and flushes serialized output.
     void drainAndProcess();
 
-    // Signals consumed by ProfilerServer
-    snf::Signal<std::string> broadcastMessage;  // pre-serialized JSON string
+    /// Pre-serialized JSON messages consumed by ProfilerServer.
+    snf::Signal<std::string> broadcastMessage;
 
 private:
     void flushChunk();

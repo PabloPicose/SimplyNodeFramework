@@ -5,6 +5,8 @@
 #include "SNFCore/Timer.h"
 #include <chrono>
 #include <cstdio>
+#include <functional>
+#include <thread>
 
 namespace snf::profiler {
 
@@ -101,6 +103,20 @@ static ProfilerNode*   g_profilerNode   = nullptr;
 static ProfilerServer* g_profilerServer = nullptr;
 static SysMonitor*     g_sysMonitor     = nullptr;
 
+namespace {
+uint64_t nowNs()
+{
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                     std::chrono::steady_clock::now().time_since_epoch())
+                                     .count());
+}
+
+uint32_t currentThreadId()
+{
+    return static_cast<uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+}
+}  // namespace
+
 void init() {
     if (g_profilerNode) return;
 
@@ -134,5 +150,29 @@ void disableMemoryTracker() {
 ProfilerNode*   profilerNode()   { return g_profilerNode; }
 ProfilerServer* profilerServer() { return g_profilerServer; }
 SysMonitor*     sysMonitor()     { return g_sysMonitor; }
+
+void onEventLoopProcessingBegin()
+{
+    TraceEvent e{};
+    e.timestamp_ns  = nowNs();
+    e.thread_id     = currentThreadId();
+    e.phase         = EventPhase::BEGIN;
+    e.category      = "eventloop";
+    e.name          = "processing";
+    e.payload_bytes = 0;
+    TraceBuffer::current().push(e);
+}
+
+void onEventLoopProcessingEnd()
+{
+    TraceEvent e{};
+    e.timestamp_ns  = nowNs();
+    e.thread_id     = currentThreadId();
+    e.phase         = EventPhase::END;
+    e.category      = "eventloop";
+    e.name          = "";
+    e.payload_bytes = 0;
+    TraceBuffer::current().push(e);
+}
 
 } // namespace snf::profiler::detail

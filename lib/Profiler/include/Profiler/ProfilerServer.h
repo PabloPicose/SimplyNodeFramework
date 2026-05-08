@@ -10,8 +10,12 @@
 
 namespace snf::profiler {
 
+/**
+ * @brief WebSocket server that streams profiler data to the dashboard.
+ */
 class ProfilerServer : public snf::Node {
 public:
+    /// Creates a server bound to @p port and wired to the profiler sources.
     explicit ProfilerServer(ProfilerNode* profilerNode,
                             SysMonitor*   sysMonitor,
                             snf::Node*    parent = nullptr,
@@ -20,6 +24,7 @@ public:
 
     void update() override {}
 
+    /// Returns the listening port.
     uint16_t port() const;
 
 private:

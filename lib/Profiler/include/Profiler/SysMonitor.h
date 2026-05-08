@@ -9,6 +9,9 @@
 
 namespace snf::profiler {
 
+/**
+ * @brief System sampling data emitted by the profiler server.
+ */
 struct SysSample {
     uint64_t                            timestamp_ns;
     std::vector<float>                  cpu_usage;   // per-core 0.0-1.0
@@ -18,14 +21,19 @@ struct SysSample {
     std::map<std::string, NetIface>     net;
 };
 
+/**
+ * @brief Periodically samples host CPU, memory, and network usage.
+ */
 class SysMonitor : public snf::Node {
 public:
+    /// Creates a monitor that emits samples at @p interval.
     explicit SysMonitor(snf::Node* parent = nullptr,
                         std::chrono::milliseconds interval = std::chrono::milliseconds(500));
     ~SysMonitor() override = default;
 
     void update() override {}
 
+    /// Emitted whenever a new system sample is available.
     snf::Signal<SysSample> sampleReady;
 
 private:

@@ -6,21 +6,36 @@
 
 namespace snf::profiler {
 
+/**
+ * @brief Current memory usage snapshot gathered by the profiler.
+ */
 struct MemSnapshot {
     size_t live_count;
     size_t live_bytes;
     size_t peak_bytes;
 };
 
+/**
+ * @brief Tracks heap allocations while profiling is enabled.
+ */
 class MemoryTracker {
 public:
-    static void enable();    // called by SNF_PROFILER_INIT
-    static void disable();   // called by SNF_PROFILER_SHUTDOWN
+    /// Enables allocation tracking.
+    static void enable();
+
+    /// Disables allocation tracking.
+    static void disable();
+
+    /// Returns whether tracking is currently active.
     static bool isEnabled();
 
+    /// Records a heap allocation.
     static void recordAlloc(void* ptr, size_t size);
+
+    /// Records a heap deallocation.
     static void recordFree(void* ptr);
 
+    /// Returns the current memory usage snapshot.
     static MemSnapshot snapshot();
 
 private:

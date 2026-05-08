@@ -9,18 +9,22 @@
 #  include <thread>
 
 namespace snf::profiler::detail {
+    /// Returns a monotonic timestamp in nanoseconds.
     inline uint64_t now_ns() {
         return static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(
                 std::chrono::steady_clock::now().time_since_epoch()).count());
     }
+    /// Returns a hashed thread identifier for trace records.
     inline uint32_t tid() {
         return static_cast<uint32_t>(
             std::hash<std::thread::id>{}(std::this_thread::get_id()));
     }
 }
 
-// RAII span guard
+/**
+ * @brief RAII span guard used by TRACE_EVENT.
+ */
 namespace snf::profiler {
 struct ScopeGuard {
     const char* category;
@@ -47,15 +51,18 @@ struct ScopeGuard {
 };
 }
 
+/// Starts a scope trace using the current function name.
 #  define TRACE_EVENT_1(_snf_cat_) \
     ::snf::profiler::ScopeGuard _snf_scope_##__LINE__(_snf_cat_, __func__, __FILE__, __LINE__)
 
+/// Starts a scope trace using an explicit span name.
 #  define TRACE_EVENT_2(_snf_cat_, _snf_name_) \
     ::snf::profiler::ScopeGuard _snf_scope_##__LINE__(_snf_cat_, _snf_name_, __FILE__, __LINE__)
 
 #  define TRACE_EVENT_GET_MACRO(_1, _2, MACRO, ...) MACRO
 #  define TRACE_EVENT(...) TRACE_EVENT_GET_MACRO(__VA_ARGS__, TRACE_EVENT_2, TRACE_EVENT_1)(__VA_ARGS__)
 
+/// Emits a BEGIN trace event.
 #  define TRACE_EVENT_BEGIN(_snf_cat_, _snf_name_) \
     do { \
         ::snf::profiler::TraceEvent _e{}; \
@@ -68,6 +75,7 @@ struct ScopeGuard {
         ::snf::profiler::TraceBuffer::current().push(_e); \
     } while(0)
 
+/// Emits an END trace event.
 #  define TRACE_EVENT_END(_snf_cat_) \
     do { \
         ::snf::profiler::TraceEvent _e{}; \
@@ -80,6 +88,7 @@ struct ScopeGuard {
         ::snf::profiler::TraceBuffer::current().push(_e); \
     } while(0)
 
+/// Emits an allocation marker for the memory timeline.
 #  define TRACE_MEMORY_ALLOC(_snf_ptr_, _snf_size_) \
     do { \
         ::snf::profiler::TraceEvent _e{}; \
@@ -92,6 +101,7 @@ struct ScopeGuard {
         ::snf::profiler::TraceBuffer::current().push(_e); \
     } while(0)
 
+/// Emits a free marker for the memory timeline.
 #  define TRACE_MEMORY_FREE(_snf_ptr_) \
     do { \
         ::snf::profiler::TraceEvent _e{}; \
@@ -106,10 +116,15 @@ struct ScopeGuard {
 
 #else // SNF_ENABLE_PROFILING not defined — all macros are no-ops
 
+/// No-op when profiling is disabled.
 #  define TRACE_EVENT(...)         do {} while(0)
+/// No-op when profiling is disabled.
 #  define TRACE_EVENT_BEGIN(...)   do {} while(0)
+/// No-op when profiling is disabled.
 #  define TRACE_EVENT_END(...)     do {} while(0)
+/// No-op when profiling is disabled.
 #  define TRACE_MEMORY_ALLOC(...) do {} while(0)
+/// No-op when profiling is disabled.
 #  define TRACE_MEMORY_FREE(...)  do {} while(0)
 
 #endif // SNF_ENABLE_PROFILING
