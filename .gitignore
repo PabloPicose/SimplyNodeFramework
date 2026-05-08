@@ -6,3 +6,4 @@ CMakeUserPresets.json
 docs/html/
 .venv
 compile_commands.json
+.codex

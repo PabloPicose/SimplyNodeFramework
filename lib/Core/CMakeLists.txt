@@ -32,6 +32,7 @@ target_sources(SNFCore
         "${SNFCORE_DIR}/Variant.cpp"
         "${SNFCORE_DIR}/File.cpp"
         "${SNFCORE_DIR}/TempFile.cpp"
+        $<$<NOT:$<BOOL:${SNF_WEB_ASSEMBLY}>>:${SNFCORE_DIR}/Process.cpp>
         ${SNFCORE_POLLER_SRC}
         "${SNFCORE_DIR}/CommandLineOption.cpp"
         "${SNFCORE_DIR}/CommandLineParser.cpp"
@@ -56,6 +57,7 @@ target_sources(SNFCore
             "${SNFCORE_DIR}/ByteArray.h"
             "${SNFCORE_DIR}/File.h"
             "${SNFCORE_DIR}/TempFile.h"
+            $<$<NOT:$<BOOL:${SNF_WEB_ASSEMBLY}>>:${SNFCORE_DIR}/Process.h>
             "${SNFCORE_DIR}/EpollPoller.h"
             "${SNFCORE_DIR}/CommandLineOption.h"
             "${SNFCORE_DIR}/CommandLineParser.h"

@@ -67,11 +67,46 @@ public:
     /** @brief Returns the owned storage. */
     const Storage& bytes() const noexcept { return m_bytes; }
 
+    /** @brief Appends @p size bytes from @p data to the end of the storage. */
+    void append(const void* data, std::size_t size)
+    {
+        if (data == nullptr || size == 0) {
+            return;
+        }
+
+        const auto* first = static_cast<const std::byte*>(data);
+        m_bytes.insert(m_bytes.end(), first, first + static_cast<std::ptrdiff_t>(size));
+    }
+
+    /** @brief Appends bytes from @p bytes to the end of the storage. */
+    void append(const std::vector<std::uint8_t>& bytes) { append(bytes.data(), bytes.size()); }
+
+    /** @brief Appends text bytes from @p text to the end of the storage. */
+    void append(std::string_view text) { append(text.data(), text.size()); }
+
     /** @brief Moves the cursor forward by at most @p count bytes. */
     void advance(std::size_t count) noexcept { m_offset += std::min(count, remainingSize()); }
 
     /** @brief Moves the cursor back to the beginning. */
     void reset() noexcept { m_offset = 0; }
+
+    /** @brief Clears all bytes and resets the cursor. */
+    void clear() noexcept
+    {
+        m_bytes.clear();
+        m_offset = 0;
+    }
+
+    /** @brief Returns remaining bytes interpreted as a string. */
+    std::string toString() const
+    {
+        const std::byte* ptr = remainingData();
+        if (ptr == nullptr) {
+            return {};
+        }
+
+        return std::string(reinterpret_cast<const char*>(ptr), remainingSize());
+    }
 
 private:
     void assign(const void* data, std::size_t size)
