@@ -16,8 +16,6 @@
 
 #include "SNFDatabase/SqlDatabase.h"
 
-struct MYSQL;
-
 namespace snf {
 
 class MySqlQueryDriver;
@@ -252,7 +250,7 @@ protected:
 private:
     friend class MySqlQueryDriver;
 
-    MYSQL* handle() const noexcept;
+    void* handle() const noexcept;
     void closeHandle(bool emitSignal);
     void configurePingTimer();
     void onPingTimeout();
@@ -261,7 +259,7 @@ private:
 
 private:
     ConnectionOptions m_options;
-    MYSQL* m_handle = nullptr;
+    void* m_handle = nullptr;
     Timer* m_pingTimer = nullptr;
     Timer::Duration m_pingInterval{std::chrono::milliseconds(30000)};
     FeatureFlags m_featureFlags = NoFeatures;

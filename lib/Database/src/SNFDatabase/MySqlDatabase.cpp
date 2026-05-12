@@ -4,6 +4,7 @@
 #include "SNFCore/NodePtr.h"
 #include "SNFDatabase/SqlQuery.h"
 
+#include <mysql/errmsg.h>
 #include <mysql/mysql.h>
 
 #include <cerrno>
@@ -97,7 +98,7 @@ public:
         finish();
         clearError();
 
-        MYSQL* database = m_database.handle();
+        MYSQL* database = static_cast<MYSQL*>(m_database.handle());
         if (database == nullptr) {
             setError(SqlDatabase::DatabaseError::InvalidOperation, "MySQL database is not open");
             return false;
@@ -145,7 +146,7 @@ public:
             return true;
         }
 
-        MYSQL* database = m_database.handle();
+        MYSQL* database = static_cast<MYSQL*>(m_database.handle());
         if (database != nullptr && mysql_errno(database) != 0) {
             const unsigned int error = mysql_errno(database);
             const std::string message = mysqlError(database, "Failed to fetch MySQL row");
@@ -398,7 +399,7 @@ bool MySqlDatabase::testFeature(FeatureFlag feature) const noexcept
 bool MySqlDatabase::open()
 {
     if (isOpen()) {
-        MYSQL* database = handle();
+        MYSQL* database = static_cast<MYSQL*>(handle());
         if (database != nullptr && mysql_ping(database) == 0) {
             clearError();
             configurePingTimer();
@@ -467,7 +468,7 @@ bool MySqlDatabase::isOpen() const noexcept
 
 bool MySqlDatabase::ping()
 {
-    MYSQL* database = handle();
+    MYSQL* database = static_cast<MYSQL*>(handle());
     if (database == nullptr) {
         setError(DatabaseError::InvalidOperation, "MySQL database is not open");
         return false;
@@ -512,14 +513,14 @@ void MySqlDatabase::onMovedToThread(EventLoop* /*oldLoop*/)
     }
 }
 
-MYSQL* MySqlDatabase::handle() const noexcept
+void* MySqlDatabase::handle() const noexcept
 {
     return m_handle;
 }
 
 void MySqlDatabase::closeHandle(bool emitSignal)
 {
-    MYSQL* database = m_handle;
+    MYSQL* database = static_cast<MYSQL*>(m_handle);
     m_handle = nullptr;
 
     if (database != nullptr) {
