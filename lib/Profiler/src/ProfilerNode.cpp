@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <functional>
 #include <thread>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace snf::profiler {
 
@@ -16,9 +18,21 @@ ProfilerNode::ProfilerNode(snf::Node* parent)
     auto now = std::chrono::system_clock::now().time_since_epoch();
     uint64_t ts = static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::seconds>(now).count());
-    char path[64];
-    std::snprintf(path, sizeof(path), "snf_profile_%llu.json", (unsigned long long)ts);
-    m_traceFilePath = path;
+
+    // Resolve the directory containing this executable and place output
+    // files in a "profiler/" subdirectory next to the binary.
+    char exePath[1024] = {};
+    ssize_t len = ::readlink("/proc/self/exe", exePath, sizeof(exePath) - 1);
+    std::string dir = (len > 0) ? std::string(exePath, len) : ".";
+    auto sep = dir.rfind('/');
+    if (sep != std::string::npos) dir.resize(sep);
+
+    std::string outDir = dir + "/profiler";
+    ::mkdir(outDir.c_str(), 0755);  // no-op if already exists
+
+    char filename[64];
+    std::snprintf(filename, sizeof(filename), "snf_profile_%llu.json", (unsigned long long)ts);
+    m_traceFilePath = outDir + "/" + filename;
     m_traceFile.open(m_traceFilePath, std::ios::app);
     m_fileOpen = m_traceFile.is_open();
 

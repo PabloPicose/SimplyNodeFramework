@@ -78,7 +78,13 @@ MemSnapshot MemoryTracker::snapshot() {
 
 } // namespace snf::profiler
 
-// Global operator new/delete overrides (only active when profiling is compiled in)
+// Global operator new/delete overrides (only active when profiling is compiled in).
+// All throwing and nothrow variants must be overridden together so that ASan
+// consistently sees every allocation go through std::malloc.  If only the
+// throwing variants are overridden, third-party code (e.g. Mesa/libLLVM) that
+// allocates via new(nothrow) and frees via operator delete will trigger an
+// ASan alloc-dealloc-mismatch because ASan assigns a different "alloc type"
+// to nothrow-new allocations that bypassed our override.
 void* operator new(size_t size) {
     void* ptr = std::malloc(size);
     if (!ptr) throw std::bad_alloc();
@@ -90,6 +96,18 @@ void* operator new[](size_t size) {
     void* ptr = std::malloc(size);
     if (!ptr) throw std::bad_alloc();
     snf::profiler::MemoryTracker::recordAlloc(ptr, size);
+    return ptr;
+}
+
+void* operator new(size_t size, const std::nothrow_t&) noexcept {
+    void* ptr = std::malloc(size);
+    if (ptr) snf::profiler::MemoryTracker::recordAlloc(ptr, size);
+    return ptr;
+}
+
+void* operator new[](size_t size, const std::nothrow_t&) noexcept {
+    void* ptr = std::malloc(size);
+    if (ptr) snf::profiler::MemoryTracker::recordAlloc(ptr, size);
     return ptr;
 }
 
@@ -109,6 +127,16 @@ void operator delete(void* ptr, size_t) noexcept {
 }
 
 void operator delete[](void* ptr, size_t) noexcept {
+    snf::profiler::MemoryTracker::recordFree(ptr);
+    std::free(ptr);
+}
+
+void operator delete(void* ptr, const std::nothrow_t&) noexcept {
+    snf::profiler::MemoryTracker::recordFree(ptr);
+    std::free(ptr);
+}
+
+void operator delete[](void* ptr, const std::nothrow_t&) noexcept {
     snf::profiler::MemoryTracker::recordFree(ptr);
     std::free(ptr);
 }

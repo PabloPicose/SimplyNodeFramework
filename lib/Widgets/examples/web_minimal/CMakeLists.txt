@@ -6,6 +6,10 @@ add_executable(snf_web_minimal
 
 target_link_libraries(snf_web_minimal PRIVATE SNFWidgets)
 
+if(SNF_ENABLE_PROFILING)
+    target_link_libraries(snf_web_minimal PRIVATE SNFProfiler)
+endif()
+
 target_compile_options(snf_web_minimal PRIVATE
     -Wall
     -Wextra

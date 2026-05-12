@@ -11,6 +11,10 @@ function(snf_add_widget_example target source)
 
     target_link_libraries(${target} PRIVATE SNFWidgets)
 
+    if(SNF_ENABLE_PROFILING)
+        target_link_libraries(${target} PRIVATE SNFProfiler)
+    endif()
+
     target_compile_options(${target} PRIVATE -Wall -Wextra)
 
     if(EMSCRIPTEN)
