@@ -16,6 +16,7 @@ add_executable(SNFCoreTests
     SpanTests.cpp
     LoggingTests.cpp
     ProcessTests.cpp
+    ThreadStorageTests.cpp
 )
 
 target_link_libraries(SNFCoreTests

@@ -51,6 +51,7 @@ target_sources(SNFCore
             "${SNFCORE_DIR}/Connection.h"
             "${SNFCORE_DIR}/Runnable.h"
             "${SNFCORE_DIR}/ThreadPool.h"
+            "${SNFCORE_DIR}/ThreadStorage.h"
             "${SNFCORE_DIR}/ModelIndex.h"
             "${SNFCORE_DIR}/AbstractTableModel.h"
             "${SNFCORE_DIR}/Variant.h"
