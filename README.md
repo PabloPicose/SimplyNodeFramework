@@ -264,8 +264,10 @@ Timer::singleShot(1000ms, []() { /* once */ });
 | `SNF_ENABLE_EXAMPLES` | `ON` if top-level | Build in-tree examples                                          |
 | `SNF_WEB_ASSEMBLY`    | `OFF`             | Build `SNFCore` for WebAssembly (requires Emscripten toolchain) |
 | `SNF_ENABLE_SQLITE`   | `OFF`             | Build `SNFDatabase` with SQLite support                         |
+| `SNF_ENABLE_MYSQL`    | `OFF`             | Build `SNFDatabase` with MySQL support                          |
 | `SNF_ENABLE_SNMP`     | `OFF`             | Build `SNFSnmp` with net-snmp support (Linux only)              |
 
+`top-level` means the root CMakeLists.txt is being configured, as opposed to being included via `add_subdirectory()` or `FetchContent`. This allows downstream projects to disable tests and examples when including SNF as a dependency.
 ---
 
 ## Guides
@@ -325,7 +327,7 @@ doxygen docs/Doxyfile
 
 ### Database
 - [x] SQLite wrapper + SqlTableModel
-- [ ] MySQL wrapper
+- [x] MySQL wrapper
 
 ### Audio
 - [ ] ALSA wrapper

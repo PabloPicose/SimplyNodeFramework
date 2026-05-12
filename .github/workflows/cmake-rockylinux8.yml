@@ -16,6 +16,20 @@ jobs:
     name: Build and test (Rocky Linux 8)
     runs-on: ubuntu-latest
 
+    services:
+      mysql-test:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: test_db
+          MYSQL_USER: test_user
+          MYSQL_PASSWORD: test_pass
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
     container:
       image: rockylinux:8
 
@@ -25,11 +39,24 @@ jobs:
           dnf -y install gcc gcc-c++ make git python3 python3-pip which findutils \
             wayland-devel wayland-protocols-devel libxkbcommon-devel \
             libX11-devel libXrandr-devel libXinerama-devel libXcursor-devel libXi-devel \
-            mesa-libGL-devel pkgconf-pkg-config sqlite-devel
+            mesa-libGL-devel pkgconf-pkg-config sqlite-devel \
+            mariadb mariadb-connector-c-devel
           python3 -m venv /opt/ci-venv
           /opt/ci-venv/bin/pip install --upgrade pip
           /opt/ci-venv/bin/pip install cmake ninja
           echo "/opt/ci-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Make mysqlclient pkg-config available
+        run: |
+          if ! pkg-config --exists mysqlclient; then
+            for candidate in libmariadb mariadb; do
+              if pkg-config --exists "$candidate"; then
+                pc_file_dir="$(pkg-config --variable=pcfiledir "$candidate")"
+                ln -sf "$pc_file_dir/$candidate.pc" "$pc_file_dir/mysqlclient.pc"
+                break
+              fi
+            done
+          fi
 
       - uses: actions/checkout@v4
 
@@ -39,5 +66,16 @@ jobs:
       - name: Build
         run: cmake --build --preset actions
 
+      - name: Load MySQL schema
+        run: |
+          DB_CLIENT="$(command -v mysql || command -v mariadb)"
+          "$DB_CLIENT" -h mysql-test -P 3306 -uroot -proot < lib/Database/test/mysql-schema.sql
+
       - name: Test
+        env:
+          SNF_MYSQL_HOST: mysql-test
+          SNF_MYSQL_PORT: "3306"
+          SNF_MYSQL_DATABASE: test_db
+          SNF_MYSQL_USER: test_user
+          SNF_MYSQL_PASSWORD: test_pass
         run: timeout 15m ctest --preset actions

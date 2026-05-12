@@ -19,6 +19,21 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    services:
+      mysql-test:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: test_db
+          MYSQL_USER: test_user
+          MYSQL_PASSWORD: test_pass
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
 
     steps:
     - uses: actions/checkout@v4
@@ -29,7 +44,8 @@ jobs:
         sudo apt-get install -y --no-install-recommends \
           libwayland-dev wayland-protocols libxkbcommon-dev \
           libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-          libgl-dev pkg-config cmake ninja-build libsqlite3-dev
+          libgl-dev pkg-config cmake ninja-build libsqlite3-dev \
+          default-mysql-client default-libmysqlclient-dev
 
     - name: Configure CMake
       run: cmake --preset actions
@@ -37,6 +53,16 @@ jobs:
     - name: Build
       run: cmake --build --preset actions
 
+    - name: Load MySQL schema
+      run: |
+        mysql -h 127.0.0.1 -P 3307 -uroot -proot < lib/Database/test/mysql-schema.sql
+
     - name: Test
+      env:
+        SNF_MYSQL_HOST: 127.0.0.1
+        SNF_MYSQL_PORT: "3307"
+        SNF_MYSQL_DATABASE: test_db
+        SNF_MYSQL_USER: test_user
+        SNF_MYSQL_PASSWORD: test_pass
       run: timeout 15m ctest --preset actions
 

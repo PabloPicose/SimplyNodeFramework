@@ -20,6 +20,7 @@
         "SNF_ENABLE_TESTS": true,
         "SNF_WEB_ASSEMBLY": false,
         "SNF_ENABLE_SQLITE": true,
+        "SNF_ENABLE_MYSQL": true,
         "SNF_ENABLE_SNMP": false
       }
     },
@@ -33,6 +34,7 @@
         "SNF_ENABLE_TESTS": true,
         "SNF_WEB_ASSEMBLY": false,
         "SNF_ENABLE_SQLITE": true,
+        "SNF_ENABLE_MYSQL": true,
         "SNF_ENABLE_SNMP": false
       }
     },
@@ -46,6 +48,7 @@
         "SNF_ENABLE_TESTS": true,
         "SNF_WEB_ASSEMBLY": false,
         "SNF_ENABLE_SQLITE": true,
+        "SNF_ENABLE_MYSQL": true,
         "SNF_ENABLE_SNMP": false
       }
     },
