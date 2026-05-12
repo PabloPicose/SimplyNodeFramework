@@ -4,6 +4,10 @@
 [![Rocky Linux 8](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-rockylinux8.yml/badge.svg)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-rockylinux8.yml)
 [![Debian 12](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-debian12.yml/badge.svg)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-debian12.yml)
 
+Simplicity is a key idea in this project. The goal is to make life easier for whoever is using the library.
+
+For example, the library includes Widgets that can be used both in desktop applications and web applications — we will see an example later — and it is designed so that, with just a simple flag, your application can run directly in a browser, full UI included.
+
 A modular C++ library providing an event-driven, node-based runtime.
 Requires **C++17**. Primary target is **Linux** (epoll); **WebAssembly** (Emscripten) is supported for `SNFCore`.
 
