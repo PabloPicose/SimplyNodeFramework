@@ -2,19 +2,26 @@
 
 #include <SNFCore/Node.h>
 #include <SNFCore/NodePtr.h>
+#include <SNFCore/TimeLapse.h>
 #include <SNFCore/Timer.h>
 #include <SNFCore/EpollPoller.h>
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 namespace snf {
 
-EventLoop::EventLoop() : m_ioPoller(std::make_unique<EpollPoller>()), m_owner(std::this_thread::get_id()) {}
+EventLoop::EventLoop()
+    : m_ioPoller(std::make_unique<EpollPoller>()), m_owner(std::this_thread::get_id()), m_timeLapse(new TimeLapse)
+{
+}
 
 EventLoop::~EventLoop()
 {
     stopIoThread();
+    delete m_timeLapse;
+    m_timeLapse = nullptr;
 
     // Destroy root nodes owned by this loop. Iterate a copy because
     // ~Node() calls removeRootNode(), which mutates m_rootNodes.
@@ -98,10 +105,13 @@ std::size_t EventLoop::getRootNodesToDeleteCount() const { return pendingDeleteC
 void EventLoop::run()
 {
     for (;;) {
+        m_timeLapse->start();
+
         // Drain task queue.
         Task task;
         while (popNextTask(task)) {
             task();
+            m_timeLapse->touch();
         }
 
         // Drain deferred deletes.
@@ -109,18 +119,21 @@ void EventLoop::run()
             NodePtr nodePtr(node);
             if (nodePtr) {
                 delete node;
+                m_timeLapse->touch();
             }
         }
 
         for (TimerEntry& timerEntry : takeDueTimers(std::chrono::steady_clock::now())) {
             if (timerEntry.timer) {
                 timerEntry.timer->dispatchTimeout(timerEntry.generation);
+                m_timeLapse->touch();
             }
         }
 
         for (ReadyIOEntry& readyIO : takeReadyIO()) {
             if (readyIO.callback) {
                 readyIO.callback(readyIO.events);
+                m_timeLapse->touch();
             }
             markReadyIOHandled(readyIO.fd);
         }
@@ -133,7 +146,10 @@ void EventLoop::run()
         }
         for (Node* node : roots) {
             node->run();
+            m_timeLapse->touch();
         }
+
+        m_timeLapse->stop();
 
         // Block until there is work, a timer deadline, or a stop request.
         // File-descriptor readiness is handled by the dedicated I/O thread,
@@ -168,10 +184,13 @@ void EventLoop::stop()
 
 void EventLoop::runPendingWork()
 {
+    m_timeLapse->start();
+
     // Drain task queue.
     Task task;
     while (popNextTask(task)) {
         task();
+        m_timeLapse->touch();
     }
 
     // Drain deferred deletes.
@@ -179,6 +198,7 @@ void EventLoop::runPendingWork()
         NodePtr nodePtr(node);
         if (nodePtr) {
             delete node;
+            m_timeLapse->touch();
         }
     }
 
@@ -186,6 +206,7 @@ void EventLoop::runPendingWork()
     for (TimerEntry& timerEntry : takeDueTimers(std::chrono::steady_clock::now())) {
         if (timerEntry.timer) {
             timerEntry.timer->dispatchTimeout(timerEntry.generation);
+            m_timeLapse->touch();
         }
     }
 
@@ -193,6 +214,7 @@ void EventLoop::runPendingWork()
     for (ReadyIOEntry& readyIO : takeReadyIO()) {
         if (readyIO.callback) {
             readyIO.callback(readyIO.events);
+            m_timeLapse->touch();
         }
         markReadyIOHandled(readyIO.fd);
     }
@@ -205,7 +227,10 @@ void EventLoop::runPendingWork()
     }
     for (Node* node : roots) {
         node->run();
+        m_timeLapse->touch();
     }
+
+    m_timeLapse->stop();
 }
 
 void EventLoop::post(EventLoop::Task t)
@@ -233,6 +258,16 @@ std::size_t EventLoop::activeTimerCount() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_timers.size();
+}
+
+std::uint64_t EventLoop::lastActivityAgeNanoseconds() const
+{
+    return m_timeLapse ? m_timeLapse->ageNanoseconds() : 0;
+}
+
+std::uint64_t EventLoop::lastIterationDurationNanoseconds() const
+{
+    return m_timeLapse ? m_timeLapse->lastDurationNanoseconds() : 0;
 }
 
 void EventLoop::scheduleTimer(Timer* timer, std::chrono::steady_clock::time_point deadline, std::uint64_t generation)

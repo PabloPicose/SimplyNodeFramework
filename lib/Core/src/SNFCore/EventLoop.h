@@ -20,6 +20,7 @@
 
 namespace snf {
 class Node;
+class TimeLapse;
 class Timer;
 class EpollPoller;
 
@@ -165,6 +166,12 @@ public:
     /** @brief Returns the number of active (scheduled) timers. */
     std::size_t activeTimerCount() const;
 
+    /** @brief Returns the age in nanoseconds since this loop last did work. */
+    std::uint64_t lastActivityAgeNanoseconds() const;
+
+    /** @brief Returns the duration in nanoseconds of the last loop pass. */
+    std::uint64_t lastIterationDurationNanoseconds() const;
+
     /**
      * @brief Returns `true` if there are no pending tasks, deletes, or
      *        due timers.
@@ -219,5 +226,6 @@ private:
     std::atomic_bool m_ioThreadStop{false};
     bool m_stop = false;
     const std::thread::id m_owner;
+    TimeLapse* m_timeLapse = nullptr;
 };
 }  // namespace snf

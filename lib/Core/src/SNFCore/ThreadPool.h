@@ -7,6 +7,7 @@
  */
 
 #include <SNFCore/Runnable.h>
+#include <SNFCore/WorkerSelectionPolicy.h>
 
 #include <condition_variable>
 #include <cstddef>
@@ -56,6 +57,15 @@ public:
     /** @brief Returns the ids of the worker threads owned by this pool. */
     std::vector<std::thread::id> workerThreadIds() const;
 
+    /** @brief Returns the worker thread that appears least loaded right now. */
+    std::thread::id preferredWorkerThreadId() const;
+
+    /** @brief Sets the worker selection policy used by preferredWorkerThreadId(). */
+    void setWorkerSelectionPolicy(WorkerSelectionPolicyPtr policy);
+
+    /** @brief Returns the current worker selection policy. */
+    WorkerSelectionPolicyPtr workerSelectionPolicy() const;
+
     /** @brief Returns the number of tasks currently executing. */
     std::size_t activeThreadCount() const;
 
@@ -63,7 +73,7 @@ public:
     std::size_t queuedTaskCount() const;
 
 private:
-    void workerLoop();
+    void workerLoop(std::size_t workerIndex);
 
     mutable std::mutex m_mutex;
     std::condition_variable m_workersReady;
@@ -74,6 +84,7 @@ private:
     std::size_t m_queuedTasks = 0;
     std::size_t m_activeTasks = 0;
     bool m_stopping = false;
+    WorkerSelectionPolicyPtr m_workerSelectionPolicy;
 };
 
 }  // namespace snf

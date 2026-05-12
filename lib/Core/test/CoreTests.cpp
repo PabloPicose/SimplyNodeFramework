@@ -670,6 +670,43 @@ TEST_F(CoreFixture, moveToThreadPoolUpdatesNodeThreadIdToWorker)
     ASSERT_EQ(deletedFuture.wait_for(std::chrono::milliseconds(1000)), std::future_status::ready);
 }
 
+TEST_F(CoreFixture, moveToThreadPoolPrefersLessLoadedWorker)
+{
+    ThreadPool pool(2);
+
+    const std::vector<std::thread::id> workerIds = pool.workerThreadIds();
+    ASSERT_GE(workerIds.size(), 2u);
+
+    TestNode* busyNode = new TestNode();
+    ASSERT_TRUE(busyNode->moveToThread(workerIds[0]));
+
+    TestNode* candidate = new TestNode();
+    ASSERT_TRUE(candidate->moveToThreadPool(&pool));
+
+    EXPECT_EQ(candidate->threadId(), workerIds[1]);
+
+    auto busyDeletedPromise = std::make_shared<std::promise<void>>();
+    std::future<void> busyDeletedFuture = busyDeletedPromise->get_future();
+    EventLoop* busyLoop = busyNode->ownerEventLoop();
+    ASSERT_NE(busyLoop, nullptr);
+    busyLoop->post([busyNode, busyDeletedPromise]() {
+        delete busyNode;
+        busyDeletedPromise->set_value();
+    });
+
+    auto candidateDeletedPromise = std::make_shared<std::promise<void>>();
+    std::future<void> candidateDeletedFuture = candidateDeletedPromise->get_future();
+    EventLoop* candidateLoop = candidate->ownerEventLoop();
+    ASSERT_NE(candidateLoop, nullptr);
+    candidateLoop->post([candidate, candidateDeletedPromise]() {
+        delete candidate;
+        candidateDeletedPromise->set_value();
+    });
+
+    ASSERT_EQ(busyDeletedFuture.wait_for(std::chrono::milliseconds(1000)), std::future_status::ready);
+    ASSERT_EQ(candidateDeletedFuture.wait_for(std::chrono::milliseconds(1000)), std::future_status::ready);
+}
+
 TEST_F(CoreFixture, deleteLaterOnChildAlsoDeletesGrandchild)
 {
     TestNode* parent = new TestNode();
