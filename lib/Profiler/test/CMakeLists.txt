@@ -16,4 +16,7 @@ target_link_libraries(SNFProfilerTests
 )
 
 include(GoogleTest)
-gtest_discover_tests(SNFProfilerTests TEST_PREFIX "SNFProfilerTests.")
+gtest_discover_tests(SNFProfilerTests
+    TEST_PREFIX "SNFProfilerTests."
+    PROPERTIES RESOURCE_LOCK "snf_profiler_global_state"
+)

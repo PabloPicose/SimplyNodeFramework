@@ -50,17 +50,25 @@ ProfilerNode::~ProfilerNode() {
 void ProfilerNode::drainAndProcess() {
     std::vector<TraceEvent> tmp;
     TraceBuffer::drainAll(tmp);
+    std::lock_guard<std::mutex> lk(m_chunkMutex);
     m_chunk.insert(m_chunk.end(), tmp.begin(), tmp.end());
     if (m_chunk.size() >= PROFILER_CHUNK_SIZE)
         flushChunk();
 }
 
 void ProfilerNode::flushChunk() {
+    // Caller must hold m_chunkMutex.
     uint64_t ts_ns = static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count());
 
-    for (const auto& e : m_chunk) {
+    // Snapshot the chunk and clear before emitting to avoid holding the lock
+    // across signal emission (which may reenter drainAndProcess via Queued slots).
+    std::vector<TraceEvent> snapshot;
+    snapshot.swap(m_chunk);
+    m_chunkMutex.unlock();
+
+    for (const auto& e : snapshot) {
         std::string json = serializeEvent(e);
         if (m_fileOpen)
             m_traceFile << json << '\n';
@@ -73,7 +81,7 @@ void ProfilerNode::flushChunk() {
         m_traceFile << memJson << '\n';
     broadcastMessage.emit(memJson);
 
-    m_chunk.clear();
+    m_chunkMutex.lock();
 }
 
 std::string ProfilerNode::serializeEvent(const TraceEvent& e) const {

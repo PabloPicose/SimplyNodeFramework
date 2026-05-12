@@ -5,6 +5,7 @@
 #include "SNFCore/Node.h"
 #include <cstdint>
 #include <fstream>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -37,6 +38,7 @@ private:
     std::string serializeMemSnapshot(uint64_t ts_ns) const;
 
     std::vector<TraceEvent> m_chunk;
+    std::mutex              m_chunkMutex;
     std::ofstream           m_traceFile;
     bool                    m_fileOpen{false};
     std::string             m_traceFilePath;

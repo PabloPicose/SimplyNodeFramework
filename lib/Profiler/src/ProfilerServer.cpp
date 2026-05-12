@@ -12,7 +12,11 @@ ProfilerServer::ProfilerServer(ProfilerNode* profilerNode, SysMonitor* sysMonito
 {
     m_wsServer = new snf::WebSocketServer(this);
     m_wsServer->newConnection.connect([this]() { onNewConnection(); });
-    m_wsServer->listen(snf::HostAddress::AnyIPv4, port);
+    if (!m_wsServer->listen(snf::HostAddress::AnyIPv4, port) && port != 0) {
+        // Requested port is in use (common in parallel test runs); fall back to
+        // an OS-assigned ephemeral port so callers can still use server->port().
+        m_wsServer->listen(snf::HostAddress::AnyIPv4, 0);
+    }
 
     // Connect to profilerNode's broadcastMessage (Queued: profilerNode is on pool thread)
     profilerNode->broadcastMessage.connect(
