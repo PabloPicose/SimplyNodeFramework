@@ -1,11 +1,19 @@
 #include <gtest/gtest.h>
 
 #include "SNFCore/Application.h"
+#include "SNFCore/Node.h"
+#include "SNFCore/ThreadPool.h"
 #include "SNFDatabase/MySqlDatabase.h"
+#include "SNFDatabase/MySqlDatabaseManager.h"
+#include "SNFDatabase/SqlTableModel.h"
 #include "SNFDatabase/SqlQuery.h"
 
 #include <cstdlib>
+#include <future>
+#include <memory>
 #include <string>
+#include <thread>
+#include <vector>
 
 using namespace snf;
 using namespace std::chrono_literals;
@@ -103,6 +111,65 @@ bool resetSchema(MySqlDatabase& database)
             "(1, 2, 'ORD-0001', 1299, 'pending'),"
             "(1, NULL, 'ORD-0002', 4999, 'paid'),"
             "(2, 1, 'ORD-0003', 2500, 'cancelled')");
+}
+
+class WorkerNode : public Node
+{
+public:
+    using Node::Node;
+};
+
+struct WorkerCapture
+{
+    bool ok{false};
+    std::thread::id threadId{};
+    const MySqlDatabase* database{nullptr};
+    std::string connectionId;
+    std::string error;
+};
+
+WorkerCapture captureCurrentWorkerDatabase(MySqlDatabaseManager& manager, WorkerNode& node)
+{
+    auto promise = std::make_shared<std::promise<WorkerCapture>>();
+    std::future<WorkerCapture> future = promise->get_future();
+
+    EventLoop* loop = node.ownerEventLoop();
+    if (loop == nullptr) {
+        return {false, {}, nullptr, {}, "Worker node has no owner event loop"};
+    }
+
+    loop->post([&manager, promise]() {
+        WorkerCapture capture;
+        capture.threadId = std::this_thread::get_id();
+
+        MySqlDatabase& database = manager.database();
+        capture.database = &database;
+
+        if (! database.isOpen() && ! database.open()) {
+            capture.error = database.errorString();
+            promise->set_value(std::move(capture));
+            return;
+        }
+
+        SqlQuery query(database);
+        if (! query.exec("SELECT CONNECTION_ID()")) {
+            capture.error = query.errorString();
+            promise->set_value(std::move(capture));
+            return;
+        }
+
+        if (! query.next()) {
+            capture.error = query.errorString();
+            promise->set_value(std::move(capture));
+            return;
+        }
+
+        capture.connectionId = query.value(0);
+        capture.ok = true;
+        promise->set_value(std::move(capture));
+    });
+
+    return future.get();
 }
 
 }  // namespace
@@ -265,4 +332,122 @@ TEST_F(MySqlDatabaseTest, AutoReconnectReopensAfterKilledConnection)
     ASSERT_TRUE(query.exec("SELECT 1")) << query.errorString();
     ASSERT_TRUE(query.next()) << query.errorString();
     EXPECT_EQ(query.value(0), "1");
+}
+
+TEST_F(MySqlDatabaseTest, ThreadLocalManagerReusesConnectionOnSameWorker)
+{
+    MySqlDatabase probe(testOptions());
+    if (! probe.open()) {
+        GTEST_SKIP() << "MySQL test database is not available: " << probe.errorString();
+    }
+
+    ThreadPool* pool = app->threadPool();
+    ASSERT_NE(pool, nullptr);
+
+    const std::vector<std::thread::id> workerIds = pool->workerThreadIds();
+    ASSERT_GE(workerIds.size(), 1u);
+
+    MySqlDatabaseManager manager(testOptions());
+
+    WorkerNode node;
+    ASSERT_TRUE(node.moveToThread(workerIds.front()));
+
+    const WorkerCapture first = captureCurrentWorkerDatabase(manager, node);
+    ASSERT_TRUE(first.ok) << first.error;
+    ASSERT_NE(first.database, nullptr);
+
+    const WorkerCapture second = captureCurrentWorkerDatabase(manager, node);
+    ASSERT_TRUE(second.ok) << second.error;
+    ASSERT_NE(second.database, nullptr);
+
+    EXPECT_EQ(first.threadId, second.threadId);
+    EXPECT_EQ(first.database, second.database);
+    EXPECT_EQ(first.connectionId, second.connectionId);
+}
+
+TEST_F(MySqlDatabaseTest, ThreadLocalManagerCreatesIndependentConnectionsPerWorker)
+{
+    MySqlDatabase probe(testOptions());
+    if (! probe.open()) {
+        GTEST_SKIP() << "MySQL test database is not available: " << probe.errorString();
+    }
+
+    ThreadPool* pool = app->threadPool();
+    ASSERT_NE(pool, nullptr);
+
+    const std::vector<std::thread::id> workerIds = pool->workerThreadIds();
+    if (workerIds.size() < 2) {
+        GTEST_SKIP() << "This test needs at least two worker threads";
+    }
+
+    MySqlDatabaseManager manager(testOptions());
+
+    WorkerNode firstNode;
+    WorkerNode secondNode;
+
+    ASSERT_TRUE(firstNode.moveToThread(workerIds[0]));
+    ASSERT_TRUE(secondNode.moveToThread(workerIds[1]));
+
+    const WorkerCapture first = captureCurrentWorkerDatabase(manager, firstNode);
+    ASSERT_TRUE(first.ok) << first.error;
+    ASSERT_NE(first.database, nullptr);
+
+    const WorkerCapture second = captureCurrentWorkerDatabase(manager, secondNode);
+    ASSERT_TRUE(second.ok) << second.error;
+    ASSERT_NE(second.database, nullptr);
+
+    EXPECT_NE(first.threadId, second.threadId);
+    EXPECT_NE(first.database, second.database);
+    EXPECT_NE(first.connectionId, second.connectionId);
+}
+
+TEST_F(MySqlDatabaseTest, SqlTableModelCanUseThreadLocalManagerOnWorker)
+{
+    MySqlDatabase probe(testOptions());
+    if (! probe.open()) {
+        GTEST_SKIP() << "MySQL test database is not available: " << probe.errorString();
+    }
+
+    ThreadPool* pool = app->threadPool();
+    ASSERT_NE(pool, nullptr);
+
+    const std::vector<std::thread::id> workerIds = pool->workerThreadIds();
+    ASSERT_FALSE(workerIds.empty());
+
+    MySqlDatabaseManager manager(testOptions());
+
+    WorkerNode node;
+    ASSERT_TRUE(node.moveToThread(workerIds.front()));
+
+    auto promise = std::make_shared<std::promise<WorkerCapture>>();
+    std::future<WorkerCapture> future = promise->get_future();
+
+    node.ownerEventLoop()->post([&manager, promise]() {
+        WorkerCapture capture;
+        capture.threadId = std::this_thread::get_id();
+
+        if (! resetSchema(manager.database())) {
+            capture.error = manager.database().errorString();
+            promise->set_value(std::move(capture));
+            return;
+        }
+
+        SqlTableModel model(manager);
+        model.setTable("users");
+        model.setPrimaryKeyColumn("id");
+
+        if (! model.select()) {
+            capture.error = model.errorString();
+            promise->set_value(std::move(capture));
+            return;
+        }
+
+        capture.connectionId = std::to_string(model.rowCount());
+        capture.ok = true;
+        promise->set_value(std::move(capture));
+    });
+
+    const WorkerCapture result = future.get();
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_FALSE(result.connectionId.empty());
 }

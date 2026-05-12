@@ -13,8 +13,10 @@ set(SNFDATABASE_SOURCES
 
 set(SNFDATABASE_HEADERS
     "${SNFDATABASE_DIR}/SqlDatabase.h"
+    "${SNFDATABASE_DIR}/SqlDatabaseProvider.h"
     "${SNFDATABASE_DIR}/SqlQuery.h"
     "${SNFDATABASE_DIR}/SqlTableModel.h"
+    "${SNFDATABASE_DIR}/MySqlDatabaseManager.h"
 )
 
 if(SNF_ENABLE_SQLITE)
