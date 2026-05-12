@@ -1,4 +1,5 @@
 set(SNFDATABASE_TEST_SOURCES)
+set(SNFDATABASE_MYSQL_TEST_SOURCES)
 
 if(SNF_ENABLE_SQLITE)
     list(APPEND SNFDATABASE_TEST_SOURCES
@@ -8,27 +9,38 @@ if(SNF_ENABLE_SQLITE)
 endif()
 
 if(SNF_ENABLE_MYSQL)
-    list(APPEND SNFDATABASE_TEST_SOURCES
+    list(APPEND SNFDATABASE_MYSQL_TEST_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/MySqlDatabaseTests.cpp"
     )
 endif()
 
-add_executable(SNFDatabaseTests ${SNFDATABASE_TEST_SOURCES})
+if(SNFDATABASE_TEST_SOURCES)
+    add_executable(SNFDatabaseTests ${SNFDATABASE_TEST_SOURCES})
 
-target_link_libraries(SNFDatabaseTests
-    PRIVATE
-        SNFDatabase
-        GTest::gtest_main
-)
+    target_link_libraries(SNFDatabaseTests
+        PRIVATE
+            SNFDatabase
+            GTest::gtest_main
+    )
 
-include(GoogleTest)
-gtest_discover_tests(SNFDatabaseTests
-    TEST_PREFIX "SNFDatabaseTests."
-    TEST_LIST SNFDATABASE_DISCOVERED_TESTS
-)
+    include(GoogleTest)
+    gtest_discover_tests(SNFDatabaseTests
+        TEST_PREFIX "SNFDatabaseTests."
+    )
+endif()
 
-foreach(test_name IN LISTS SNFDATABASE_DISCOVERED_TESTS)
-    if(test_name MATCHES "^SNFDatabaseTests\\.MySqlDatabaseTest\\.")
-        set_tests_properties(${test_name} PROPERTIES RESOURCE_LOCK "snf-mysql-schema")
-    endif()
-endforeach()
+if(SNFDATABASE_MYSQL_TEST_SOURCES)
+    add_executable(SNFDatabaseMySqlTests ${SNFDATABASE_MYSQL_TEST_SOURCES})
+
+    target_link_libraries(SNFDatabaseMySqlTests
+        PRIVATE
+            SNFDatabase
+            GTest::gtest_main
+    )
+
+    include(GoogleTest)
+    gtest_discover_tests(SNFDatabaseMySqlTests
+        TEST_PREFIX "SNFDatabaseTests."
+        PROPERTIES RESOURCE_LOCK "snf-mysql-schema"
+    )
+endif()
