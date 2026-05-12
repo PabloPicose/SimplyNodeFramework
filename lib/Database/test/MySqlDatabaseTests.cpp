@@ -117,6 +117,7 @@ class WorkerNode : public Node
 {
 public:
     using Node::Node;
+
 };
 
 struct WorkerCapture
@@ -126,6 +127,87 @@ struct WorkerCapture
     const MySqlDatabase* database{nullptr};
     std::string connectionId;
     std::string error;
+};
+
+class DoSomeSql final : public Node
+{
+public:
+    explicit DoSomeSql(MySqlDatabaseManager& manager)
+        : m_manager(manager)
+    {
+        sendPetition.connect(NodePtr<DoSomeSql>(this), &DoSomeSql::onSendPetition, ConnectionType::Queued);
+    }
+
+    Signal<std::string> sendPetition;
+    Signal<std::thread::id, std::vector<std::string>> dataReady;
+    Signal<std::string> error;
+
+protected:
+    void update() override {}
+
+private:
+    void onSendPetition(std::string userEmail)
+    {
+        MySqlDatabase& database = m_manager.database();
+        if (! database.isOpen() && ! database.open()) {
+            error.emit(database.errorString());
+            return;
+        }
+
+        SqlQuery query(database);
+        if (! query.exec(
+                "SELECT orders.order_number "
+                "FROM orders INNER JOIN users ON users.id = orders.user_id "
+                "WHERE users.email = '" + userEmail + "' "
+                "ORDER BY orders.order_number")) {
+            error.emit(query.errorString());
+            return;
+        }
+
+        std::vector<std::string> orderNumbers;
+        while (query.next()) {
+            orderNumbers.push_back(query.value(0));
+        }
+
+        dataReady.emit(std::this_thread::get_id(), std::move(orderNumbers));
+    }
+
+private:
+    MySqlDatabaseManager& m_manager;
+};
+
+class PetitionResultReceiver final : public Node
+{
+public:
+    void onData(std::thread::id workerThread, std::vector<std::string> values)
+    {
+        callbackThread = std::this_thread::get_id();
+        queryThread = workerThread;
+        rows = std::move(values);
+        completed = true;
+        if (EventLoop* loop = ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    }
+
+    void onError(std::string message)
+    {
+        callbackThread = std::this_thread::get_id();
+        errorMessage = std::move(message);
+        completed = true;
+        if (EventLoop* loop = ownerEventLoop()) {
+            loop->post([loop]() { loop->stop(); });
+        }
+    }
+
+    bool completed{false};
+    std::thread::id queryThread{};
+    std::thread::id callbackThread{};
+    std::vector<std::string> rows;
+    std::string errorMessage;
+
+protected:
+    void update() override {}
 };
 
 WorkerCapture captureCurrentWorkerDatabase(MySqlDatabaseManager& manager, WorkerNode& node)
@@ -426,8 +508,15 @@ TEST_F(MySqlDatabaseTest, SqlTableModelCanUseThreadLocalManagerOnWorker)
         WorkerCapture capture;
         capture.threadId = std::this_thread::get_id();
 
-        if (! resetSchema(manager.database())) {
-            capture.error = manager.database().errorString();
+        MySqlDatabase& database = manager.database();
+        if (! database.isOpen() && ! database.open()) {
+            capture.error = database.errorString();
+            promise->set_value(std::move(capture));
+            return;
+        }
+
+        if (! resetSchema(database)) {
+            capture.error = database.errorString();
             promise->set_value(std::move(capture));
             return;
         }
@@ -450,4 +539,54 @@ TEST_F(MySqlDatabaseTest, SqlTableModelCanUseThreadLocalManagerOnWorker)
     const WorkerCapture result = future.get();
     ASSERT_TRUE(result.ok) << result.error;
     EXPECT_FALSE(result.connectionId.empty());
+}
+
+TEST_F(MySqlDatabaseTest, UserLevelSignalFlowRunsQueryOnWorkerAndReturnsDataToMainThread)
+{
+    MySqlDatabase probe(testOptions());
+    if (! probe.open()) {
+        GTEST_SKIP() << "MySQL test database is not available: " << probe.errorString();
+    }
+    ASSERT_TRUE(resetSchema(probe)) << probe.errorString();
+
+    ThreadPool* pool = app->threadPool();
+    ASSERT_NE(pool, nullptr);
+
+    const std::vector<std::thread::id> workerIds = pool->workerThreadIds();
+    ASSERT_FALSE(workerIds.empty());
+
+    MySqlDatabaseManager manager(testOptions());
+    EXPECT_FALSE(manager.isOpen());
+
+    auto* doSomeSql = new DoSomeSql(manager);
+    auto* receiver = new PetitionResultReceiver();
+
+    doSomeSql->dataReady.connect(
+        NodePtr<PetitionResultReceiver>(receiver),
+        &PetitionResultReceiver::onData,
+        ConnectionType::Queued);
+    doSomeSql->error.connect(
+        NodePtr<PetitionResultReceiver>(receiver),
+        &PetitionResultReceiver::onError,
+        ConnectionType::Queued);
+
+    ASSERT_TRUE(doSomeSql->moveToThread(workerIds.front()));
+
+    doSomeSql->sendPetition.emit("alice@example.com");
+    app->run();
+
+    EXPECT_TRUE(receiver->completed);
+    ASSERT_TRUE(receiver->errorMessage.empty()) << receiver->errorMessage;
+    EXPECT_EQ(receiver->rows.size(), 2u);
+    EXPECT_EQ(receiver->rows[0], "ORD-0001");
+    EXPECT_EQ(receiver->rows[1], "ORD-0002");
+
+    EXPECT_EQ(receiver->callbackThread, std::this_thread::get_id());
+    EXPECT_NE(receiver->queryThread, std::this_thread::get_id());
+    EXPECT_EQ(receiver->queryThread, workerIds.front());
+
+    EXPECT_FALSE(manager.isOpen());
+
+    delete receiver;
+    delete doSomeSql;
 }
