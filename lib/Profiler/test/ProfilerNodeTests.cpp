@@ -18,6 +18,7 @@
 #include <dirent.h>
 #include <string>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
 using namespace snf;
@@ -157,21 +158,38 @@ TEST_F(ProfilerNodeFixture, TraceFileIsCreatedOnChunkFlush)
 
     EXPECT_TRUE(flushed.load());
 
-    bool fileFound = false;
-    if (DIR* d = opendir(".")) {
-        struct dirent* entry;
-        while ((entry = readdir(d)) != nullptr) {
-            std::string fname(entry->d_name);
-            if (fname.rfind("snf_profile_", 0) == 0 &&
-                fname.size() > 5 &&
-                fname.substr(fname.size() - 5) == ".json") {
-                fileFound = true;
-                break;
+    auto hasTraceFileInDir = [](const std::string& dirPath) {
+        if (DIR* d = opendir(dirPath.c_str())) {
+            struct dirent* entry;
+            while ((entry = readdir(d)) != nullptr) {
+                std::string fname(entry->d_name);
+                if (fname.rfind("snf_profile_", 0) == 0 &&
+                    fname.size() > 5 &&
+                    fname.substr(fname.size() - 5) == ".json") {
+                    closedir(d);
+                    return true;
+                }
+            }
+            closedir(d);
+        }
+        return false;
+    };
+
+    bool fileFound = hasTraceFileInDir(".");
+    if (!fileFound) {
+        char exePath[1024] = {};
+        ssize_t len = ::readlink("/proc/self/exe", exePath, sizeof(exePath) - 1);
+        if (len > 0) {
+            std::string exeDir(exePath, len);
+            auto sep = exeDir.rfind('/');
+            if (sep != std::string::npos) {
+                exeDir.resize(sep);
+                fileFound = hasTraceFileInDir(exeDir + "/profiler");
             }
         }
-        closedir(d);
     }
-    EXPECT_TRUE(fileFound) << "expected a snf_profile_*.json file to exist";
+    EXPECT_TRUE(fileFound)
+        << "expected a snf_profile_*.json file to exist in '.' or '<exe_dir>/profiler'";
 }
 
 TEST_F(ProfilerNodeFixture, MacroEventsReachBroadcast)
