@@ -43,8 +43,12 @@ void Logger::stop()
 bool Logger::flush(std::chrono::milliseconds timeout)
 {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
+    const auto targetProcessed = m_enqueued.load(std::memory_order_relaxed);
     std::unique_lock<std::mutex> lock(m_queueMutex);
-    return m_queueCv.wait_until(lock, deadline, [this]() { return m_queue.empty(); });
+    return m_queueCv.wait_until(lock, deadline, [this, targetProcessed]() {
+        return m_queue.empty() &&
+               (m_processed.load(std::memory_order_relaxed) >= targetProcessed);
+    });
 }
 
 void Logger::setLevel(LogLevel lv) noexcept

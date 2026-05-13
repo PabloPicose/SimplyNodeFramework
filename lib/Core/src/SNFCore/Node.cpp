@@ -285,15 +285,13 @@ bool Node::moveToThreadPool(ThreadPool* pool)
         throw std::runtime_error("Application global ThreadPool does not exist");
     }
 
-    const std::vector<std::thread::id> workerThreadIds = pool->workerThreadIds();
-    if (workerThreadIds.empty()) {
+    const std::thread::id workerThreadId = pool->preferredWorkerThreadId();
+    if (workerThreadId == std::thread::id()) {
         return false;
     }
 
-    for (const std::thread::id workerThreadId : workerThreadIds) {
-        if (moveToThread(workerThreadId)) {
-            return true;
-        }
+    if (moveToThread(workerThreadId)) {
+        return true;
     }
     return false;
 }

@@ -8,6 +8,7 @@
 
 #include "SNFCore/AbstractTableModel.h"
 #include "SNFDatabase/SqlDatabase.h"
+#include "SNFDatabase/SqlDatabaseProvider.h"
 
 #include <string>
 #include <unordered_map>
@@ -55,6 +56,11 @@ public:
      * `select()` is called.
      */
     explicit SqlTableModel(SqlDatabase& database);
+
+    /**
+     * @brief Constructs the model with a provider that resolves the current thread's database.
+     */
+    explicit SqlTableModel(SqlDatabaseProvider& databaseProvider);
 
     /** @brief Sets the name of the table to load. */
     void setTable(const std::string& tableName);
@@ -124,13 +130,15 @@ public:
                  ModelDataRole role = ModelDataRole::Edit) override;
 
 private:
+    SqlDatabase& database() const;
     void clearError() const;
     void setError(SqlDatabase::DatabaseError error, std::string errorString) const;
     static std::string variantToSqlLiteral(const Variant& value);
     int primaryKeyColumnIndex() const;
     const Variant& cachedValue(int row, int column) const;
 
-    SqlDatabase* m_database;
+    SqlDatabase* m_database = nullptr;
+    SqlDatabaseProvider* m_databaseProvider = nullptr;
     std::string m_tableName;
     std::string m_primaryKeyColumn;
 

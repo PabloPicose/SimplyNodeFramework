@@ -14,6 +14,8 @@
 #include <utility>
 #include <vector>
 
+#include "SNFCore/Span.h"
+
 namespace snf {
 
 /**
@@ -32,13 +34,14 @@ public:
 
     ByteArray() = default;
     explicit ByteArray(Storage bytes) : m_bytes(std::move(bytes)) {}
+    explicit ByteArray(Span<const std::byte> bytes) { assign(bytes); }
     explicit ByteArray(const std::vector<std::uint8_t>& bytes)
     {
-        assign(bytes.data(), bytes.size());
+        assign(uint8BytesView(bytes));
     }
     explicit ByteArray(std::string_view text) { assign(text.data(), text.size()); }
     explicit ByteArray(const std::string& text) : ByteArray(std::string_view(text)) {}
-    ByteArray(const void* data, std::size_t size) { assign(data, size); }
+    ByteArray(const void* data, std::size_t size) { assign(bytesView(data, size)); }
 
     /** @brief Returns the full size of the owned byte sequence. */
     std::size_t size() const noexcept { return m_bytes.size(); }
@@ -47,7 +50,7 @@ public:
     std::size_t offset() const noexcept { return m_offset; }
 
     /** @brief Returns how many bytes remain from the current cursor. */
-    std::size_t remainingSize() const noexcept { return m_bytes.size() - m_offset; }
+    std::size_t remainingSize() const noexcept { return remainingView().size(); }
 
     /** @brief Returns `true` when no bytes are owned. */
     bool empty() const noexcept { return m_bytes.empty(); }
@@ -56,16 +59,39 @@ public:
     bool fullyConsumed() const noexcept { return remainingSize() == 0; }
 
     /** @brief Returns the start of the owned byte sequence, or `nullptr` if empty. */
-    const std::byte* data() const noexcept { return m_bytes.empty() ? nullptr : m_bytes.data(); }
+    const std::byte* data() const noexcept { return bytesView().data(); }
 
     /** @brief Returns the first remaining byte, or `nullptr` if fully consumed. */
-    const std::byte* remainingData() const noexcept
-    {
-        return fullyConsumed() ? nullptr : (m_bytes.data() + static_cast<std::ptrdiff_t>(m_offset));
-    }
+    const std::byte* remainingData() const noexcept { return remainingView().data(); }
 
     /** @brief Returns the owned storage. */
     const Storage& bytes() const noexcept { return m_bytes; }
+
+    /** @brief Returns the full byte sequence as a non-owning view. */
+    Span<const std::byte> bytesView() const noexcept
+    {
+        return m_bytes.empty() ? Span<const std::byte>() : Span<const std::byte>(m_bytes);
+    }
+
+    /** @brief Returns the remaining byte sequence from the current cursor. */
+    Span<const std::byte> remainingView() const noexcept { return bytesView().subspan(m_offset); }
+
+    /** @brief Appends @p size bytes from @p data to the end of the storage. */
+    void append(Span<const std::byte> bytes)
+    {
+        m_bytes.insert(m_bytes.end(), bytes.begin(), bytes.end());
+    }
+
+    void append(const void* data, std::size_t size)
+    {
+        append(bytesView(data, size));
+    }
+
+    /** @brief Appends bytes from @p bytes to the end of the storage. */
+    void append(const std::vector<std::uint8_t>& bytes) { append(bytes.data(), bytes.size()); }
+
+    /** @brief Appends text bytes from @p text to the end of the storage. */
+    void append(std::string_view text) { append(text.data(), text.size()); }
 
     /** @brief Moves the cursor forward by at most @p count bytes. */
     void advance(std::size_t count) noexcept { m_offset += std::min(count, remainingSize()); }
@@ -73,18 +99,48 @@ public:
     /** @brief Moves the cursor back to the beginning. */
     void reset() noexcept { m_offset = 0; }
 
-private:
-    void assign(const void* data, std::size_t size)
+    /** @brief Clears all bytes and resets the cursor. */
+    void clear() noexcept
     {
         m_bytes.clear();
         m_offset = 0;
+    }
 
-        if (data == nullptr || size == 0) {
-            return;
+    /** @brief Returns remaining bytes interpreted as a string. */
+    std::string toString() const
+    {
+        const Span<const std::byte> remaining = remainingView();
+        if (remaining.empty()) {
+            return {};
         }
 
-        const auto* first = static_cast<const std::byte*>(data);
-        m_bytes.assign(first, first + static_cast<std::ptrdiff_t>(size));
+        return std::string(reinterpret_cast<const char*>(remaining.data()), remaining.size());
+    }
+
+private:
+    static Span<const std::byte> bytesView(const void* data, std::size_t size) noexcept
+    {
+        if (data == nullptr || size == 0) {
+            return {};
+        }
+
+        return Span<const std::byte>(static_cast<const std::byte*>(data), size);
+    }
+
+    static Span<const std::byte> uint8BytesView(const std::vector<std::uint8_t>& bytes) noexcept
+    {
+        return Span<const std::byte>(reinterpret_cast<const std::byte*>(bytes.data()), bytes.size());
+    }
+
+    void assign(Span<const std::byte> bytes)
+    {
+        m_bytes.assign(bytes.begin(), bytes.end());
+        m_offset = 0;
+    }
+
+    void assign(const void* data, std::size_t size)
+    {
+        assign(bytesView(data, size));
     }
 
 private:

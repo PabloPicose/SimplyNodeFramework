@@ -78,8 +78,8 @@ private:
     void handleTcpDisconnected();
     void handleTcpError(const std::string& errorMessage);
 
-    void processHandshakeBytes(const std::vector<std::uint8_t>& data);
-    void processFrameBytes(const std::vector<std::uint8_t>& data);
+    void processHandshakeBytes(Span<const std::byte> data);
+    void processFrameBytes(Span<const std::byte> data);
     void processFrame(const websocket::detail::WebSocketFrame& frame);
 
     bool sendFrame(websocket::detail::OpCode opcode,
@@ -257,15 +257,15 @@ void WebSocketImplNative::handleTcpReadyRead()
         return;
     }
 
-    const std::vector<std::uint8_t> data = m_socket->readAll();
+    const ByteArray data = m_socket->readAll();
     if (data.empty()) {
         return;
     }
 
     if (!m_handshakeComplete) {
-        processHandshakeBytes(data);
+        processHandshakeBytes(data.bytesView());
     } else {
-        processFrameBytes(data);
+        processFrameBytes(data.bytesView());
     }
 }
 
@@ -291,9 +291,9 @@ void WebSocketImplNative::handleTcpError(const std::string& errorMessage)
     fail(errorMessage);
 }
 
-void WebSocketImplNative::processHandshakeBytes(const std::vector<std::uint8_t>& data)
+void WebSocketImplNative::processHandshakeBytes(Span<const std::byte> data)
 {
-    m_handshakeBuffer.append(data.begin(), data.end());
+    m_handshakeBuffer.append(reinterpret_cast<const char*>(data.data()), data.size());
 
     const auto headerEnd = m_handshakeBuffer.find("\r\n\r\n");
     if (headerEnd == std::string::npos) {
@@ -315,11 +315,12 @@ void WebSocketImplNative::processHandshakeBytes(const std::vector<std::uint8_t>&
     m_owner.connected.emit();
 
     if (!remaining.empty()) {
-        processFrameBytes(toBytes(remaining));
+        const ByteArray remainingBytes(remaining);
+        processFrameBytes(remainingBytes.bytesView());
     }
 }
 
-void WebSocketImplNative::processFrameBytes(const std::vector<std::uint8_t>& data)
+void WebSocketImplNative::processFrameBytes(Span<const std::byte> data)
 {
     m_frameParser->feed(data);
     if (m_frameParser->hasError()) {

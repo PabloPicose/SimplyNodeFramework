@@ -219,6 +219,14 @@ std::size_t UdpSocket::sendDatagram(const std::vector<std::uint8_t>& data,
                                      const HostAddress& destAddress,
                                      std::uint16_t destPort)
 {
+    return sendDatagram(Span<const std::byte>(reinterpret_cast<const std::byte*>(data.data()), data.size()),
+                        destAddress, destPort);
+}
+
+std::size_t UdpSocket::sendDatagram(Span<const std::byte> data,
+                                     const HostAddress& destAddress,
+                                     std::uint16_t destPort)
+{
     if (data.empty()) {
         return 0;
     }
@@ -233,10 +241,10 @@ std::size_t UdpSocket::sendDatagram(const std::vector<std::uint8_t>& data,
             return 0;
         }
 
-        const std::vector<std::uint8_t> pending = data;
+        const ByteArray::Storage pending(data.begin(), data.end());
         loop->post([self = NodePtr<UdpSocket>(this), pending, destAddress, destPort]() {
             if (self) {
-                self->sendDatagram(pending, destAddress, destPort);
+                self->sendDatagram(Span<const std::byte>(pending.data(), pending.size()), destAddress, destPort);
             }
         });
         return data.size();
@@ -268,7 +276,8 @@ std::size_t UdpSocket::sendDatagram(const std::vector<std::uint8_t>& data,
 
 std::size_t UdpSocket::sendDatagram(const std::string& data, const HostAddress& destAddress, std::uint16_t destPort)
 {
-    return sendDatagram(std::vector<std::uint8_t>(data.begin(), data.end()), destAddress, destPort);
+    return sendDatagram(Span<const std::byte>(reinterpret_cast<const std::byte*>(data.data()), data.size()),
+                        destAddress, destPort);
 }
 
 bool UdpSocket::hasPendingDatagram() const
@@ -446,7 +455,7 @@ void UdpSocket::handleEvents(std::uint32_t nativeEvents)
     }
 }
 
-bool UdpSocket::sendDatagramToAddress(const std::vector<std::uint8_t>& data, const sockaddr_storage& destAddress)
+bool UdpSocket::sendDatagramToAddress(Span<const std::byte> data, const sockaddr_storage& destAddress)
 {
     const int fd = descriptor();
     if (fd < 0) {
@@ -492,8 +501,7 @@ void UdpSocket::handleReadable()
             std::string senderHost = addressToString(senderAddr);
             std::uint16_t senderPort = addressToPort(senderAddr);
 
-            std::vector<std::uint8_t> datagramData(buffer, buffer + readBytes);
-            NetworkDatagram datagram(datagramData, senderHost, senderPort);
+            NetworkDatagram datagram(ByteArray(buffer, static_cast<std::size_t>(readBytes)), senderHost, senderPort);
 
             {
                 std::lock_guard<std::mutex> lock(m_mutex);

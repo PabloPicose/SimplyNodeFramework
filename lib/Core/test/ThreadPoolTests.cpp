@@ -4,6 +4,7 @@
 #include "SNFCore/EventLoop.h"
 #include "SNFCore/Runnable.h"
 #include "SNFCore/ThreadPool.h"
+#include "SNFCore/WorkerSelectionPolicy.h"
 
 #include <atomic>
 #include <chrono>
@@ -49,6 +50,18 @@ public:
     snf::Application* app = nullptr;
 };
 
+class PickLastWorkerPolicy final : public snf::IWorkerSelectionPolicy
+{
+public:
+    std::size_t selectWorkerIndex(const std::vector<snf::WorkerLoadSnapshot>& snapshots) const override
+    {
+        if (snapshots.empty()) {
+            return snapshots.size();
+        }
+        return snapshots.size() - 1;
+    }
+};
+
 }  // namespace
 
 TEST_F(ThreadPoolFixture, applicationOwnsGlobalThreadPool)
@@ -72,6 +85,18 @@ TEST_F(ThreadPoolFixture, workersRegisterIdleEventLoops)
         EXPECT_EQ(loop->ownerThreadId(), workerThreadId);
         EXPECT_FALSE(loop->hasPendingWork());
     }
+}
+
+TEST_F(ThreadPoolFixture, customWorkerSelectionPolicyIsApplied)
+{
+    snf::ThreadPool* pool = app->threadPool();
+    ASSERT_NE(pool, nullptr);
+
+    const std::vector<std::thread::id> workerThreadIds = pool->workerThreadIds();
+    ASSERT_FALSE(workerThreadIds.empty());
+
+    pool->setWorkerSelectionPolicy(std::make_shared<PickLastWorkerPolicy>());
+    EXPECT_EQ(pool->preferredWorkerThreadId(), workerThreadIds.back());
 }
 
 TEST(ThreadPoolTests, twoThreadPoolDoesNotRunMoreThanTwoTasksConcurrently)

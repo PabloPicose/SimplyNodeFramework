@@ -659,8 +659,52 @@ TEST_F(CoreFixture, moveToThreadPoolUpdatesNodeThreadIdToWorker)
     ASSERT_EQ(executedFuture.wait_for(std::chrono::milliseconds(1000)), std::future_status::ready);
     EXPECT_EQ(executedFuture.get(), movedThreadId);
 
-    node->deleteLater();
-    movedLoop->runPendingWork();
+    auto deletedPromise = std::make_shared<std::promise<void>>();
+    std::future<void> deletedFuture = deletedPromise->get_future();
+
+    movedLoop->post([node, deletedPromise]() {
+        delete node;
+        deletedPromise->set_value();
+    });
+
+    ASSERT_EQ(deletedFuture.wait_for(std::chrono::milliseconds(1000)), std::future_status::ready);
+}
+
+TEST_F(CoreFixture, moveToThreadPoolPrefersLessLoadedWorker)
+{
+    ThreadPool pool(2);
+
+    const std::vector<std::thread::id> workerIds = pool.workerThreadIds();
+    ASSERT_GE(workerIds.size(), 2u);
+
+    TestNode* busyNode = new TestNode();
+    ASSERT_TRUE(busyNode->moveToThread(workerIds[0]));
+
+    TestNode* candidate = new TestNode();
+    ASSERT_TRUE(candidate->moveToThreadPool(&pool));
+
+    EXPECT_EQ(candidate->threadId(), workerIds[1]);
+
+    auto busyDeletedPromise = std::make_shared<std::promise<void>>();
+    std::future<void> busyDeletedFuture = busyDeletedPromise->get_future();
+    EventLoop* busyLoop = busyNode->ownerEventLoop();
+    ASSERT_NE(busyLoop, nullptr);
+    busyLoop->post([busyNode, busyDeletedPromise]() {
+        delete busyNode;
+        busyDeletedPromise->set_value();
+    });
+
+    auto candidateDeletedPromise = std::make_shared<std::promise<void>>();
+    std::future<void> candidateDeletedFuture = candidateDeletedPromise->get_future();
+    EventLoop* candidateLoop = candidate->ownerEventLoop();
+    ASSERT_NE(candidateLoop, nullptr);
+    candidateLoop->post([candidate, candidateDeletedPromise]() {
+        delete candidate;
+        candidateDeletedPromise->set_value();
+    });
+
+    ASSERT_EQ(busyDeletedFuture.wait_for(std::chrono::milliseconds(1000)), std::future_status::ready);
+    ASSERT_EQ(candidateDeletedFuture.wait_for(std::chrono::milliseconds(1000)), std::future_status::ready);
 }
 
 TEST_F(CoreFixture, deleteLaterOnChildAlsoDeletesGrandchild)
@@ -1760,6 +1804,54 @@ TEST_F(CoreFixture, queuedSignalFromManyThreadsDeliversOnReceiverThread)
     EXPECT_FALSE(receiver->wrongThread.load());
 
     delete receiver;
+}
+
+TEST_F(CoreFixture, applicationDestructionDeletesRootAndMovedToThreadPoolNodes)
+{
+    using namespace std::chrono_literals;
+
+    std::vector<NodePtr<TestNode>> nodePtrs;
+
+    // Create some root nodes
+    TestNode* root1 = new TestNode();
+    TestNode* root2 = new TestNode();
+
+    // Create a child node under root1
+    TestNode* child = new TestNode(root1);
+
+    // Move root2 to thread pool
+    ASSERT_TRUE(root2->moveToThreadPool());
+
+    // Store NodePtrs to verify deletion later
+    nodePtrs.push_back(NodePtr<TestNode>(root1));
+    nodePtrs.push_back(NodePtr<TestNode>(root2));
+    nodePtrs.push_back(NodePtr<TestNode>(child));
+
+    // Verify all nodes are alive before destruction
+    EXPECT_TRUE(nodePtrs[0].isAlive());
+    EXPECT_TRUE(nodePtrs[1].isAlive());
+    EXPECT_TRUE(nodePtrs[2].isAlive());
+
+    // Verify thread ownership
+    EXPECT_EQ(root1->threadId(), std::this_thread::get_id());
+    EXPECT_NE(root2->threadId(), std::this_thread::get_id());
+    EXPECT_EQ(child->threadId(), root1->threadId());
+
+    // Verify node count: root2 moved to thread pool, so only root1 is in main thread
+    EXPECT_EQ(Application::instance()->getRootNodesCount(), 1);
+
+    // Delete the Application, which should delete all nodes
+    // (both main-thread roots and thread-pool nodes)
+    delete app;
+    app = nullptr;
+
+
+    // Verify all nodes have been deleted
+    EXPECT_FALSE(nodePtrs[0].isAlive());
+    EXPECT_FALSE(nodePtrs[1].isAlive());
+    EXPECT_FALSE(nodePtrs[2].isAlive());
+
+    EXPECT_EQ(Application::instance(), nullptr);
 }
 
 int main(int argc, char** argv)

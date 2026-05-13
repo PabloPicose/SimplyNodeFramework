@@ -261,12 +261,12 @@ std::size_t TcpSocket::write(const std::string& data)
     return write(ByteArray(data));
 }
 
-std::vector<std::uint8_t> TcpSocket::readAll()
+ByteArray TcpSocket::readAll()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    std::vector<std::uint8_t> output;
+    ByteArray::Storage output;
     output.swap(m_readBuffer);
-    return output;
+    return ByteArray(std::move(output));
 }
 
 TcpSocketState TcpSocket::state() const
@@ -406,7 +406,7 @@ void TcpSocket::handleReadable()
     }
 
     bool appended = false;
-    std::uint8_t buffer[4096];
+    std::byte buffer[4096];
     while (true) {
         const ssize_t readBytes = ::recv(fd, buffer, sizeof(buffer), 0);
         if (readBytes > 0) {

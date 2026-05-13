@@ -16,6 +16,20 @@ jobs:
     name: Build and test (Debian 12)
     runs-on: ubuntu-latest
 
+    services:
+      mysql-test:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: test_db
+          MYSQL_USER: test_user
+          MYSQL_PASSWORD: test_pass
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
     container:
       image: debian:12
 
@@ -27,7 +41,7 @@ jobs:
             build-essential git python3 python3-pip python3-venv ca-certificates \
             libwayland-dev wayland-protocols libxkbcommon-dev \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libgl-dev pkg-config libsqlite3-dev
+            libgl-dev pkg-config libsqlite3-dev default-mysql-client default-libmysqlclient-dev
           python3 -m venv /opt/ci-venv
           /opt/ci-venv/bin/pip install --upgrade pip
           /opt/ci-venv/bin/pip install cmake ninja
@@ -36,10 +50,20 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure CMake
-        run: cmake -B ${{ github.workspace }}/build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DSNF_ENABLE_TESTS=ON
+        run: cmake --preset actions
 
       - name: Build
-        run: cmake --build ${{ github.workspace }}/build --config ${{ env.BUILD_TYPE }}
+        run: cmake --build --preset actions
+
+      - name: Load MySQL schema
+        run: |
+          mysql -h mysql-test -P 3306 -uroot -proot < lib/Database/test/mysql-schema.sql
 
       - name: Test
-        run: timeout 15m ctest --test-dir ${{ github.workspace }}/build -C ${{ env.BUILD_TYPE }} --output-on-failure --timeout 180
+        env:
+          SNF_MYSQL_HOST: mysql-test
+          SNF_MYSQL_PORT: "3306"
+          SNF_MYSQL_DATABASE: test_db
+          SNF_MYSQL_USER: test_user
+          SNF_MYSQL_PASSWORD: test_pass
+        run: timeout 15m ctest --preset actions

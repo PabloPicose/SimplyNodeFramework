@@ -12,6 +12,20 @@ SqlTableModel::SqlTableModel(SqlDatabase& database)
 {
 }
 
+SqlTableModel::SqlTableModel(SqlDatabaseProvider& databaseProvider)
+    : m_databaseProvider(&databaseProvider)
+{
+}
+
+SqlDatabase& SqlTableModel::database() const
+{
+    if (m_databaseProvider != nullptr) {
+        return m_databaseProvider->database();
+    }
+
+    return *m_database;
+}
+
 void SqlTableModel::setTable(const std::string& tableName)
 {
     m_tableName = tableName;
@@ -39,7 +53,7 @@ bool SqlTableModel::select()
         return false;
     }
 
-    SqlQuery query(*m_database);
+    SqlQuery query(database());
     if (! query.exec("SELECT * FROM " + m_tableName)) {
         setError(query.lastError(), query.errorString());
         return false;
@@ -133,7 +147,7 @@ bool SqlTableModel::submit()
             + " SET " + setClauses
             + " WHERE " + m_columnNames[pkIndex] + " = " + variantToSqlLiteral(m_rows[row][pkIndex]);
 
-        SqlQuery query(*m_database);
+        SqlQuery query(database());
         if (! query.exec(sql)) {
             setError(query.lastError(), query.errorString());
             failedEdits.insert({row, edits});

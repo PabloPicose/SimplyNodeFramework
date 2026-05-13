@@ -24,6 +24,9 @@ option(SNF_EXPERIMENTAL
 option(SNF_ENABLE_SQLITE
     "Enable SQLite support in SNFDatabase"
     OFF)
+option(SNF_ENABLE_MYSQL
+    "Enable MySQL support in SNFDatabase"
+    OFF)
 option(SNF_ENABLE_SNMP
     "Build the SNFSnmp module (requires net-snmp / libsnmp-dev)"
     OFF)

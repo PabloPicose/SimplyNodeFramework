@@ -50,9 +50,9 @@ public:
             acceptedSockets.push_back(client);
             
             client->readyRead.connect([client]() {
-                const std::vector<std::uint8_t> data = client->readAll();
+                ByteArray data = client->readAll();
                 if (!data.empty()) {
-                    client->write(data);  // Echo back
+                    client->write(std::move(data));  // Echo back
                 }
             });
         });
@@ -194,8 +194,8 @@ TEST_F(TcpSocketFixture, connectAndEchoRoundTrip)
 
     socket.readyRead.connect([&]() {
         didReadyRead = true;
-        const std::vector<std::uint8_t> data = socket.readAll();
-        received.append(data.begin(), data.end());
+        const ByteArray data = socket.readAll();
+        received += data.toString();
         if (received.size() >= payload.size()) {
             if (EventLoop* loop = socket.ownerEventLoop()) {
                 loop->post([loop]() { loop->stop(); });
@@ -246,8 +246,8 @@ TEST_F(TcpSocketFixture, pendingWorkReceivesTcpEventsFromBackgroundDispatcher)
     socket.readyRead.connect([&]() {
         readyReadThread = std::this_thread::get_id();
         didReadyRead = true;
-        const std::vector<std::uint8_t> data = socket.readAll();
-        received.append(data.begin(), data.end());
+        const ByteArray data = socket.readAll();
+        received += data.toString();
     });
 
     socket.errorOccurred.connect([&](const std::string& error) { errorMessage = error; });
@@ -802,12 +802,12 @@ TEST_F(TcpSocketFixture, writeImmediatelyAfterConnectToHostIsDelivered)
     TcpSocket socket(false);
     const std::string payload = "queued-before-connected-signal";
 
-    std::vector<std::uint8_t> received;
+    std::string received;
     std::string errorMessage;
 
     socket.readyRead.connect([&]() {
-        const std::vector<std::uint8_t> data = socket.readAll();
-        received.insert(received.end(), data.begin(), data.end());
+        const ByteArray data = socket.readAll();
+        received += data.toString();
         if (received.size() >= payload.size()) {
             if (EventLoop* loop = socket.ownerEventLoop()) {
                 loop->post([loop]() { loop->stop(); });
@@ -830,7 +830,7 @@ TEST_F(TcpSocketFixture, writeImmediatelyAfterConnectToHostIsDelivered)
     app->run();
 
     EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
-    EXPECT_EQ(std::string(received.begin(), received.end()), payload);
+    EXPECT_EQ(received, payload);
 }
 
 TEST_F(TcpSocketFixture, closeDuringConnectingState)
@@ -1127,20 +1127,20 @@ TEST_F(TcpSocketFixture, largeDataTransferStreaming)
     TcpSocket socket(false);
     
     const std::size_t payloadSize = 2 * 1024 * 1024;
-    std::vector<std::uint8_t> largePayload;
+    std::string largePayload;
     largePayload.reserve(payloadSize);
     for (std::size_t i = 0; i < payloadSize; ++i) {
-        largePayload.push_back(static_cast<std::uint8_t>(i % 256));
+        largePayload.push_back(static_cast<char>(i % 256));
     }
     
-    std::vector<std::uint8_t> received;
+    std::string received;
     std::string errorMessage;
     
     socket.connected.connect([&]() { socket.write(largePayload); });
     
     socket.readyRead.connect([&]() {
-        const std::vector<std::uint8_t> data = socket.readAll();
-        received.insert(received.end(), data.begin(), data.end());
+        const ByteArray data = socket.readAll();
+        received += data.toString();
         
         if (received.size() >= payloadSize) {
             if (EventLoop* loop = socket.ownerEventLoop()) {

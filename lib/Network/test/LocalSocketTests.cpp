@@ -377,10 +377,10 @@ TEST_F(LocalSocketFixture, echoRoundtrip)
     // loop processes the accept.
     client.connected.connect([&] { client.write(payload); });
 
-    std::vector<std::uint8_t> received;
+    std::string received;
     client.readyRead.connect([&] {
-        const auto chunk = client.readAll();
-        received.insert(received.end(), chunk.begin(), chunk.end());
+        const ByteArray chunk = client.readAll();
+        received += chunk.toString();
         if (received.size() >= payload.size()) {
             if (EventLoop* loop = client.ownerEventLoop()) {
                 loop->stop();
@@ -395,7 +395,7 @@ TEST_F(LocalSocketFixture, echoRoundtrip)
     app->run();
 
     ASSERT_EQ(received.size(), payload.size());
-    EXPECT_EQ(std::string(received.begin(), received.end()), payload);
+    EXPECT_EQ(received, payload);
 }
 
 TEST_F(LocalSocketFixture, bytesWrittenSignalEmitted)
@@ -469,7 +469,7 @@ TEST_F(LocalSocketFixture, writeFromOtherThreadIsMarshaled)
 
     bool connectedSignal = false;
     std::string errorMessage;
-    std::vector<std::uint8_t> received;
+    std::string received;
 
     client.connected.connect([&]() {
         connectedSignal = true;
@@ -479,8 +479,8 @@ TEST_F(LocalSocketFixture, writeFromOtherThreadIsMarshaled)
     });
 
     client.readyRead.connect([&]() {
-        const auto chunk = client.readAll();
-        received.insert(received.end(), chunk.begin(), chunk.end());
+        const ByteArray chunk = client.readAll();
+        received += chunk.toString();
         if (received.size() >= payload.size()) {
             if (EventLoop* loop = client.ownerEventLoop()) {
                 loop->stop();
@@ -504,7 +504,7 @@ TEST_F(LocalSocketFixture, writeFromOtherThreadIsMarshaled)
     EXPECT_TRUE(errorMessage.empty()) << "Error: " << errorMessage;
     EXPECT_TRUE(connectedSignal);
     ASSERT_EQ(received.size(), payload.size());
-    EXPECT_EQ(std::string(received.begin(), received.end()), payload);
+    EXPECT_EQ(received, payload);
 }
 
 TEST_F(LocalSocketPlainFixture, byteArrayWriteStartsAtCurrentOffset)

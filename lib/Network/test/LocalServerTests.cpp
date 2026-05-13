@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <csignal>
 #include <string>
 #include <vector>
@@ -504,8 +505,8 @@ TEST_F(LocalServerFixture, acceptedSocketCanEchoToClient)
     LocalServer server;
     ASSERT_TRUE(server.listen(path));
 
-    const std::string payload = "hello-from-client";
-    std::string receivedByClient;
+    const ByteArray payload(std::string_view("hello-from-client"));
+    ByteArray receivedByClient;
     std::string serverError;
     std::string clientError;
 
@@ -530,10 +531,12 @@ TEST_F(LocalServerFixture, acceptedSocketCanEchoToClient)
     LocalSocket client;
 
     client.readyRead.connect([&] {
-        const auto data = client.readAll();
-        receivedByClient.assign(data.begin(), data.end());
-        if (EventLoop* loop = client.ownerEventLoop()) {
-            loop->post([loop]() { loop->stop(); });
+        const ByteArray data = client.readAll();
+        receivedByClient.append(data.bytesView());
+        if (receivedByClient.size() >= payload.size()) {
+            if (EventLoop* loop = client.ownerEventLoop()) {
+                loop->post([loop]() { loop->stop(); });
+            }
         }
     });
 
@@ -554,7 +557,7 @@ TEST_F(LocalServerFixture, acceptedSocketCanEchoToClient)
 
     EXPECT_TRUE(serverError.empty());
     EXPECT_TRUE(clientError.empty());
-    EXPECT_EQ(receivedByClient, payload);
+    EXPECT_EQ(receivedByClient.bytes(), payload.bytes());
 
     if (accepted) { accepted->close(); delete accepted; }
     server.close();
@@ -567,10 +570,10 @@ TEST_F(LocalServerFixture, largeDataTransferIntegrity)
     ASSERT_TRUE(server.listen(path));
 
     constexpr std::size_t kSize = 1u * 1024u * 1024u;  // 1 MB
-    const std::vector<std::uint8_t> sendData(kSize, 0xAB);
-
-    std::vector<std::uint8_t> receivedByClient;
-    receivedByClient.reserve(kSize);
+    const ByteArray sendData(ByteArray::Storage(kSize, std::byte{0xAB}));
+    ByteArray::Storage receivedStorage;
+    receivedStorage.reserve(kSize);
+    ByteArray receivedByClient(std::move(receivedStorage));
 
     LocalSocket* accepted = nullptr;
     server.newConnection.connect([&] {
@@ -578,7 +581,7 @@ TEST_F(LocalServerFixture, largeDataTransferIntegrity)
         ASSERT_NE(accepted, nullptr);
 
         accepted->readyRead.connect([&] {
-            const auto chunk = accepted->readAll();
+            const ByteArray chunk = accepted->readAll();
             accepted->write(chunk);  // echo
         });
     });
@@ -586,8 +589,8 @@ TEST_F(LocalServerFixture, largeDataTransferIntegrity)
     LocalSocket client;
 
     client.readyRead.connect([&] {
-        const auto chunk = client.readAll();
-        receivedByClient.insert(receivedByClient.end(), chunk.begin(), chunk.end());
+        const ByteArray chunk = client.readAll();
+        receivedByClient.append(chunk.bytesView());
         if (receivedByClient.size() >= kSize) {
             if (EventLoop* loop = client.ownerEventLoop()) {
                 loop->post([loop]() { loop->stop(); });
@@ -604,7 +607,7 @@ TEST_F(LocalServerFixture, largeDataTransferIntegrity)
     app->run();
 
     ASSERT_EQ(receivedByClient.size(), kSize);
-    EXPECT_EQ(receivedByClient, sendData);
+    EXPECT_EQ(receivedByClient.bytes(), sendData.bytes());
 
     if (accepted) { accepted->close(); delete accepted; }
     server.close();

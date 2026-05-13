@@ -128,7 +128,7 @@ void HttpServer::_onSocketReadyRead(TcpSocket* socket)
     HttpRequestParser& parser = stateIt->second.parser;
 
     // Feed data to parser
-    parser.feed(data.data(), data.size());
+    parser.feed(data.bytesView());
 
     // Process any complete requests
     while (parser.isComplete())

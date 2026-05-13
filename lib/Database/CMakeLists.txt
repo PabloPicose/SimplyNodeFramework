@@ -13,8 +13,10 @@ set(SNFDATABASE_SOURCES
 
 set(SNFDATABASE_HEADERS
     "${SNFDATABASE_DIR}/SqlDatabase.h"
+    "${SNFDATABASE_DIR}/SqlDatabaseProvider.h"
     "${SNFDATABASE_DIR}/SqlQuery.h"
     "${SNFDATABASE_DIR}/SqlTableModel.h"
+    "${SNFDATABASE_DIR}/MySqlDatabaseManager.h"
 )
 
 if(SNF_ENABLE_SQLITE)
@@ -30,6 +32,22 @@ if(SNF_ENABLE_SQLITE)
 
     target_compile_definitions(SNFDatabase PUBLIC SNF_ENABLE_SQLITE)
     target_link_libraries(SNFDatabase PRIVATE SQLite::SQLite3)
+endif()
+
+if(SNF_ENABLE_MYSQL)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(MYSQLCLIENT REQUIRED IMPORTED_TARGET mysqlclient)
+
+    list(APPEND SNFDATABASE_SOURCES
+        "${SNFDATABASE_DIR}/MySqlDatabase.cpp"
+    )
+
+    list(APPEND SNFDATABASE_HEADERS
+        "${SNFDATABASE_DIR}/MySqlDatabase.h"
+    )
+
+    target_compile_definitions(SNFDatabase PUBLIC SNF_ENABLE_MYSQL)
+    target_link_libraries(SNFDatabase PRIVATE PkgConfig::MYSQLCLIENT)
 endif()
 
 target_sources(SNFDatabase
@@ -69,6 +87,6 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/SNFDatabase
 )
 
-if(SNF_ENABLE_TESTS AND SNF_ENABLE_SQLITE)
+if(SNF_ENABLE_TESTS AND (SNF_ENABLE_SQLITE OR SNF_ENABLE_MYSQL))
     add_subdirectory(test)
 endif()

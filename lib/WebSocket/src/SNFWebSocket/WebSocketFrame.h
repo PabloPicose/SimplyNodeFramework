@@ -1,5 +1,8 @@
 #pragma once
 
+#include <SNFCore/ByteArray.h>
+#include <SNFCore/Span.h>
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -27,6 +30,8 @@ class WebSocketFrameParser
 public:
     void feed(const std::uint8_t* data, std::size_t size);
     void feed(const std::vector<std::uint8_t>& data);
+    /** @brief Overload accepting a non-owning byte span. */
+    void feed(Span<const std::byte> data);
 
     bool hasFrame() const;
     WebSocketFrame nextFrame();
@@ -40,7 +45,7 @@ private:
     void setError(std::string message);
 
 private:
-    std::vector<std::uint8_t> m_buffer;
+    ByteArray::Storage m_buffer;
     std::vector<WebSocketFrame> m_frames;
     std::string m_error;
 };

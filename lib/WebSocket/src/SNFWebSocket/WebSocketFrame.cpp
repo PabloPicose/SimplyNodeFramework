@@ -29,11 +29,11 @@ bool isControlOpcode(OpCode opcode)
     return opcode == OpCode::Close || opcode == OpCode::Ping || opcode == OpCode::Pong;
 }
 
-std::uint64_t readBigEndian(const std::vector<std::uint8_t>& data, std::size_t offset, std::size_t count)
+std::uint64_t readBigEndian(const ByteArray::Storage& data, std::size_t offset, std::size_t count)
 {
     std::uint64_t value = 0;
     for (std::size_t i = 0; i < count; ++i) {
-        value = (value << 8u) | data[offset + i];
+        value = (value << 8u) | std::to_integer<std::uint8_t>(data[offset + i]);
     }
     return value;
 }
@@ -53,18 +53,23 @@ std::array<std::uint8_t, 4> randomMask()
 
 void WebSocketFrameParser::feed(const std::uint8_t* data, std::size_t size)
 {
-    if (hasError() || size == 0) {
-        return;
-    }
-
-    m_buffer.insert(m_buffer.end(), data, data + size);
-    while (!hasError() && tryParseOne()) {
-    }
+    feed(Span<const std::byte>(reinterpret_cast<const std::byte*>(data), size));
 }
 
 void WebSocketFrameParser::feed(const std::vector<std::uint8_t>& data)
 {
-    feed(data.data(), data.size());
+    feed(Span<const std::byte>(reinterpret_cast<const std::byte*>(data.data()), data.size()));
+}
+
+void WebSocketFrameParser::feed(Span<const std::byte> data)
+{
+    if (hasError() || data.empty()) {
+        return;
+    }
+
+    m_buffer.insert(m_buffer.end(), data.begin(), data.end());
+    while (!hasError() && tryParseOne()) {
+    }
 }
 
 bool WebSocketFrameParser::hasFrame() const
@@ -106,8 +111,8 @@ bool WebSocketFrameParser::tryParseOne()
         return false;
     }
 
-    const std::uint8_t first = m_buffer[0];
-    const std::uint8_t second = m_buffer[1];
+    const std::uint8_t first = std::to_integer<std::uint8_t>(m_buffer[0]);
+    const std::uint8_t second = std::to_integer<std::uint8_t>(m_buffer[1]);
     const bool fin = (first & 0x80u) != 0;
     const bool hasReservedBits = (first & 0x70u) != 0;
     const auto opcodeByte = static_cast<std::uint8_t>(first & 0x0Fu);
@@ -169,7 +174,8 @@ bool WebSocketFrameParser::tryParseOne()
         if (m_buffer.size() < offset + maskKey.size()) {
             return false;
         }
-        std::copy_n(m_buffer.begin() + static_cast<std::ptrdiff_t>(offset), maskKey.size(), maskKey.begin());
+        std::copy_n(reinterpret_cast<const std::uint8_t*>(m_buffer.data() + offset),
+                maskKey.size(), maskKey.begin());
         offset += maskKey.size();
     }
 
@@ -187,8 +193,9 @@ bool WebSocketFrameParser::tryParseOne()
     frame.fin = fin;
     frame.opcode = opcode;
     frame.masked = masked;
-    frame.payload.assign(m_buffer.begin() + static_cast<std::ptrdiff_t>(offset),
-                         m_buffer.begin() + static_cast<std::ptrdiff_t>(offset + payloadSize));
+    frame.payload.assign(
+        reinterpret_cast<const std::uint8_t*>(m_buffer.data() + offset),
+        reinterpret_cast<const std::uint8_t*>(m_buffer.data() + offset + payloadSize));
 
     if (masked) {
         for (std::size_t i = 0; i < frame.payload.size(); ++i) {

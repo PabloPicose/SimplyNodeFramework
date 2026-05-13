@@ -20,8 +20,9 @@
         "SNF_ENABLE_TESTS": true,
         "SNF_WEB_ASSEMBLY": false,
         "SNF_ENABLE_SQLITE": true,
-        "SNF_ENABLE_SNMP": false,
         "SNF_ENABLE_PROFILING": true
+        "SNF_ENABLE_MYSQL": true,
+        "SNF_ENABLE_SNMP": false
       }
     },
     {
@@ -34,6 +35,21 @@
         "SNF_ENABLE_TESTS": true,
         "SNF_WEB_ASSEMBLY": false,
         "SNF_ENABLE_SQLITE": true,
+        "SNF_ENABLE_MYSQL": true,
+        "SNF_ENABLE_SNMP": false
+      }
+    },
+    {
+      "name": "actions",
+      "displayName": "GitHub Actions",
+      "inherits": "native-debug",
+      "binaryDir": "${sourceDir}/build/actions",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SNF_ENABLE_TESTS": true,
+        "SNF_WEB_ASSEMBLY": false,
+        "SNF_ENABLE_SQLITE": true,
+        "SNF_ENABLE_MYSQL": true,
         "SNF_ENABLE_SNMP": false
       }
     },
@@ -79,6 +95,10 @@
       "configurePreset": "native-debug"
     },
     {
+      "name": "actions",
+      "configurePreset": "actions"
+    },
+    {
       "name": "native-release",
       "configurePreset": "native-release"
     },
@@ -115,6 +135,17 @@
       },
       "execution": {
         "jobs": 2,
+        "timeout": 60
+      }
+    },
+    {
+      "name": "actions",
+      "configurePreset": "actions",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 4,
         "timeout": 60
       }
     },
