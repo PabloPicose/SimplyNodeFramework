@@ -5,11 +5,15 @@ cmake_minimum_required(VERSION 3.26)
 # Emscripten link options.
 #
 # Usage:
-#   snf_add_widget_example(<target_name> <source_file>)
+#   snf_add_widget_example(<target_name> <source_file> [<additional_libraries>...])
 function(snf_add_widget_example target source)
     add_executable(${target} ${source})
 
-    target_link_libraries(${target} PRIVATE SNFWidgets)
+    target_link_libraries(${target}
+        PRIVATE
+            SNFWidgets
+            ${ARGN}
+    )
 
     if(SNF_ENABLE_PROFILING)
         target_link_libraries(${target} PRIVATE SNFProfiler)
@@ -39,3 +43,6 @@ snf_add_widget_example(snf_widgets_scroll_area_example     scroll_area_example.c
 snf_add_widget_example(snf_widgets_tabs_example            tabs_example.cpp)
 snf_add_widget_example(snf_widgets_stacked_widget_example  stacked_widget_example.cpp)
 snf_add_widget_example(snf_widgets_layouts_example         layouts_example.cpp)
+
+# Link the echo to the Network library
+snf_add_widget_example(snf_widgets_echo_client_example     echo_client_example.cpp SNFNetwork)
