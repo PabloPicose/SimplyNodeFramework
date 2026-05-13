@@ -22,6 +22,7 @@ target_sources(SNFCore
         "${SNFCORE_DIR}/Application.cpp"
         "${SNFCORE_DIR}/Node.cpp"
         "${SNFCORE_DIR}/NodePtr.cpp"
+        "${SNFCORE_DIR}/NodeRegistry.cpp"
         "${SNFCORE_DIR}/Timer.cpp"
         "${SNFCORE_DIR}/TimeLapse.cpp"
         "${SNFCORE_DIR}/EventLoop.cpp"

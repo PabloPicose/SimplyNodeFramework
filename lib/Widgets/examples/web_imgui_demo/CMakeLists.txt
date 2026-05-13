@@ -8,6 +8,10 @@ add_executable(snf_web_imgui_demo
 
 target_link_libraries(snf_web_imgui_demo PRIVATE SNFWidgets)
 
+if(SNF_ENABLE_PROFILING)
+    target_link_libraries(snf_web_imgui_demo PRIVATE SNFProfiler)
+endif()
+
 target_compile_options(snf_web_imgui_demo PRIVATE -Wall -Wextra)
 
 if(EMSCRIPTEN)

@@ -10,6 +10,8 @@
 #include <SNFCore/Node.h>
 #include <SNFCore/NodeLifetimeBlock.h>
 
+#include "NodeRegistry.h"
+
 #include <stdexcept>
 #include <type_traits>
 
@@ -46,9 +48,14 @@ class NodePtr
     std::shared_ptr<NodeLifetimeBlock> m_block;
 
 public:
-    /** @brief Constructs a NodePtr wrapping @p node, sharing its lifetime block. */
+    /** @brief Constructs a NodePtr wrapping @p node, sharing its lifetime block.
+     *
+     * Safe to call even if @p node has already been deleted — the registry
+     * lookup never dereferences the raw pointer, eliminating use-after-free.
+     */
     explicit NodePtr(T* node)
-        : m_node(node), m_block(node ? node->lifetimeBlock() : nullptr)
+        : m_node(node)
+        , m_block(node ? detail::NodeRegistry::instance().lookup(node) : nullptr)
     {
     }
 
@@ -124,7 +131,7 @@ public:
     void reset(T* pObj = nullptr)
     {
         m_node = pObj;
-        m_block = pObj ? pObj->lifetimeBlock() : nullptr;
+        m_block = pObj ? detail::NodeRegistry::instance().lookup(pObj) : nullptr;
     }
 
     /**

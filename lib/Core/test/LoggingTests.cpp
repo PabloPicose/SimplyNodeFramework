@@ -196,7 +196,7 @@ TEST_F(LoggerStandaloneFixture, messageCarriesAllFields)
     ASSERT_TRUE(logger->flush(500ms));
 
     ASSERT_EQ(capture->count(), 1u);
-    const LogMessage& msg = capture->messages().front();
+    const LogMessage msg = capture->messages().front();
 
     EXPECT_EQ(msg.level,    LogLevel::Warning);
     EXPECT_EQ(msg.text,     "hello");
@@ -439,7 +439,7 @@ TEST_F(LoggerAppFixture, macroRecordsCorrectFileAndLine)
     ASSERT_TRUE(app->logger().flush(500ms));
 
     ASSERT_EQ(capture->count(), 1u);
-    const LogMessage& msg = capture->messages().front();
+    const LogMessage msg = capture->messages().front();
     EXPECT_EQ(msg.line, expectedLine);
     // __FILE__ varies; just verify it is non-empty.
     EXPECT_GT(std::string(msg.file).size(), 0u);

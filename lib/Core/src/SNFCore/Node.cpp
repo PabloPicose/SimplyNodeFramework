@@ -5,6 +5,7 @@
 #include <iostream>
 #include <stdexcept>
 
+#include "NodeRegistry.h"
 #include "SNFCore/Application.h"
 #include "SNFCore/EventLoop.h"
 #include "SNFCore/NodePtr.h"
@@ -17,6 +18,11 @@ Node::~Node()
     // before touching any framework state. Lock-free: the atomic store
     // is seen by any concurrent NodePtr::isAlive() check.
     m_lifetimeBlock->alive.store(false, std::memory_order_release);
+
+    // Remove from the global registry so that NodePtr(raw_ptr) constructed
+    // after this point correctly gets a null/dead block without dereferencing
+    // the freed memory.
+    detail::NodeRegistry::instance().unregisterNode(this);
 
     const auto app = Application::instance();
     if (m_isRoot && m_ownerEventLoop) {
@@ -180,6 +186,10 @@ Node::Node(Node* parent) : m_parent(parent)
     m_generation = s_nextGeneration.fetch_add(1, std::memory_order_relaxed);
 
     m_lifetimeBlock = std::make_shared<NodeLifetimeBlock>();
+
+    // Register in the global registry immediately so that NodePtr(this)
+    // can look up the block without dereferencing an arbitrary raw pointer.
+    detail::NodeRegistry::instance().registerNode(this, m_lifetimeBlock);
 
     const auto app = Application::instance();
     if (! app) {
