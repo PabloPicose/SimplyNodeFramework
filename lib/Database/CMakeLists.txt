@@ -31,12 +31,20 @@ if(SNF_ENABLE_SQLITE)
     )
 
     target_compile_definitions(SNFDatabase PUBLIC SNF_ENABLE_SQLITE)
-    target_link_libraries(SNFDatabase PRIVATE SQLite::SQLite3)
+    target_link_libraries(SNFDatabase PRIVATE SQLite3::SQLite3)
 endif()
 
 if(SNF_ENABLE_MYSQL)
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(MYSQLCLIENT REQUIRED IMPORTED_TARGET mysqlclient)
+    foreach(_snf_mysql_pc mysqlclient libmariadb mariadb)
+        pkg_check_modules(MYSQLCLIENT IMPORTED_TARGET ${_snf_mysql_pc})
+        if(MYSQLCLIENT_FOUND)
+            break()
+        endif()
+    endforeach()
+    if(NOT MYSQLCLIENT_FOUND)
+        message(FATAL_ERROR "SNF_ENABLE_MYSQL is ON but no MySQL/MariaDB client library was found (tried: mysqlclient, libmariadb, mariadb)")
+    endif()
 
     list(APPEND SNFDATABASE_SOURCES
         "${SNFDATABASE_DIR}/MySqlDatabase.cpp"
