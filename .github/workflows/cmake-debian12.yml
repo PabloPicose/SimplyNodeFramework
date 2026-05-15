@@ -57,7 +57,7 @@ jobs:
 
       - name: Load MySQL schema
         run: |
-          mysql -h mysql-test -P 3306 -uroot -proot < lib/Database/test/mysql-schema.sql
+          mysql -h mysql-test -P 3306 -uroot -proot --skip-ssl < lib/Database/test/mysql-schema.sql
 
       - name: Test
         env:

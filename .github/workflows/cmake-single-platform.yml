@@ -55,7 +55,7 @@ jobs:
 
     - name: Load MySQL schema
       run: |
-        mysql -h 127.0.0.1 -P 3307 -uroot -proot < lib/Database/test/mysql-schema.sql
+        mysql -h 127.0.0.1 -P 3307 -uroot -proot --ssl-mode=DISABLED < lib/Database/test/mysql-schema.sql
 
     - name: Test
       env:

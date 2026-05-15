@@ -98,6 +98,14 @@ install(TARGETS SNFDatabase
     FILE_SET HEADERS DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
+# _SNFSQLite3 is created on distros where find_package(SQLite3) does not
+# produce an imported target; it must be in the same export set as SNFDatabase.
+if(TARGET _SNFSQLite3)
+    install(TARGETS _SNFSQLite3
+        EXPORT SNFDatabaseTargets
+    )
+endif()
+
 install(
     EXPORT SNFDatabaseTargets
     FILE SNFDatabaseTargets.cmake

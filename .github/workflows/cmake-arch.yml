@@ -40,7 +40,7 @@ jobs:
             base-devel git cmake ninja pkgconf \
             wayland wayland-protocols libxkbcommon \
             libx11 libxrandr libxinerama libxcursor libxi \
-            mesa sqlite mariadb-libs mariadb
+            mesa sqlite mariadb-libs mariadb-clients
 
       - name: Make mysqlclient pkg-config available
         run: |
@@ -65,7 +65,7 @@ jobs:
       - name: Load MySQL schema
         run: |
           DB_CLIENT="$(command -v mysql || command -v mariadb)"
-          "$DB_CLIENT" -h mysql-test -P 3306 -uroot -proot < lib/Database/test/mysql-schema.sql
+          "$DB_CLIENT" -h mysql-test -P 3306 -uroot -proot --skip-ssl < lib/Database/test/mysql-schema.sql
 
       - name: Test
         env:
