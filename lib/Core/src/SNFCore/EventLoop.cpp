@@ -111,10 +111,6 @@ std::size_t EventLoop::getRootNodesToDeleteCount() const { return pendingDeleteC
 
 void EventLoop::run()
 {
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_stop = false;
-    }
     for (;;) {
 
         // ── Active processing phase (measured by the profiler) ────────────

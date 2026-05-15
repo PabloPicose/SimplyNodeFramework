@@ -50,7 +50,8 @@ std::size_t ThreadPool::defaultThreadCount()
     return 0;  // No worker threads in Emscripten single-threaded builds.
 #else
     const unsigned int hardwareThreads = std::thread::hardware_concurrency();
-    return std::max<std::size_t>(1, hardwareThreads == 0 ? 2 : hardwareThreads);
+    // Leave one core available for the main thread and the test runner.
+    return std::max<std::size_t>(1, hardwareThreads > 1 ? hardwareThreads - 1 : 1);
 #endif
 }
 
