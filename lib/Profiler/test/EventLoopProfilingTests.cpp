@@ -215,9 +215,11 @@ TEST_F(EventLoopProfilingFixture, WorkerThreadsEmitSpansWithDistinctThreadIds)
     auto events = drainAll();
     auto begins = filter(events, "eventloop", EventPhase::BEGIN);
 
-    // At least kTasks processing spans should have been emitted.
-    EXPECT_GE(begins.size(), static_cast<size_t>(kTasks))
-        << "Expected at least one processing span per task";
+    // At least one processing span must have been emitted by worker threads.
+    // Multiple tasks may be batched into a single event loop iteration (one
+    // span per iteration, not per task), so we only assert >= 1.
+    EXPECT_GE(begins.size(), 1u)
+        << "Expected at least one processing span from worker threads";
 
     // The spans should come from at least 2 different thread IDs
     // (worker threads are distinct from the main thread).
