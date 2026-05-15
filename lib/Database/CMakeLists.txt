@@ -20,7 +20,16 @@ set(SNFDATABASE_HEADERS
 )
 
 if(SNF_ENABLE_SQLITE)
-    find_package(SQLite3 REQUIRED)
+    find_package(SQLite3 QUIET)
+    if(NOT TARGET SQLite3::SQLite3)
+        # Fallback: some distros ship a SQLite3Config.cmake that sets SQLite3_FOUND
+        # but does not define the imported target. Use pkg-config to fill the gap.
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(SQLITE3_PC REQUIRED IMPORTED_TARGET sqlite3)
+        add_library(_SNFSQLite3 INTERFACE)
+        target_link_libraries(_SNFSQLite3 INTERFACE PkgConfig::SQLITE3_PC)
+        add_library(SQLite3::SQLite3 ALIAS _SNFSQLite3)
+    endif()
 
     list(APPEND SNFDATABASE_SOURCES
         "${SNFDATABASE_DIR}/SqliteDatabase.cpp"

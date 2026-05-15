@@ -1,0 +1,77 @@
+name: Arch Linux
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  BUILD_TYPE: Debug
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-and-test:
+    name: Build and test (Arch Linux)
+    runs-on: ubuntu-latest
+
+    services:
+      mysql-test:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: test_db
+          MYSQL_USER: test_user
+          MYSQL_PASSWORD: test_pass
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    container:
+      image: archlinux:latest
+
+    steps:
+      - name: Install toolchain
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel git cmake ninja pkgconf \
+            wayland wayland-protocols libxkbcommon \
+            libx11 libxrandr libxinerama libxcursor libxi \
+            mesa sqlite mariadb-libs mariadb
+
+      - name: Make mysqlclient pkg-config available
+        run: |
+          if ! pkg-config --exists mysqlclient; then
+            for candidate in libmariadb mariadb; do
+              if pkg-config --exists "$candidate"; then
+                pc_file_dir="$(pkg-config --variable=pcfiledir "$candidate")"
+                ln -sf "$pc_file_dir/$candidate.pc" "$pc_file_dir/mysqlclient.pc"
+                break
+              fi
+            done
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: cmake --preset actions
+
+      - name: Build
+        run: cmake --build --preset actions
+
+      - name: Load MySQL schema
+        run: |
+          DB_CLIENT="$(command -v mysql || command -v mariadb)"
+          "$DB_CLIENT" -h mysql-test -P 3306 -uroot -proot < lib/Database/test/mysql-schema.sql
+
+      - name: Test
+        env:
+          SNF_MYSQL_HOST: mysql-test
+          SNF_MYSQL_PORT: "3306"
+          SNF_MYSQL_DATABASE: test_db
+          SNF_MYSQL_USER: test_user
+          SNF_MYSQL_PASSWORD: test_pass
+        run: timeout 15m ctest --preset actions

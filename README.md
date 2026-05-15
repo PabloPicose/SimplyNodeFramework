@@ -3,6 +3,7 @@
 [![Ubuntu](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-single-platform.yml/badge.svg)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-single-platform.yml)
 [![Rocky Linux 8](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-rockylinux8.yml/badge.svg)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-rockylinux8.yml)
 [![Debian 12](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-debian12.yml/badge.svg)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-debian12.yml)
+[![Arch Linux](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-arch.yml/badge.svg)](https://github.com/PabloPicose/SimplyNodeFramework/actions/workflows/cmake-arch.yml)
 
 Simplicity is a key idea in this project. The goal is to make life easier for whoever is using the library.
 
