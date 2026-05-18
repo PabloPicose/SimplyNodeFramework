@@ -33,6 +33,18 @@ endif()
 # --use-port=contrib.glfw3 compile/link flags; no CMake target is needed).
 # On desktop we fetch GLFW as a static library via FetchContent.
 if(NOT EMSCRIPTEN)
+    # Auto-detect wayland-scanner availability for Wayland support.
+    # If wayland-scanner is not found (e.g., on WSL2 with X11 only),
+    # disable GLFW_BUILD_WAYLAND to avoid build errors.
+    find_program(WAYLAND_SCANNER_EXECUTABLE NAMES wayland-scanner)
+    if(WAYLAND_SCANNER_EXECUTABLE)
+        set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE)
+        message(STATUS "wayland-scanner found: enabling GLFW Wayland support")
+    else()
+        set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
+        message(STATUS "wayland-scanner not found: disabling GLFW Wayland support (X11 will be used)")
+    endif()
+
     set(GLFW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)

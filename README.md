@@ -331,9 +331,10 @@ Timer::singleShot(1000ms, []() { /* once */ });
 | `SNF_ENABLE_TESTS`    | `ON` if top-level | Build unit tests (GoogleTest)                                   |
 | `SNF_ENABLE_EXAMPLES` | `ON` if top-level | Build in-tree examples                                          |
 | `SNF_WEB_ASSEMBLY`    | `OFF`             | Build `SNFCore` for WebAssembly (requires Emscripten toolchain) |
+| `SNF_ENABLE_WIDGETS`  | `ON`              | Build `SNFWidgets` (Dear ImGui + GLFW)                          |
 | `SNF_ENABLE_SQLITE`   | `OFF`             | Build `SNFDatabase` with SQLite support                         |
 | `SNF_ENABLE_MYSQL`    | `OFF`             | Build `SNFDatabase` with MySQL support                          |
-| `SNF_ENABLE_SNMP`     | `OFF`             | Build `SNFSnmp` with net-snmp support (Linux only)              |
+| `SNF_ENABLE_SNMP`     | `OFF`             | Build `SNFSnmp` with net-snmp support                           |
 
 
 `top-level` means the root CMakeLists.txt is being configured, as opposed to being included via `add_subdirectory()` or `FetchContent`. This allows downstream projects to disable tests and examples when including SNF as a dependency.
@@ -374,7 +375,7 @@ doxygen docs/Doxyfile
 
 ### Core
 - [ ] File system watcher (inotify)
-- [ ] Process management (spawn, stdout/stderr capture)
+- [x] Process management (spawn, stdout/stderr capture)
 - [ ] Plugin system (runtime shared-library loading)
 - [ ] Per-node update flag (skip `update()` when no work is pending)
 - [x] Logging framework (log levels, formatting, file output)
