@@ -111,10 +111,10 @@ std::size_t EventLoop::getRootNodesToDeleteCount() const { return pendingDeleteC
 
 void EventLoop::run()
 {
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_stop = false;
-    }
+    // m_stop is NOT reset here: a stop() issued from another thread before this
+    // thread reaches run() must not be lost (otherwise the loop could block
+    // forever). The request is consumed when run() returns, so the loop can be
+    // run again afterwards.
     for (;;) {
 
         // ── Active processing phase (measured by the profiler) ────────────
@@ -175,6 +175,7 @@ void EventLoop::run()
             std::unique_lock<std::mutex> lock(m_mutex);
             if (m_stop) {
                 stopRequested = true;
+                m_stop = false;
             } else {
                 std::chrono::steady_clock::time_point nextDeadline;
                 if (nextTimerDeadlineLocked(nextDeadline)) {
@@ -192,6 +193,7 @@ void EventLoop::run()
                     });
                 }
                 stopRequested = m_stop;
+                m_stop = false;
             }
         }
 

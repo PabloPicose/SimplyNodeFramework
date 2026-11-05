@@ -232,10 +232,9 @@ void ThreadPool::workerLoop(std::size_t workerIndex)
             m_workerLoops[workerIndex] = loop;
         }
     }
-    // Post the ready notification as a task so it fires from *inside* run(),
-    // after the m_stop = false reset. This guarantees that when the main
-    // thread wakes from m_workersReady.wait(), every worker is already
-    // executing its event loop and any subsequent stop() will be handled.
+    // Post the ready notification as a task so it fires from *inside* run().
+    // This guarantees that when the main thread wakes from
+    // m_workersReady.wait(), every worker is already executing its event loop.
     loop->post([this]() { m_workersReady.notify_all(); });
 
     loop->run();
