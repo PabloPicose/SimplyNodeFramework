@@ -104,8 +104,11 @@ void Node::deleteLater()
     m_lifetimeBlock->markedForDelete.store(true, std::memory_order_release);
 
     if (m_ownerEventLoop && ! m_ownerEventLoop->isInThisThread()) {
-        m_ownerEventLoop->post([ownerLoop = m_ownerEventLoop, node = this]() { ownerLoop->enqueueDelete(node); });
+        // Mark before handing the delete over: once posted, the owner thread
+        // may destroy the node at any moment, so `this` must not be touched
+        // after postDeleteToOwner().
         app->markToDelete(this);
+        postDeleteToOwner(m_ownerEventLoop);
         return;
     }
 
@@ -117,6 +120,22 @@ void Node::deleteLater()
     } else {
         throw std::runtime_error("Node owner EventLoop does not exist");
     }
+}
+
+void Node::postDeleteToOwner(EventLoop* loop)
+{
+    loop->post([loop, node = this, block = m_lifetimeBlock]() {
+        if (! block->alive.load(std::memory_order_acquire)) {
+            return;
+        }
+        EventLoop* owner = node->m_ownerEventLoop;
+        if (owner && owner != loop) {
+            // The node migrated after deleteLater() was requested.
+            node->postDeleteToOwner(owner);
+            return;
+        }
+        loop->enqueueDelete(node);
+    });
 }
 
 void Node::update() { std::cerr << "Pure virtual function called from Node::update()" << std::endl; }
@@ -269,9 +288,15 @@ bool Node::moveToThread(std::thread::id targetThreadId)
 
     // Asynchronous path: post to the current owner thread.
     currentLoop->post([self = NodePtr<Node>(this), targetLoop]() {
-        if (self) {
-            self->applyMoveToThread(targetLoop);
+        if (! self) {
+            return;
         }
+        // The preconditions were checked on the calling thread; the node may
+        // have been re-parented since then. Never split a child from its parent.
+        if (self->m_parent && self->m_parent->ownerThreadId() != targetLoop->ownerThreadId()) {
+            return;
+        }
+        self->applyMoveToThread(targetLoop);
     });
     return true;
 }

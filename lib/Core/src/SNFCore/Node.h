@@ -218,6 +218,12 @@ protected:
 private:
     void pushDeleteChild(Node* child);
 
+    // Posts the deferred delete of this node to @p loop. If by the time the
+    // task runs the node has migrated to another loop, the task forwards
+    // itself to the current owner so the node is always destroyed on its
+    // owner thread.
+    void postDeleteToOwner(EventLoop* loop);
+
     // Performs the actual recursive migration; must be called on owner thread.
     void applyMoveToThread(EventLoop* targetLoop);
 

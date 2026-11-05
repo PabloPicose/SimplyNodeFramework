@@ -1854,6 +1854,337 @@ TEST_F(CoreFixture, applicationDestructionDeletesRootAndMovedToThreadPoolNodes)
     EXPECT_EQ(Application::instance(), nullptr);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// moveToThread: hooks, bookkeeping and edge cases
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+struct HookEvent {
+    enum Kind { AboutToMove, Moved } kind;
+    const Node* node;
+    EventLoop* ownerAtCall;  // ownerEventLoop() when the hook runs
+    EventLoop* argument;     // newLoop / oldLoop passed to the hook
+};
+
+class HookRecordingNode final : public snf::Node
+{
+public:
+    explicit HookRecordingNode(std::vector<HookEvent>* events, Node* parent = nullptr)
+        : Node(parent), m_events(events)
+    {
+    }
+
+protected:
+    void update() override {}
+
+    void onAboutToMoveToThread(EventLoop* newLoop) override
+    {
+        m_events->push_back({HookEvent::AboutToMove, this, ownerEventLoop(), newLoop});
+    }
+
+    void onMovedToThread(EventLoop* oldLoop) override
+    {
+        m_events->push_back({HookEvent::Moved, this, ownerEventLoop(), oldLoop});
+    }
+
+private:
+    std::vector<HookEvent>* m_events;
+};
+
+class DestructionThreadNode final : public snf::Node
+{
+public:
+    struct Record {
+        std::mutex mutex;
+        std::condition_variable cv;
+        int destroyed = 0;
+        std::thread::id destroyedOn;
+        std::thread::id ownerAtDestruction;
+    };
+
+    explicit DestructionThreadNode(std::shared_ptr<Record> record, Node* parent = nullptr)
+        : Node(parent), m_record(std::move(record))
+    {
+    }
+
+    ~DestructionThreadNode() override
+    {
+        std::lock_guard<std::mutex> lock(m_record->mutex);
+        ++m_record->destroyed;
+        m_record->destroyedOn = std::this_thread::get_id();
+        m_record->ownerAtDestruction = ownerThreadId();
+        m_record->cv.notify_all();
+    }
+
+protected:
+    void update() override {}
+
+private:
+    std::shared_ptr<Record> m_record;
+};
+
+// Runs @p fn on @p loop's thread and waits until it has finished. Because the
+// task queue is FIFO, this also guarantees that previously posted tasks ran.
+template <typename Fn>
+bool runOnLoopAndWait(EventLoop* loop, Fn fn, std::chrono::milliseconds timeout = std::chrono::milliseconds(1000))
+{
+    auto done = std::make_shared<std::promise<void>>();
+    std::future<void> future = done->get_future();
+    loop->post([fn, done]() mutable {
+        fn();
+        done->set_value();
+    });
+    return future.wait_for(timeout) == std::future_status::ready;
+}
+
+}  // namespace
+
+TEST_F(CoreFixture, moveToThreadInvokesHooksInOrderForWholeSubtree)
+{
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerId);
+    ASSERT_NE(workerLoop, nullptr);
+
+    std::vector<HookEvent> events;
+    auto* root = new HookRecordingNode(&events);
+    auto* child = new HookRecordingNode(&events, root);
+    EventLoop* mainLoop = root->ownerEventLoop();
+
+    ASSERT_TRUE(root->moveToThread(workerId));  // synchronous: called on owner thread
+
+    ASSERT_EQ(events.size(), 4u);
+    // Root first, then the child; each gets AboutToMove before Moved.
+    EXPECT_EQ(events[0].kind, HookEvent::AboutToMove);
+    EXPECT_EQ(events[0].node, root);
+    EXPECT_EQ(events[0].ownerAtCall, mainLoop);
+    EXPECT_EQ(events[0].argument, workerLoop);
+
+    EXPECT_EQ(events[1].kind, HookEvent::Moved);
+    EXPECT_EQ(events[1].node, root);
+    EXPECT_EQ(events[1].ownerAtCall, workerLoop);
+    EXPECT_EQ(events[1].argument, mainLoop);
+
+    EXPECT_EQ(events[2].kind, HookEvent::AboutToMove);
+    EXPECT_EQ(events[2].node, child);
+    EXPECT_EQ(events[2].ownerAtCall, mainLoop);
+    EXPECT_EQ(events[2].argument, workerLoop);
+
+    EXPECT_EQ(events[3].kind, HookEvent::Moved);
+    EXPECT_EQ(events[3].node, child);
+    EXPECT_EQ(events[3].ownerAtCall, workerLoop);
+    EXPECT_EQ(events[3].argument, mainLoop);
+
+    ASSERT_TRUE(runOnLoopAndWait(workerLoop, [root]() { delete root; }));
+}
+
+TEST_F(CoreFixture, moveToThreadSameThreadDoesNotInvokeHooks)
+{
+    std::vector<HookEvent> events;
+    auto* root = new HookRecordingNode(&events);
+    new HookRecordingNode(&events, root);
+
+    EXPECT_TRUE(root->moveToThread(std::this_thread::get_id()));
+    EXPECT_TRUE(events.empty());
+
+    delete root;
+}
+
+TEST_F(CoreFixture, moveToThreadUpdatesNodeAndRootBookkeepingExactly)
+{
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerId);
+    ASSERT_NE(workerLoop, nullptr);
+
+    auto* root = new TestNode();
+    auto* child = new TestNode(root);
+    new TestNode(child);
+    EventLoop* mainLoop = root->ownerEventLoop();
+
+    const std::size_t mainNodesBefore = mainLoop->registeredNodesCount();
+    const std::size_t mainRootsBefore = mainLoop->getRootNodesCount();
+    const std::size_t workerNodesBefore = workerLoop->registeredNodesCount();
+    const std::size_t workerRootsBefore = workerLoop->getRootNodesCount();
+
+    ASSERT_TRUE(root->moveToThread(workerId));
+
+    // All three nodes change loop, but only the root is a root on the target.
+    EXPECT_EQ(mainLoop->registeredNodesCount(), mainNodesBefore - 3);
+    EXPECT_EQ(workerLoop->registeredNodesCount(), workerNodesBefore + 3);
+    EXPECT_EQ(mainLoop->getRootNodesCount(), mainRootsBefore - 1);
+    EXPECT_EQ(workerLoop->getRootNodesCount(), workerRootsBefore + 1);
+    EXPECT_TRUE(root->isRoot());
+    EXPECT_FALSE(child->isRoot());
+
+    ASSERT_TRUE(runOnLoopAndWait(workerLoop, [root]() { delete root; }));
+    EXPECT_EQ(workerLoop->registeredNodesCount(), workerNodesBefore);
+    EXPECT_EQ(workerLoop->getRootNodesCount(), workerRootsBefore);
+}
+
+TEST_F(CoreFixture, asyncMoveToThreadIsIgnoredIfNodeIsDeletedBeforeItApplies)
+{
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerId);
+    ASSERT_NE(workerLoop, nullptr);
+
+    std::vector<HookEvent> events;
+    auto* node = new HookRecordingNode(&events);
+    EventLoop* mainLoop = node->ownerEventLoop();
+    const std::size_t workerNodesBefore = workerLoop->registeredNodesCount();
+
+    // Called from a non-owner thread: the migration is posted to mainLoop.
+    std::thread caller([&]() { EXPECT_TRUE(node->moveToThread(workerId)); });
+    caller.join();
+
+    delete node;
+    mainLoop->runPendingWork();
+
+    EXPECT_TRUE(events.empty());
+    EXPECT_EQ(workerLoop->registeredNodesCount(), workerNodesBefore);
+}
+
+TEST_F(CoreFixture, moveToThreadPoolReturnsFalseAfterPoolShutdown)
+{
+    ThreadPool pool(1);
+    pool.shutdown();
+
+    auto* node = new TestNode();
+    const std::thread::id before = node->ownerThreadId();
+
+    EXPECT_FALSE(node->moveToThreadPool(&pool));
+    EXPECT_EQ(node->ownerThreadId(), before);
+
+    delete node;
+}
+
+TEST_F(CoreFixture, chainedMigrationsKeepAffinityAndBookkeepingConsistent)
+{
+    ThreadPool pool(2);
+    const std::vector<std::thread::id> workerIds = pool.workerThreadIds();
+    ASSERT_EQ(workerIds.size(), 2u);
+    EventLoop* loopA = Application::instance()->getEventLoopByThreadId(workerIds[0]);
+    EventLoop* loopB = Application::instance()->getEventLoopByThreadId(workerIds[1]);
+    ASSERT_NE(loopA, nullptr);
+    ASSERT_NE(loopB, nullptr);
+
+    std::vector<HookEvent> events;  // only touched by the current owner thread
+    auto* root = new HookRecordingNode(&events);
+    auto* child = new HookRecordingNode(&events, root);
+    EventLoop* mainLoop = root->ownerEventLoop();
+    const std::thread::id mainId = std::this_thread::get_id();
+    const std::size_t mainNodesBefore = mainLoop->registeredNodesCount();
+    const std::size_t mainRootsBefore = mainLoop->getRootNodesCount();
+
+    // main -> A (synchronous)
+    ASSERT_TRUE(root->moveToThread(workerIds[0]));
+    EXPECT_EQ(child->ownerEventLoop(), loopA);
+
+    // A -> B (asynchronous: posted to A, the current owner)
+    ASSERT_TRUE(root->moveToThread(workerIds[1]));
+    ASSERT_TRUE(runOnLoopAndWait(loopA, []() {}));
+    EXPECT_EQ(root->ownerEventLoop(), loopB);
+    EXPECT_EQ(child->ownerEventLoop(), loopB);
+    EXPECT_EQ(loopA->registeredNodesCount(), 0u);
+    EXPECT_EQ(loopA->getRootNodesCount(), 0u);
+
+    // B -> main (asynchronous: posted to B)
+    ASSERT_TRUE(root->moveToThread(mainId));
+    ASSERT_TRUE(runOnLoopAndWait(loopB, []() {}));
+    EXPECT_EQ(root->ownerThreadId(), mainId);
+    EXPECT_EQ(child->ownerThreadId(), mainId);
+    EXPECT_EQ(loopB->registeredNodesCount(), 0u);
+    EXPECT_EQ(loopB->getRootNodesCount(), 0u);
+    EXPECT_EQ(mainLoop->registeredNodesCount(), mainNodesBefore);
+    EXPECT_EQ(mainLoop->getRootNodesCount(), mainRootsBefore);
+
+    // Three migrations x two nodes x two hooks.
+    EXPECT_EQ(events.size(), 12u);
+
+    delete root;
+}
+
+TEST_F(CoreFixture, asyncMoveToThreadDoesNotSplitNodeFromParentAddedBeforeItApplies)
+{
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+
+    auto* node = new TestNode();
+    EventLoop* mainLoop = node->ownerEventLoop();
+
+    // Request accepted from another thread while node is still a root.
+    std::thread caller([&]() { EXPECT_TRUE(node->moveToThread(workerId)); });
+    caller.join();
+
+    // Before the posted migration runs, the node gets a parent on main.
+    auto* parent = new TestNode();
+    node->setParent(parent);
+
+    mainLoop->runPendingWork();
+
+    // Parent and child must still share the same thread.
+    EXPECT_EQ(node->ownerThreadId(), parent->ownerThreadId());
+    EXPECT_EQ(node->ownerEventLoop(), parent->ownerEventLoop());
+
+    if (node->ownerEventLoop() == parent->ownerEventLoop()) {
+        delete parent;
+    }
+}
+
+TEST_F(CoreFixture, nodeMigratedAfterForeignDeleteLaterIsDestroyedOnItsOwnerThread)
+{
+    using namespace std::chrono_literals;
+
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+
+    auto record = std::make_shared<DestructionThreadNode::Record>();
+    auto* node = new DestructionThreadNode(record);
+    EventLoop* mainLoop = node->ownerEventLoop();
+
+    // deleteLater() from a foreign thread posts the delete to the current
+    // owner (main).
+    std::thread caller([&]() { node->deleteLater(); });
+    caller.join();
+
+    // The node is migrated (or the migration is refused) before main
+    // processes that posted delete.
+    node->moveToThread(workerId);
+    mainLoop->runPendingWork();
+
+    std::unique_lock<std::mutex> lock(record->mutex);
+    ASSERT_TRUE(record->cv.wait_for(lock, 1s, [&]() { return record->destroyed > 0; }));
+    EXPECT_EQ(record->destroyed, 1);
+    // Never destroyed from a thread other than its owner.
+    EXPECT_EQ(record->destroyedOn, record->ownerAtDestruction);
+}
+
+TEST_F(CoreFixture, deleteLaterFromForeignThreadDoesNotTouchNodeAfterOwnerDeletesIt)
+{
+    using namespace std::chrono_literals;
+
+    // deleteLater() called from a non-owner thread hands the delete to the
+    // owner loop. The owner may destroy the node immediately, so the caller
+    // must not touch the node (or its registry entry) after handing it over.
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+
+    constexpr int kIterations = 300;
+    for (int i = 0; i < kIterations; ++i) {
+        auto record = std::make_shared<DestructionThreadNode::Record>();
+        auto* node = new DestructionThreadNode(record);
+        ASSERT_TRUE(node->moveToThread(workerId));
+
+        ASSERT_NO_THROW(node->deleteLater()) << "iteration " << i;
+
+        std::unique_lock<std::mutex> lock(record->mutex);
+        ASSERT_TRUE(record->cv.wait_for(lock, 1s, [&]() { return record->destroyed > 0; })) << "iteration " << i;
+        ASSERT_EQ(record->destroyed, 1);
+    }
+}
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
