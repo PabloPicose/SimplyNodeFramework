@@ -19,6 +19,18 @@ Node::~Node()
     // is seen by any concurrent NodePtr::isAlive() check.
     m_lifetimeBlock->alive.store(false, std::memory_order_release);
 
+#ifndef NDEBUG
+    // Contract: a node is destroyed only on its owner thread (use
+    // deleteLater() from other threads). Destroying it elsewhere while the
+    // owner loop is running races with that loop ticking the node.
+    if (m_ownerEventLoop && ! m_ownerEventLoop->isInThisThread() && m_ownerEventLoop->isRunning()) {
+        std::cerr << "snf::Node: node '" << m_name
+                  << "' destroyed from a thread other than its owner while the owner EventLoop is running;"
+                     " use deleteLater() from other threads"
+                  << std::endl;
+    }
+#endif
+
     // Remove from the global registry so that NodePtr(raw_ptr) constructed
     // after this point correctly gets a null/dead block without dereferencing
     // the freed memory.

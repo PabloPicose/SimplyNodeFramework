@@ -47,6 +47,8 @@ bool EventLoop::isInThisThread() const noexcept { return std::this_thread::get_i
 
 std::thread::id EventLoop::ownerThreadId() const noexcept { return m_owner; }
 
+bool EventLoop::isRunning() const noexcept { return m_running.load(std::memory_order_acquire); }
+
 void EventLoop::enqueueDelete(Node* node)
 {
     {
@@ -115,6 +117,7 @@ void EventLoop::run()
     // thread reaches run() must not be lost (otherwise the loop could block
     // forever). The request is consumed when run() returns, so the loop can be
     // run again afterwards.
+    m_running.store(true, std::memory_order_release);
     for (;;) {
 
         // ── Active processing phase (measured by the profiler) ────────────
@@ -201,6 +204,7 @@ void EventLoop::run()
             break;
         }
     }
+    m_running.store(false, std::memory_order_release);
 }
 
 void EventLoop::stop()

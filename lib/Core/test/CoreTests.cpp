@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <future>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -2183,6 +2184,77 @@ TEST_F(CoreFixture, deleteLaterFromForeignThreadDoesNotTouchNodeAfterOwnerDelete
         ASSERT_TRUE(record->cv.wait_for(lock, 1s, [&]() { return record->destroyed > 0; })) << "iteration " << i;
         ASSERT_EQ(record->destroyed, 1);
     }
+}
+
+// ---- Destruction contract: only on the owner thread (Debug warning) ----
+
+namespace {
+constexpr const char* kForeignDestroyWarning = "destroyed from a thread other than its owner";
+}
+
+TEST_F(CoreFixture, destroyingNodeOffOwnerThreadWhileOwnerLoopRunsWarnsInDebug)
+{
+#ifdef NDEBUG
+    GTEST_SKIP() << "The warning is only emitted in Debug builds";
+#endif
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerId);
+    ASSERT_NE(workerLoop, nullptr);
+
+    auto* node = new TestNode();
+    ASSERT_TRUE(node->moveToThread(workerId));
+
+    // Park the worker inside a task: its loop is running, but it is not
+    // touching the node while we destroy it, so the test itself is race-free.
+    std::promise<void> parked;
+    std::promise<void> release;
+    std::shared_future<void> releaseFuture = release.get_future().share();
+    workerLoop->post([&parked, releaseFuture]() {
+        parked.set_value();
+        releaseFuture.wait();
+    });
+    parked.get_future().wait();
+
+    testing::internal::CaptureStderr();
+    delete node;
+    const std::string output = testing::internal::GetCapturedStderr();
+    release.set_value();
+
+    EXPECT_NE(output.find(kForeignDestroyWarning), std::string::npos) << output;
+}
+
+TEST_F(CoreFixture, destroyingNodeOnOwnerThreadDoesNotWarn)
+{
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerId);
+    ASSERT_NE(workerLoop, nullptr);
+
+    auto* node = new TestNode();
+    ASSERT_TRUE(node->moveToThread(workerId));
+
+    testing::internal::CaptureStderr();
+    ASSERT_TRUE(runOnLoopAndWait(workerLoop, [node]() { delete node; }));
+    const std::string output = testing::internal::GetCapturedStderr();
+
+    EXPECT_EQ(output.find(kForeignDestroyWarning), std::string::npos) << output;
+}
+
+TEST_F(CoreFixture, destroyingNodeAfterOwnerLoopStoppedDoesNotWarn)
+{
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+
+    auto* node = new TestNode();
+    ASSERT_TRUE(node->moveToThread(workerId));
+    pool.shutdown();  // the owner loop is no longer running
+
+    testing::internal::CaptureStderr();
+    delete node;
+    const std::string output = testing::internal::GetCapturedStderr();
+
+    EXPECT_EQ(output.find(kForeignDestroyWarning), std::string::npos) << output;
 }
 
 int main(int argc, char** argv)

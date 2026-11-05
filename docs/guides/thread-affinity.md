@@ -196,6 +196,27 @@ overload, which has no lifetime tracking.
 
 ---
 
+## Destroying nodes
+
+A node may only be destroyed on its owner thread. While the owner `EventLoop`
+is running it ticks the node (`run()`/`update()`) and dispatches its timers and
+I/O, so a `delete` issued from another thread races with that work.
+
+- On the owner thread, `delete node` is fine.
+- From any other thread, call `node->deleteLater()`. The delete is handed to
+  the owner loop (and follows the node if it migrates before the delete runs).
+- If you need to wait for the destruction, post the `delete` to
+  `node->ownerEventLoop()` and wait on a `std::promise`.
+
+Destroying a node from another thread is only safe once its owner loop has
+stopped (for example after `ThreadPool::shutdown()`), which is what
+`Application` does when it is destroyed.
+
+In Debug builds, `~Node()` prints a warning to `stderr` when a node is
+destroyed from a thread other than its owner while the owner loop is running.
+
+---
+
 ## Common mistakes
 
 **Forgetting `ConnectionType::Queued`**
@@ -210,3 +231,9 @@ silently (returns `false`).
 **Moving a node that has a parent on a different thread**
 `moveToThread` only allows moving root nodes or complete subtrees. Moving a child
 whose parent lives on a different thread is rejected.
+
+**Deleting a migrated node from the thread that created it**
+After `moveToThread`/`moveToThreadPool` the owner is the target thread. A
+stack-allocated node going out of scope, or a plain `delete`, on the original
+thread races with the worker loop. Use `deleteLater()` or delete it on the
+owner thread (see *Destroying nodes*).

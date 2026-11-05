@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "SNFCore/Application.h"
+#include "SNFCore/EventLoop.h"
 #include "SNFCore/Node.h"
 #include "SNFCore/ThreadPool.h"
 #include "SNFDatabase/MySqlDatabase.h"
@@ -119,6 +120,36 @@ public:
     using Node::Node;
 
 };
+
+// Nodes may only be destroyed on their owner thread. Nodes moved to a pool
+// worker are therefore deleted through this helper, which runs the delete on
+// the owner loop and waits for it (also when a test returns early).
+void destroyOnOwnerThread(Node* node)
+{
+    if (! node) {
+        return;
+    }
+    EventLoop* loop = node->ownerEventLoop();
+    if (! loop || loop->isInThisThread() || ! loop->isRunning()) {
+        delete node;
+        return;
+    }
+    auto done = std::make_shared<std::promise<void>>();
+    std::future<void> future = done->get_future();
+    loop->post([node, done]() {
+        delete node;
+        done->set_value();
+    });
+    future.wait();
+}
+
+struct DestroyOnOwnerThread
+{
+    void operator()(Node* node) const { destroyOnOwnerThread(node); }
+};
+
+template <typename T>
+using OwnerThreadNode = std::unique_ptr<T, DestroyOnOwnerThread>;
 
 struct WorkerCapture
 {
@@ -431,14 +462,14 @@ TEST_F(MySqlDatabaseTest, ThreadLocalManagerReusesConnectionOnSameWorker)
 
     MySqlDatabaseManager manager(testOptions());
 
-    WorkerNode node;
-    ASSERT_TRUE(node.moveToThread(workerIds.front()));
+    OwnerThreadNode<WorkerNode> node(new WorkerNode());
+    ASSERT_TRUE(node->moveToThread(workerIds.front()));
 
-    const WorkerCapture first = captureCurrentWorkerDatabase(manager, node);
+    const WorkerCapture first = captureCurrentWorkerDatabase(manager, *node);
     ASSERT_TRUE(first.ok) << first.error;
     ASSERT_NE(first.database, nullptr);
 
-    const WorkerCapture second = captureCurrentWorkerDatabase(manager, node);
+    const WorkerCapture second = captureCurrentWorkerDatabase(manager, *node);
     ASSERT_TRUE(second.ok) << second.error;
     ASSERT_NE(second.database, nullptr);
 
@@ -464,17 +495,17 @@ TEST_F(MySqlDatabaseTest, ThreadLocalManagerCreatesIndependentConnectionsPerWork
 
     MySqlDatabaseManager manager(testOptions());
 
-    WorkerNode firstNode;
-    WorkerNode secondNode;
+    OwnerThreadNode<WorkerNode> firstNode(new WorkerNode());
+    OwnerThreadNode<WorkerNode> secondNode(new WorkerNode());
 
-    ASSERT_TRUE(firstNode.moveToThread(workerIds[0]));
-    ASSERT_TRUE(secondNode.moveToThread(workerIds[1]));
+    ASSERT_TRUE(firstNode->moveToThread(workerIds[0]));
+    ASSERT_TRUE(secondNode->moveToThread(workerIds[1]));
 
-    const WorkerCapture first = captureCurrentWorkerDatabase(manager, firstNode);
+    const WorkerCapture first = captureCurrentWorkerDatabase(manager, *firstNode);
     ASSERT_TRUE(first.ok) << first.error;
     ASSERT_NE(first.database, nullptr);
 
-    const WorkerCapture second = captureCurrentWorkerDatabase(manager, secondNode);
+    const WorkerCapture second = captureCurrentWorkerDatabase(manager, *secondNode);
     ASSERT_TRUE(second.ok) << second.error;
     ASSERT_NE(second.database, nullptr);
 
@@ -498,13 +529,13 @@ TEST_F(MySqlDatabaseTest, SqlTableModelCanUseThreadLocalManagerOnWorker)
 
     MySqlDatabaseManager manager(testOptions());
 
-    WorkerNode node;
-    ASSERT_TRUE(node.moveToThread(workerIds.front()));
+    OwnerThreadNode<WorkerNode> node(new WorkerNode());
+    ASSERT_TRUE(node->moveToThread(workerIds.front()));
 
     auto promise = std::make_shared<std::promise<WorkerCapture>>();
     std::future<WorkerCapture> future = promise->get_future();
 
-    node.ownerEventLoop()->post([&manager, promise]() {
+    node->ownerEventLoop()->post([&manager, promise]() {
         WorkerCapture capture;
         capture.threadId = std::this_thread::get_id();
 
@@ -558,7 +589,8 @@ TEST_F(MySqlDatabaseTest, UserLevelSignalFlowRunsQueryOnWorkerAndReturnsDataToMa
     MySqlDatabaseManager manager(testOptions());
     EXPECT_FALSE(manager.isOpen());
 
-    auto* doSomeSql = new DoSomeSql(manager);
+    OwnerThreadNode<DoSomeSql> doSomeSqlOwner(new DoSomeSql(manager));
+    DoSomeSql* doSomeSql = doSomeSqlOwner.get();
     auto* receiver = new PetitionResultReceiver();
 
     doSomeSql->dataReady.connect(
@@ -588,5 +620,5 @@ TEST_F(MySqlDatabaseTest, UserLevelSignalFlowRunsQueryOnWorkerAndReturnsDataToMa
     EXPECT_FALSE(manager.isOpen());
 
     delete receiver;
-    delete doSomeSql;
+    // doSomeSql lives on the worker: destroyed there by doSomeSqlOwner.
 }

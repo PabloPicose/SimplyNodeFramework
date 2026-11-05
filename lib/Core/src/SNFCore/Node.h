@@ -32,8 +32,14 @@ class ThreadPool;
  * supported only for leaf nodes that are never passed to `addChild()` and
  * never call `deleteLater()`.
  *
- * Each node is bound to the thread on which it was constructed. Use
- * `ownerEventLoop()` to post work back to that thread.
+ * Each node is bound to the thread on which it was constructed (or to the
+ * thread it was moved to with `moveToThread()`). Use `ownerEventLoop()` to
+ * post work back to that thread.
+ *
+ * A node must only be destroyed on its owner thread. From any other thread
+ * use `deleteLater()`. Destroying it elsewhere is only safe once the owner
+ * EventLoop has stopped; in Debug builds `~Node()` warns on `stderr` if a node
+ * is destroyed from a foreign thread while its owner loop is running.
  *
  * Subclasses must implement `update()`, which is called once per event-loop
  * iteration by `run()`.

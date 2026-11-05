@@ -157,6 +157,14 @@ public:
     /** @brief Returns the ID of the thread that owns this EventLoop. */
     std::thread::id ownerThreadId() const noexcept;
 
+    /**
+     * @brief Returns `true` while the owner thread is inside run().
+     *
+     * Used to detect nodes destroyed from a foreign thread while their owner
+     * loop may be ticking them.
+     */
+    bool isRunning() const noexcept;
+
     /** @brief Returns the number of nodes pending deferred deletion. */
     std::size_t pendingDeleteCount() const;
 
@@ -225,6 +233,7 @@ private:
     bool m_ioThreadStarted = false;
     std::atomic_bool m_ioThreadStop{false};
     bool m_stop = false;
+    std::atomic_bool m_running{false};
     const std::thread::id m_owner;
     TimeLapse* m_timeLapse = nullptr;
 };
