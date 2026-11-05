@@ -160,6 +160,8 @@ public:
 
 protected:
     void update() override;
+    void onAboutToMoveToThread(EventLoop* newLoop) override;
+    void onMovedToThread(EventLoop* oldLoop) override;
 
 private:
     friend class EventLoop;
@@ -171,6 +173,9 @@ private:
     bool m_singleShot = false;
     bool m_active = false;
     std::uint64_t m_generation = 0;
+    // Deadline of the currently scheduled timeout; used to re-arm the timer
+    // on the new EventLoop when the node migrates to another thread.
+    std::chrono::steady_clock::time_point m_deadline{};
 };
 
 }  // namespace snf

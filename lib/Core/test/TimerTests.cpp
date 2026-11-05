@@ -1,11 +1,16 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
+#include <future>
+#include <memory>
 #include <thread>
 #include <vector>
 
 #include "SNFCore/Application.h"
 #include "SNFCore/Connection.h"
+#include "SNFCore/EventLoop.h"
+#include "SNFCore/ThreadPool.h"
 #include "SNFCore/Timer.h"
 
 using namespace snf;
@@ -26,6 +31,28 @@ public:
 
     Application* app = nullptr;
 };
+
+class PlainNode final : public Node
+{
+public:
+    explicit PlainNode(Node* parent = nullptr) : Node(parent) {}
+
+protected:
+    void update() override {}
+};
+
+// Runs @p fn on @p loop's thread and waits for it to finish.
+template <typename Fn>
+bool runOnLoop(EventLoop* loop, Fn fn, std::chrono::milliseconds timeout = 1000ms)
+{
+    auto done = std::make_shared<std::promise<void>>();
+    std::future<void> future = done->get_future();
+    loop->post([fn, done]() mutable {
+        fn();
+        done->set_value();
+    });
+    return future.wait_for(timeout) == std::future_status::ready;
+}
 
 }  // namespace
 
@@ -347,4 +374,131 @@ TEST_F(TimerFixture, startWithoutArgumentsFromForeignThreadUsesConfiguredInterva
     EXPECT_EQ(timeoutCount, 1);
     EXPECT_EQ(callbackThread, timer.ownerThreadId());
     EXPECT_FALSE(timer.isActive());
+}
+
+// ---- Migration of active timers (moveToThread) ----
+
+TEST_F(TimerFixture, activeTimerFiresOnNewThreadAfterMigration)
+{
+    auto* timer = new Timer();
+    EventLoop* oldLoop = timer->ownerEventLoop();
+
+    auto fired = std::make_shared<std::promise<std::thread::id>>();
+    std::future<std::thread::id> firedFuture = fired->get_future();
+    timer->timeout.connect([fired]() { fired->set_value(std::this_thread::get_id()); });
+
+    timer->setSingleShot(true);
+    timer->start(30ms);
+    ASSERT_TRUE(timer->moveToThreadPool());
+
+    EventLoop* newLoop = timer->ownerEventLoop();
+    ASSERT_NE(newLoop, oldLoop);
+
+    // The pending timeout must have moved with the timer.
+    EXPECT_EQ(oldLoop->activeTimerCount(), 0u);
+
+    ASSERT_EQ(firedFuture.wait_for(1s), std::future_status::ready);
+    EXPECT_EQ(firedFuture.get(), newLoop->ownerThreadId());
+
+    ASSERT_TRUE(runOnLoop(newLoop, [timer]() { delete timer; }));
+}
+
+TEST_F(TimerFixture, repeatingTimerKeepsFiringOnNewThreadAfterMigration)
+{
+    auto* timer = new Timer();
+    EventLoop* oldLoop = timer->ownerEventLoop();
+
+    std::atomic<int> firedOnNewThread{0};
+    std::atomic<int> firedElsewhere{0};
+    std::atomic<std::thread::id> expectedThread{};
+    timer->timeout.connect([&]() {
+        if (std::this_thread::get_id() == expectedThread.load()) {
+            ++firedOnNewThread;
+        } else {
+            ++firedElsewhere;
+        }
+    });
+
+    timer->start(10ms);
+    ASSERT_TRUE(timer->moveToThreadPool());
+    EventLoop* newLoop = timer->ownerEventLoop();
+    expectedThread.store(newLoop->ownerThreadId());
+
+    const auto deadline = std::chrono::steady_clock::now() + 1s;
+    while (firedOnNewThread.load() < 3 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(5ms);
+    }
+
+    // Give the old loop a chance to fire anything it might still hold.
+    oldLoop->runPendingWork();
+
+    EXPECT_GE(firedOnNewThread.load(), 3);
+    EXPECT_EQ(firedElsewhere.load(), 0);
+
+    ASSERT_TRUE(runOnLoop(newLoop, [timer]() { delete timer; }));
+}
+
+TEST_F(TimerFixture, stopAfterMigrationPreventsTimeoutOnOldThread)
+{
+    auto* timer = new Timer();
+    EventLoop* oldLoop = timer->ownerEventLoop();
+
+    std::atomic<int> timeoutCount{0};
+    timer->timeout.connect([&]() { ++timeoutCount; });
+
+    timer->start(20ms);
+    ASSERT_TRUE(timer->moveToThreadPool());
+    EventLoop* newLoop = timer->ownerEventLoop();
+
+    // Stop on the new owner thread before the first deadline.
+    ASSERT_TRUE(runOnLoop(newLoop, [timer]() { timer->stop(); }));
+
+    std::this_thread::sleep_for(60ms);
+    oldLoop->runPendingWork();
+
+    EXPECT_EQ(timeoutCount.load(), 0);
+    EXPECT_EQ(oldLoop->activeTimerCount(), 0u);
+    EXPECT_EQ(newLoop->activeTimerCount(), 0u);
+
+    ASSERT_TRUE(runOnLoop(newLoop, [timer]() { delete timer; }));
+}
+
+TEST_F(TimerFixture, destroyingMigratedTimerLeavesNoEntryInOldLoop)
+{
+    auto* timer = new Timer();
+    EventLoop* oldLoop = timer->ownerEventLoop();
+
+    timer->start(1s);
+    ASSERT_TRUE(timer->moveToThreadPool());
+    EventLoop* newLoop = timer->ownerEventLoop();
+
+    ASSERT_TRUE(runOnLoop(newLoop, [timer]() { delete timer; }));
+
+    // A leftover entry here would hold a dangling Timer*.
+    EXPECT_EQ(oldLoop->activeTimerCount(), 0u);
+    EXPECT_EQ(newLoop->activeTimerCount(), 0u);
+}
+
+TEST_F(TimerFixture, childTimerMigratesWithParentNode)
+{
+    auto* parent = new PlainNode();
+    auto* timer = new Timer(parent);
+    EventLoop* oldLoop = parent->ownerEventLoop();
+
+    auto fired = std::make_shared<std::promise<std::thread::id>>();
+    std::future<std::thread::id> firedFuture = fired->get_future();
+    timer->timeout.connect([fired]() { fired->set_value(std::this_thread::get_id()); });
+
+    timer->setSingleShot(true);
+    timer->start(30ms);
+    ASSERT_TRUE(parent->moveToThreadPool());
+
+    EventLoop* newLoop = parent->ownerEventLoop();
+    EXPECT_EQ(timer->ownerEventLoop(), newLoop);
+    EXPECT_EQ(oldLoop->activeTimerCount(), 0u);
+
+    ASSERT_EQ(firedFuture.wait_for(1s), std::future_status::ready);
+    EXPECT_EQ(firedFuture.get(), newLoop->ownerThreadId());
+
+    ASSERT_TRUE(runOnLoop(newLoop, [parent]() { delete parent; }));
 }

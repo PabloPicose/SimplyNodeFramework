@@ -45,16 +45,19 @@ void Timer::start()
 
     Duration nextInterval;
     std::uint64_t generation = 0;
+    std::chrono::steady_clock::time_point deadline;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         nextInterval = sanitizeInterval(m_interval);
         m_interval = nextInterval;
         m_active = true;
         generation = ++m_generation;
+        deadline = std::chrono::steady_clock::now() + nextInterval;
+        m_deadline = deadline;
     }
 
     if (EventLoop* loop = ownerEventLoop()) {
-        loop->scheduleTimer(this, std::chrono::steady_clock::now() + nextInterval, generation);
+        loop->scheduleTimer(this, deadline, generation);
     }
 }
 
@@ -71,15 +74,18 @@ void Timer::start(Duration interval)
 
     const Duration nextInterval = sanitizeInterval(interval);
     std::uint64_t generation = 0;
+    std::chrono::steady_clock::time_point deadline;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_interval = nextInterval;
         m_active = true;
         generation = ++m_generation;
+        deadline = std::chrono::steady_clock::now() + nextInterval;
+        m_deadline = deadline;
     }
 
     if (EventLoop* loop = ownerEventLoop()) {
-        loop->scheduleTimer(this, std::chrono::steady_clock::now() + nextInterval, generation);
+        loop->scheduleTimer(this, deadline, generation);
     }
 }
 
@@ -121,18 +127,21 @@ void Timer::setInterval(Duration interval)
     const Duration nextInterval = sanitizeInterval(interval);
     bool shouldReschedule = false;
     std::uint64_t generation = 0;
+    std::chrono::steady_clock::time_point deadline;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_interval = nextInterval;
         if (m_active) {
             shouldReschedule = true;
             generation = ++m_generation;
+            deadline = std::chrono::steady_clock::now() + nextInterval;
+            m_deadline = deadline;
         }
     }
 
     if (shouldReschedule) {
         if (EventLoop* loop = ownerEventLoop()) {
-            loop->scheduleTimer(this, std::chrono::steady_clock::now() + nextInterval, generation);
+            loop->scheduleTimer(this, deadline, generation);
         }
     }
 }
@@ -174,12 +183,43 @@ bool Timer::isActive() const
 
 void Timer::update() {}
 
+void Timer::onAboutToMoveToThread(EventLoop* /*newLoop*/)
+{
+    // The pending timeout lives in the old loop's timer list. Remove it so the
+    // old thread neither emits timeout nor keeps a pointer to this timer.
+    if (EventLoop* loop = ownerEventLoop()) {
+        loop->cancelTimer(this);
+    }
+}
+
+void Timer::onMovedToThread(EventLoop* /*oldLoop*/)
+{
+    // ownerEventLoop() already points to the new loop. Re-arm with the same
+    // deadline and generation so the remaining time is preserved.
+    bool active = false;
+    std::chrono::steady_clock::time_point deadline;
+    std::uint64_t generation = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        active = m_active;
+        deadline = m_deadline;
+        generation = m_generation;
+    }
+
+    if (active) {
+        if (EventLoop* loop = ownerEventLoop()) {
+            loop->scheduleTimer(this, deadline, generation);
+        }
+    }
+}
+
 void Timer::dispatchTimeout(std::uint64_t generation)
 {
     bool shouldEmit = false;
     bool shouldReschedule = false;
     Duration nextInterval = Duration::zero();
     std::uint64_t nextGeneration = 0;
+    std::chrono::steady_clock::time_point nextDeadline;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         if (! m_active || generation != m_generation) {
@@ -194,12 +234,14 @@ void Timer::dispatchTimeout(std::uint64_t generation)
             nextInterval = sanitizeInterval(m_interval);
             shouldReschedule = true;
             nextGeneration = ++m_generation;
+            nextDeadline = std::chrono::steady_clock::now() + nextInterval;
+            m_deadline = nextDeadline;
         }
     }
 
     if (shouldReschedule) {
         if (EventLoop* loop = ownerEventLoop()) {
-            loop->scheduleTimer(this, std::chrono::steady_clock::now() + nextInterval, nextGeneration);
+            loop->scheduleTimer(this, nextDeadline, nextGeneration);
         }
     }
 
