@@ -205,10 +205,12 @@ void EventLoop::run()
 
 void EventLoop::stop()
 {
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_stop = true;
-    }
+    // Wake the loop while still holding m_mutex. As soon as the owner thread
+    // can observe m_stop it may leave run() and destroy this EventLoop (e.g. a
+    // ThreadPool worker with a standalone loop), so nothing in this object may
+    // be touched after the lock is released.
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_stop = true;
     m_ioPoller->wakeUp();
     m_condition.notify_all();
 }

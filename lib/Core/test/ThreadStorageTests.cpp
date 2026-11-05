@@ -274,7 +274,9 @@ TEST(ThreadStorageTests, concurrentAccessFromManyThreadsIsCorrect)
     snf::ThreadStorage<int> storage;
 
     constexpr int kThreadCount = 16;
-    std::vector<bool> ok(kThreadCount, false);
+    // Not std::vector<bool>: it packs elements into shared words, so writing
+    // ok[i] from different threads would be a data race.
+    std::vector<char> ok(kThreadCount, 0);
     std::vector<std::thread> threads;
     threads.reserve(kThreadCount);
 

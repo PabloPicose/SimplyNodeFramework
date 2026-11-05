@@ -138,3 +138,15 @@ TEST(ThreadPoolTests, twoThreadPoolDoesNotRunMoreThanTwoTasksConcurrently)
         EXPECT_TRUE(expectedWorkers.count(workerThread) > 0);
     }
 }
+
+TEST(ThreadPoolTests, shutdownWithoutApplicationDoesNotTouchDestroyedWorkerLoops)
+{
+    // Without an Application each worker owns a standalone EventLoop that is
+    // destroyed as soon as run() returns. shutdown() must not touch a worker
+    // loop after the worker can observe the stop request (checked under
+    // ThreadSanitizer / AddressSanitizer).
+    for (int i = 0; i < 100; ++i) {
+        snf::ThreadPool pool(4);
+        ASSERT_EQ(pool.workerThreadIds().size(), 4U);
+    }
+}
