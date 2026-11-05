@@ -70,6 +70,20 @@ public:
     bool isBlocking() const;
 
     /**
+     * @brief Sets whether `bind()` enables `SO_REUSEADDR` on the socket.
+     *
+     * Off by default, so binding an address and port already in use fails. Turn it on before `bind()` only when
+     * several sockets must share the port (for example, several multicast listeners). On Linux, two UDP sockets
+     * that both enable it can bind the same address and port, and unicast datagrams then reach only the last one.
+     *
+     * Takes effect on the next `bind()`; it does not change a socket that is already bound.
+     */
+    void setReuseAddress(bool reuse);
+
+    /** @brief Returns `true` if `bind()` enables `SO_REUSEADDR`. Default: `false`. */
+    bool reuseAddress() const;
+
+    /**
      * @brief Binds the socket to @p hostAddress on @p port.
      *
      * After binding successfully, the socket is in the `Bound` state and ready
@@ -173,6 +187,7 @@ private:
 private:
     mutable std::mutex m_mutex;
     bool m_blocking = false;
+    bool m_reuseAddress = false;
     UdpSocketState m_state = UdpSocketState::Unbound;
     std::uint16_t m_boundPort = 0;
     std::queue<NetworkDatagram> m_pendingDatagrams;

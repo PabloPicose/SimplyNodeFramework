@@ -104,6 +104,95 @@ TEST_F(UdpSocketFixture, bindSpecificPortSucceeds)
     EXPECT_FALSE(hasError);
 }
 
+// SO_REUSEADDR is off by default: on Linux it lets two UDP sockets bind the same address and port, and unicast
+// datagrams then go only to the last one.
+TEST_F(UdpSocketFixture, reuseAddressIsOffByDefault)
+{
+    UdpSocket socket;
+    EXPECT_FALSE(socket.reuseAddress());
+}
+
+TEST_F(UdpSocketFixture, bindToPortInUseFails)
+{
+    UdpSocket first;
+    ASSERT_TRUE(first.bind(HostAddress::LocalHost, 0));
+    const std::uint16_t port = first.boundPort();
+    ASSERT_GT(port, 0);
+
+    UdpSocket second;
+    std::string errorText;
+    second.errorOccurred.connect([&](const std::string& error) { errorText = error; });
+
+    const bool ok = second.bind(HostAddress::LocalHost, port);
+
+    Timer shutdown;
+    armShutdown(shutdown, 50ms);
+    app->run();
+
+    EXPECT_FALSE(ok);
+    EXPECT_EQ(second.state(), UdpSocketState::Error);
+    EXPECT_FALSE(errorText.empty());
+    EXPECT_EQ(first.state(), UdpSocketState::Bound);
+    EXPECT_EQ(first.boundPort(), port);
+}
+
+TEST_F(UdpSocketFixture, portInUseStillReceivesAfterFailedBind)
+{
+    UdpSocket receiver;
+    ASSERT_TRUE(receiver.bind(HostAddress::LocalHost, 0));
+    const std::uint16_t port = receiver.boundPort();
+
+    UdpSocket intruder;
+    EXPECT_FALSE(intruder.bind(HostAddress::LocalHost, port));
+
+    UdpSocket sender;
+    ASSERT_TRUE(sender.bind(HostAddress::LocalHost, 0));
+
+    std::string receivedPayload;
+    receiver.readyRead.connect([&]() {
+        while (receiver.hasPendingDatagram()) {
+            receivedPayload += receiver.pendingDatagram().data().toString();
+            if (EventLoop* loop = receiver.ownerEventLoop()) {
+                loop->post([loop]() { loop->stop(); });
+            }
+        }
+    });
+
+    sender.sendDatagram(std::string("still-mine"), HostAddress::LocalHost, port);
+
+    Timer shutdown;
+    armShutdown(shutdown, 2s);
+    app->run();
+
+    EXPECT_EQ(receivedPayload, "still-mine");
+}
+
+TEST_F(UdpSocketFixture, reuseAddressLetsTwoSocketsSharePort)
+{
+    UdpSocket first;
+    first.setReuseAddress(true);
+    EXPECT_TRUE(first.reuseAddress());
+    ASSERT_TRUE(first.bind(HostAddress::LocalHost, 0));
+    const std::uint16_t port = first.boundPort();
+
+    UdpSocket second;
+    second.setReuseAddress(true);
+    EXPECT_TRUE(second.bind(HostAddress::LocalHost, port));
+    EXPECT_EQ(second.state(), UdpSocketState::Bound);
+    EXPECT_EQ(second.boundPort(), port);
+}
+
+TEST_F(UdpSocketFixture, reuseAddressOnlyOnOneSideDoesNotSharePort)
+{
+    UdpSocket first;
+    first.setReuseAddress(true);
+    ASSERT_TRUE(first.bind(HostAddress::LocalHost, 0));
+    const std::uint16_t port = first.boundPort();
+
+    UdpSocket second;
+    EXPECT_FALSE(second.bind(HostAddress::LocalHost, port));
+}
+
 TEST_F(UdpSocketFixture, sendEmptyDatagramReturnsZero)
 {
     UdpSocket socket;

@@ -138,6 +138,18 @@ bool UdpSocket::isBlocking() const
     return m_blocking;
 }
 
+void UdpSocket::setReuseAddress(bool reuse)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_reuseAddress = reuse;
+}
+
+bool UdpSocket::reuseAddress() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_reuseAddress;
+}
+
 bool UdpSocket::bind(const HostAddress& hostAddress, std::uint16_t port)
 {
     if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
@@ -174,12 +186,14 @@ bool UdpSocket::bind(const HostAddress& hostAddress, std::uint16_t port)
             continue;
         }
 
-        // Allow reusing the address immediately after close
-        int reuse = 1;
-        if (::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-            lastError = errno;
-            ::close(fd);
-            continue;
+        // Only on request: with SO_REUSEADDR, Linux lets two UDP sockets bind the same address and port.
+        if (reuseAddress()) {
+            int reuse = 1;
+            if (::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
+                lastError = errno;
+                ::close(fd);
+                continue;
+            }
         }
 
         setDescriptor(fd);
