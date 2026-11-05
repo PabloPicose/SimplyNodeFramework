@@ -15,6 +15,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <memory>
 
 namespace snf {
 
@@ -81,23 +82,44 @@ bool invokeOnOwnerThreadAndWait(EventLoop* loop, Fn&& fn, bool fallback = false)
         return fallback;
     }
 
-    std::mutex m;
-    std::condition_variable cv;
-    bool done = false;
-    bool result = fallback;
+    // Shared with the posted task, which may outlive this call: if the owner
+    // loop does not pick the task up in time we return and the task, when it
+    // eventually runs, must not touch this stack frame.
+    struct State {
+        std::mutex mutex;
+        std::condition_variable cv;
+        bool started = false;
+        bool done = false;
+        bool abandoned = false;
+        bool result = false;
+    };
+    auto state = std::make_shared<State>();
 
-    loop->post([&]() {
-        result = fn();
+    loop->post([state, fn = std::forward<Fn>(fn)]() mutable {
         {
-            std::lock_guard<std::mutex> lock(m);
-            done = true;
+            std::lock_guard<std::mutex> lock(state->mutex);
+            if (state->abandoned) {
+                // The caller already gave up and reported failure.
+                return;
+            }
+            state->started = true;
         }
-        cv.notify_one();
+        const bool result = fn();
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->result = result;
+        state->done = true;
+        state->cv.notify_one();
     });
 
-    std::unique_lock<std::mutex> lock(m);
-    const bool completed = cv.wait_for(lock, std::chrono::seconds(2), [&]() { return done; });
-    return completed ? result : fallback;
+    std::unique_lock<std::mutex> lock(state->mutex);
+    if (! state->cv.wait_for(lock, std::chrono::seconds(2), [&]() { return state->started || state->done; })) {
+        // Not started in time: drop the request so it is never applied later.
+        state->abandoned = true;
+        return fallback;
+    }
+    // Already running on the owner thread: wait for the real result.
+    state->cv.wait(lock, [&]() { return state->done; });
+    return state->result;
 }
 
 }  // namespace

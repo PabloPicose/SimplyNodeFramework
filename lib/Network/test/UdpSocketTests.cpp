@@ -495,6 +495,24 @@ TEST_F(UdpSocketFixture, bindFromDifferentThreadExecutesInOwnerLoop)
     EXPECT_GT(socket.boundPort(), 0);
 }
 
+TEST_F(UdpSocketFixture, bindFromDifferentThreadThatTimesOutIsNotAppliedLater)
+{
+    // The owner loop is not running, so a cross-thread bind() cannot complete
+    // and returns false after its timeout. The request must then be dropped:
+    // it must not run later, when the owner loop finally processes its queue.
+    UdpSocket socket;
+
+    bool bindOk = true;
+    std::thread worker([&]() { bindOk = socket.bind(HostAddress::LocalHost, 0); });
+    worker.join();
+
+    EXPECT_FALSE(bindOk);
+
+    app->loopOnce();
+
+    EXPECT_EQ(socket.state(), UdpSocketState::Unbound);
+}
+
 TEST_F(UdpSocketFixture, setBlockingFromDifferentThreadAppliesChange)
 {
     UdpSocket socket(false);
