@@ -17,6 +17,7 @@
 namespace snf {
 
 class EventLoop;
+class Executor;
 class ThreadPool;
 
 /**
@@ -136,6 +137,15 @@ public:
     EventLoop* ownerEventLoop() const;
 
     /**
+     * @brief Returns the Executor that owns this node.
+     *
+     * Queued and `Auto` deliveries, `deleteLater()` and asynchronous
+     * migrations run inside it. Today it is always the node's EventLoop
+     * (`ownerEventLoop()`). Lock-free and safe to call from any thread.
+     */
+    Executor* ownerExecutor() const;
+
+    /**
      * @brief Migrates this node and all its descendants to @p targetThreadId.
      *
      * If called from the owner thread the migration is applied immediately.
@@ -250,16 +260,21 @@ private:
     // itself to the current owner so the node is always destroyed on its
     // owner thread. Off the owner thread only @p block is read, never the
     // node, which the owner may destroy at any moment.
-    static void postDeleteToOwner(Node* node, std::shared_ptr<NodeLifetimeBlock> block, EventLoop* loop);
+    static void postDeleteToOwner(Node* node, std::shared_ptr<NodeLifetimeBlock> block, Executor* executor);
 
     // Same forwarding scheme for a migration requested off the owner thread.
     static void postMoveToOwner(Node* node,
                                 std::shared_ptr<NodeLifetimeBlock> block,
-                                EventLoop* loop,
+                                Executor* executor,
                                 EventLoop* targetLoop);
 
-    // Sets the owner loop; only on the owner thread (or during construction).
-    void setOwnerEventLoop(EventLoop* loop);
+    // Sets the owner; only from inside the owner (or during construction).
+    void setOwnerExecutor(Executor* executor);
+
+    // Debug builds: prints a warning if the node is being @p what (e.g.
+    // "destroyed") from outside its owner while the owner is running, which
+    // races with the owner touching the same node. No-op in release builds.
+    void warnIfTouchedOffOwner(const char* what, const char* hint) const;
 
     // Performs the actual recursive migration; must be called on owner thread.
     void applyMoveToThread(EventLoop* targetLoop);

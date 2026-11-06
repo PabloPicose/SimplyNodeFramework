@@ -276,6 +276,12 @@ the node stays there. Call it from the node's owner thread when moving many
 nodes in a row: called from another thread, the migration applies later and
 consecutive calls may pick the same worker.
 
+**Changing the tree from another thread**
+`setParent()` and constructing a node with a parent mutate the parent's list of
+children, so they must run on the owner thread of the nodes involved. In Debug
+builds a warning is printed when this happens from another thread while the
+owner loop is running (the same check as for destruction).
+
 **Moving a node that has a parent on a different thread**
 `moveToThread` only allows moving root nodes or complete subtrees. Moving a child
 whose parent lives on a different thread is rejected.

@@ -8,6 +8,7 @@
 #include "NodeRegistry.h"
 #include "SNFCore/Application.h"
 #include "SNFCore/EventLoop.h"
+#include "SNFCore/Executor.h"
 #include "SNFCore/NodePtr.h"
 #include "SNFCore/TaskPool.h"
 #include "SNFCore/ThreadPool.h"
@@ -20,17 +21,10 @@ Node::~Node()
     // is seen by any concurrent NodePtr::isAlive() check.
     m_lifetimeBlock->alive.store(false, std::memory_order_release);
 
-#ifndef NDEBUG
-    // Contract: a node is destroyed only on its owner thread (use
-    // deleteLater() from other threads). Destroying it elsewhere while the
-    // owner loop is running races with that loop ticking the node.
-    if (const EventLoop* owner = ownerEventLoop(); owner && ! owner->isInThisThread() && owner->isRunning()) {
-        std::cerr << "snf::Node: node '" << m_name
-                  << "' destroyed from a thread other than its owner while the owner EventLoop is running;"
-                     " use deleteLater() from other threads"
-                  << std::endl;
-    }
-#endif
+    // Contract: a node is destroyed only inside its owner (use deleteLater()
+    // from other threads). Destroying it elsewhere while the owner is running
+    // races with the owner ticking the node.
+    warnIfTouchedOffOwner("destroyed", "use deleteLater() from other threads");
 
     // Remove from the global registry so that NodePtr(raw_ptr) constructed
     // after this point correctly gets a null/dead block without dereferencing
@@ -117,59 +111,59 @@ void Node::deleteLater()
     // deletion without taking a lock.
     m_lifetimeBlock->markedForDelete.store(true, std::memory_order_release);
 
-    EventLoop* const ownerLoop = ownerEventLoop();
-    if (ownerLoop && ! ownerLoop->isInThisThread()) {
-        // Mark before handing the delete over: once posted, the owner thread
-        // may destroy the node at any moment, so `this` must not be touched
+    Executor* const owner = ownerExecutor();
+    if (owner && ! owner->isCurrent()) {
+        // Mark before handing the delete over: once posted, the owner may
+        // destroy the node at any moment, so `this` must not be touched
         // after postDeleteToOwner().
         app->markToDelete(this);
-        postDeleteToOwner(this, m_lifetimeBlock, ownerLoop);
+        postDeleteToOwner(this, m_lifetimeBlock, owner);
         return;
     }
 
     app->markToDelete(this);
     if (m_parent) {
         m_parent->pushDeleteChild(this);
-    } else if (ownerLoop) {
-        ownerLoop->enqueueDelete(this);
+    } else if (owner) {
+        owner->enqueueDelete(this);
     } else {
         throw std::runtime_error("Node owner EventLoop does not exist");
     }
 }
 
-void Node::postDeleteToOwner(Node* node, std::shared_ptr<NodeLifetimeBlock> block, EventLoop* loop)
+void Node::postDeleteToOwner(Node* node, std::shared_ptr<NodeLifetimeBlock> block, Executor* executor)
 {
-    loop->post([loop, node, block = std::move(block)]() {
+    executor->post([executor, node, block = std::move(block)]() {
         if (! block->alive.load(std::memory_order_acquire)) {
             return;
         }
-        EventLoop* owner = block->ownerLoop.load(std::memory_order_acquire);
-        if (owner && owner != loop) {
+        Executor* owner = block->owner.load(std::memory_order_acquire);
+        if (owner && owner != executor) {
             // The node migrated after deleteLater() was requested.
             postDeleteToOwner(node, block, owner);
             return;
         }
-        loop->enqueueDelete(node);
+        executor->enqueueDelete(node);
     });
 }
 
 void Node::postMoveToOwner(Node* node,
                            std::shared_ptr<NodeLifetimeBlock> block,
-                           EventLoop* loop,
+                           Executor* executor,
                            EventLoop* targetLoop)
 {
-    loop->post([node, block = std::move(block), loop, targetLoop]() {
+    executor->post([node, block = std::move(block), executor, targetLoop]() {
         if (! block->alive.load(std::memory_order_acquire)) {
             return;
         }
-        EventLoop* owner = block->ownerLoop.load(std::memory_order_acquire);
-        if (owner && owner != loop) {
+        Executor* owner = block->owner.load(std::memory_order_acquire);
+        if (owner && owner != executor) {
             // The node migrated again before this request ran: apply it on
             // the current owner instead.
             postMoveToOwner(node, block, owner, targetLoop);
             return;
         }
-        // On the owner thread from here on. The preconditions were checked on
+        // Inside the owner from here on. The preconditions were checked on
         // the calling thread; the node may have been re-parented since then.
         // Never split a child from its parent.
         if (node->m_parent && node->m_parent->ownerEventLoop() != targetLoop) {
@@ -206,6 +200,11 @@ void Node::run()
 
 void Node::setParent(Node* parent)
 {
+    warnIfTouchedOffOwner("re-parented", "change the tree inside the node's owner");
+    if (parent) {
+        parent->warnIfTouchedOffOwner("given a child", "change the tree inside the parent's owner");
+    }
+
     if (m_parent) {
         for (auto it = m_parent->m_children.begin(); it != m_parent->m_children.end(); ++it) {
             if (*it == this) {
@@ -244,9 +243,29 @@ std::thread::id Node::ownerThreadId() const
 
 std::thread::id Node::threadId() const { return ownerThreadId(); }
 
-EventLoop* Node::ownerEventLoop() const { return m_lifetimeBlock->ownerLoop.load(std::memory_order_acquire); }
+Executor* Node::ownerExecutor() const { return m_lifetimeBlock->owner.load(std::memory_order_acquire); }
 
-void Node::setOwnerEventLoop(EventLoop* loop) { m_lifetimeBlock->ownerLoop.store(loop, std::memory_order_release); }
+EventLoop* Node::ownerEventLoop() const
+{
+    Executor* executor = ownerExecutor();
+    return executor ? executor->eventLoop() : nullptr;
+}
+
+void Node::setOwnerExecutor(Executor* executor) { m_lifetimeBlock->owner.store(executor, std::memory_order_release); }
+
+void Node::warnIfTouchedOffOwner(const char* what, const char* hint) const
+{
+#ifndef NDEBUG
+    const Executor* owner = ownerExecutor();
+    if (owner && ! owner->isCurrent() && owner->isActive()) {
+        std::cerr << "snf::Node: node '" << m_name << "' " << what
+                  << " from a thread other than its owner while the owner is running; " << hint << std::endl;
+    }
+#else
+    (void)what;
+    (void)hint;
+#endif
+}
 
 std::uint64_t Node::generation() const { return m_generation; }
 
@@ -276,12 +295,13 @@ Node::Node(Node* parent) : m_parent(parent)
 
     EventLoop* ownerLoop = nullptr;
     if (m_parent) {
+        m_parent->warnIfTouchedOffOwner("given a child", "create children inside the parent's owner");
+        setOwnerExecutor(m_parent->ownerExecutor());
         ownerLoop = m_parent->ownerEventLoop();
-        setOwnerEventLoop(ownerLoop);
         m_parent->addChild(this);
     } else {
         ownerLoop = app->getOrCreateCurrentThreadEventLoop();
-        setOwnerEventLoop(ownerLoop);
+        setOwnerExecutor(ownerLoop);
         m_isRoot = true;
         ownerLoop->addRootNode(this);
     }
@@ -333,8 +353,8 @@ bool Node::moveToThread(std::thread::id targetThreadId)
         return false;
     }
 
-    EventLoop* currentLoop = ownerEventLoop();
-    if (! currentLoop) {
+    Executor* currentOwner = ownerExecutor();
+    if (! currentOwner) {
         return false;
     }
 
@@ -344,15 +364,15 @@ bool Node::moveToThread(std::thread::id targetThreadId)
         return false;
     }
 
-    if (currentLoop->isInThisThread()) {
+    if (currentOwner->isCurrent()) {
         // Synchronous path: execute migration immediately.
         applyMoveToThread(targetLoop);
         return true;
     }
 
-    // Asynchronous path: post to the current owner thread (forwarded if the
-    // node migrates again before the request runs).
-    postMoveToOwner(this, m_lifetimeBlock, currentLoop, targetLoop);
+    // Asynchronous path: post to the current owner (forwarded if the node
+    // migrates again before the request runs).
+    postMoveToOwner(this, m_lifetimeBlock, currentOwner, targetLoop);
     return true;
 }
 
@@ -403,7 +423,7 @@ void Node::applyMoveToThread(EventLoop* targetLoop)
         }
     }
 
-    setOwnerEventLoop(targetLoop);
+    setOwnerExecutor(targetLoop);
 
     targetLoop->addNode(this);
     if (m_isRoot) {

@@ -53,6 +53,7 @@ target_sources(SNFCore
             "${SNFCORE_DIR}/Timer.h"
             "${SNFCORE_DIR}/TimeLapse.h"
             "${SNFCORE_DIR}/EventLoop.h"
+            "${SNFCORE_DIR}/Executor.h"
             "${SNFCORE_DIR}/Connection.h"
             "${SNFCORE_DIR}/Runnable.h"
             "${SNFCORE_DIR}/ThreadPool.h"

@@ -7,6 +7,7 @@
  */
 
 #include <SNFCore/Application.h>
+#include <SNFCore/Executor.h>
 #include <SNFCore/Node.h>
 #include <SNFCore/NodeLifetimeBlock.h>
 
@@ -93,14 +94,27 @@ public:
     }
 
     /**
-     * @brief Returns the owner EventLoop recorded in the control block.
+     * @brief Returns the owner Executor recorded in the control block.
      *
      * Lock-free and safe from any thread, even after the node is destroyed
      * (it then returns the last owner). Returns `nullptr` for a null pointer.
      */
+    Executor* ownerExecutor() const
+    {
+        return m_block ? m_block->owner.load(std::memory_order_acquire) : nullptr;
+    }
+
+    /**
+     * @brief Returns the owner as an EventLoop, or `nullptr` if the owner is
+     *        not an EventLoop (or for a null pointer).
+     *
+     * Unlike ownerExecutor() this asks the executor itself, so the executor
+     * must still exist (EventLoops live as long as the Application).
+     */
     EventLoop* ownerEventLoop() const
     {
-        return m_block ? m_block->ownerLoop.load(std::memory_order_acquire) : nullptr;
+        Executor* executor = ownerExecutor();
+        return executor ? executor->eventLoop() : nullptr;
     }
 
     /**

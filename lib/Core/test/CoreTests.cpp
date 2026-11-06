@@ -13,6 +13,7 @@
 
 #include "SNFCore/Application.h"
 #include "SNFCore/EventLoop.h"
+#include "SNFCore/Executor.h"
 #include "SNFCore/Node.h"
 #include "SNFCore/NodePtr.h"
 #include "SNFCore/ThreadPool.h"
@@ -2556,6 +2557,232 @@ TEST_F(CoreFixture, asyncMoveToThreadIsDroppedIfTargetPoolShutsDownBeforeItAppli
     EXPECT_EQ(node->ownerEventLoop(), mainLoop);
 
     delete node;
+}
+
+// ---- Phase 2: Executor abstraction and the debug affinity checker ----
+
+TEST_F(CoreFixture, eventLoopIsTheExecutorOfItsNodes)
+{
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerId);
+    ASSERT_NE(workerLoop, nullptr);
+
+    auto* node = new TestNode();
+    EventLoop* mainLoop = node->ownerEventLoop();
+    Executor* mainExecutor = mainLoop;
+
+    EXPECT_EQ(node->ownerExecutor(), mainExecutor);
+    EXPECT_EQ(mainExecutor->eventLoop(), mainLoop);
+    EXPECT_TRUE(mainExecutor->isCurrent());
+    EXPECT_FALSE(mainExecutor->isRetired());
+
+    ASSERT_TRUE(node->moveToThread(workerId));
+    EXPECT_EQ(node->ownerExecutor(), static_cast<Executor*>(workerLoop));
+    EXPECT_FALSE(node->ownerExecutor()->isCurrent());  // main is not the worker
+    EXPECT_TRUE(node->ownerExecutor()->isActive());    // the worker loop is running
+
+    ASSERT_TRUE(runOnLoopAndWait(workerLoop, [node]() { delete node; }));
+}
+
+TEST_F(CoreFixture, executorPostAndCurrentAreConsistentOnTheOwnerThread)
+{
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+    Executor* executor = Application::instance()->getEventLoopByThreadId(workerId);
+    ASSERT_NE(executor, nullptr);
+
+    auto result = std::make_shared<std::promise<std::pair<std::thread::id, bool>>>();
+    auto future = result->get_future();
+    executor->post([executor, result]() { result->set_value({std::this_thread::get_id(), executor->isCurrent()}); });
+
+    ASSERT_EQ(future.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+    const auto [ranOn, wasCurrent] = future.get();
+    EXPECT_EQ(ranOn, workerId);
+    EXPECT_TRUE(wasCurrent);
+    EXPECT_FALSE(executor->isCurrent());
+}
+
+TEST_F(CoreFixture, executorOfAShutDownPoolIsRetiredAndInactive)
+{
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+    Executor* executor = Application::instance()->getEventLoopByThreadId(workerId);
+    ASSERT_NE(executor, nullptr);
+    EXPECT_TRUE(executor->isActive());
+
+    pool.shutdown();
+
+    EXPECT_TRUE(executor->isRetired());
+    EXPECT_FALSE(executor->isActive());
+}
+
+TEST_F(CoreFixture, nodePtrReportsTheLastOwnerExecutorAfterTheNodeIsDestroyed)
+{
+    auto* node = new TestNode();
+    Executor* owner = node->ownerExecutor();
+    NodePtr<TestNode> ptr(node);
+
+    delete node;
+
+    EXPECT_FALSE(ptr);
+    EXPECT_EQ(ptr.ownerExecutor(), owner);
+    EXPECT_EQ(ptr.ownerEventLoop(), owner->eventLoop());
+    EXPECT_EQ(NodePtr<TestNode>(nullptr).ownerExecutor(), nullptr);
+}
+
+TEST_F(CoreFixture, deleteLaterThroughTheExecutorDestroysOnTheOwnerThread)
+{
+    using namespace std::chrono_literals;
+
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+
+    auto record = std::make_shared<DestructionThreadNode::Record>();
+    auto* node = new DestructionThreadNode(record);
+    ASSERT_TRUE(node->moveToThread(workerId));
+
+    node->deleteLater();  // from main: forwarded to the worker's executor
+
+    std::unique_lock<std::mutex> lock(record->mutex);
+    ASSERT_TRUE(record->cv.wait_for(lock, 1s, [&]() { return record->destroyed > 0; }));
+    EXPECT_EQ(record->destroyedOn, workerId);
+}
+
+namespace {
+constexpr const char* kForeignAffinityWarning = "from a thread other than its owner";
+
+// Moves @p node to @p workerLoop's thread and parks that loop inside a task,
+// so the loop counts as running while the test touches the node from main.
+// The returned promise releases the worker.
+std::shared_ptr<std::promise<void>> parkWorker(EventLoop* workerLoop)
+{
+    auto parked = std::make_shared<std::promise<void>>();
+    auto release = std::make_shared<std::promise<void>>();
+    std::shared_future<void> released = release->get_future().share();
+    workerLoop->post([parked, released]() {
+        parked->set_value();
+        released.wait();
+    });
+    parked->get_future().wait();
+    return release;
+}
+}  // namespace
+
+TEST_F(CoreFixture, creatingAChildOfANodeOwnedByAnotherRunningThreadWarnsInDebug)
+{
+#ifdef NDEBUG
+    GTEST_SKIP() << "The warning is only emitted in Debug builds";
+#endif
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerId);
+    ASSERT_NE(workerLoop, nullptr);
+
+    auto* parent = new TestNode();
+    ASSERT_TRUE(parent->moveToThread(workerId));
+    auto release = parkWorker(workerLoop);
+
+    testing::internal::CaptureStderr();
+    new TestNode(parent);  // mutates parent's children from main
+    const std::string output = testing::internal::GetCapturedStderr();
+    release->set_value();
+
+    EXPECT_NE(output.find(kForeignAffinityWarning), std::string::npos) << output;
+    ASSERT_TRUE(runOnLoopAndWait(workerLoop, [parent]() { delete parent; }));
+}
+
+TEST_F(CoreFixture, setParentFromAnotherThreadWhileOwnerRunsWarnsInDebug)
+{
+#ifdef NDEBUG
+    GTEST_SKIP() << "The warning is only emitted in Debug builds";
+#endif
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerId);
+    ASSERT_NE(workerLoop, nullptr);
+
+    auto* parent = new TestNode();
+    auto* child = new TestNode(parent);
+    ASSERT_TRUE(parent->moveToThread(workerId));
+    auto release = parkWorker(workerLoop);
+
+    testing::internal::CaptureStderr();
+    child->setParent(nullptr);  // detaches from main: races with the worker
+    const std::string output = testing::internal::GetCapturedStderr();
+    release->set_value();
+
+    EXPECT_NE(output.find(kForeignAffinityWarning), std::string::npos) << output;
+    ASSERT_TRUE(runOnLoopAndWait(workerLoop, [parent, child]() {
+        delete child;
+        delete parent;
+    }));
+}
+
+TEST_F(CoreFixture, treeChangesOnTheOwnerThreadDoNotWarn)
+{
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerId);
+    ASSERT_NE(workerLoop, nullptr);
+
+    auto* parent = new TestNode();
+    ASSERT_TRUE(parent->moveToThread(workerId));
+
+    testing::internal::CaptureStderr();
+    ASSERT_TRUE(runOnLoopAndWait(workerLoop, [parent]() {
+        auto* child = new TestNode(parent);
+        child->setParent(nullptr);
+        child->setParent(parent);
+        delete parent;
+    }));
+    // Main-thread nodes touched while main's loop is not running: no warning.
+    auto* local = new TestNode();
+    auto* localChild = new TestNode(local);
+    localChild->setParent(nullptr);
+    delete localChild;
+    delete local;
+    const std::string output = testing::internal::GetCapturedStderr();
+
+    EXPECT_EQ(output.find(kForeignAffinityWarning), std::string::npos) << output;
+}
+
+TEST_F(CoreFixture, foreignDeleteLaterIsDroppedIfTheOwnerDestroysTheNodeFirst)
+{
+    std::atomic<int> destroyed{0};
+    auto* node = new DestructionCountingNode(&destroyed);
+    EventLoop* mainLoop = node->ownerEventLoop();
+
+    // Requested from another thread: the delete is posted to main...
+    std::thread caller([&]() { node->deleteLater(); });
+    caller.join();
+
+    // ...but main destroys the node itself before processing it.
+    delete node;
+    mainLoop->runPendingWork();
+    Application::instance()->loopOnce();
+
+    EXPECT_EQ(destroyed.load(), 1);
+}
+
+TEST_F(CoreFixture, asyncMoveOfAChildToItsParentsThreadIsANoOp)
+{
+    std::vector<HookEvent> events;
+    auto* parent = new HookRecordingNode(&events);
+    auto* child = new HookRecordingNode(&events, parent);
+    EventLoop* mainLoop = parent->ownerEventLoop();
+    const std::thread::id mainId = std::this_thread::get_id();
+
+    // Accepted (the parent already lives on the target) and posted to main.
+    std::thread caller([&]() { EXPECT_TRUE(child->moveToThread(mainId)); });
+    caller.join();
+    mainLoop->runPendingWork();
+
+    EXPECT_EQ(child->ownerEventLoop(), mainLoop);
+    EXPECT_EQ(child->parent(), parent);
+    EXPECT_TRUE(events.empty());  // no hooks: nothing actually moved
+
+    delete parent;
 }
 
 int main(int argc, char** argv)

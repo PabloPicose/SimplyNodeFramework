@@ -7,6 +7,7 @@
  */
 
 #include <SNFCore/EventLoop.h>
+#include <SNFCore/Executor.h>
 #include <SNFCore/NodePtr.h>
 
 #include <algorithm>
@@ -57,19 +58,19 @@ bool canInvokeReceiver(const NodePtr<Receiver>& receiver)
     return static_cast<bool>(receiver) && ! receiver.isMarkedToDelete();
 }
 
-// Posts @p task to @p loop. When it runs, if the receiver has migrated to
-// another loop in the meantime, it is forwarded to the current owner, so the
-// slot always runs on the receiver's owner thread. Off the owner thread only
+// Posts @p task to @p executor. When it runs, if the receiver has migrated
+// to another owner in the meantime, it is forwarded to the current owner, so
+// the slot always runs inside the receiver's owner. Outside the owner only
 // the receiver's control block is read, never the node itself.
 template <typename Receiver>
-void postToReceiverOwner(EventLoop* loop, NodePtr<Receiver> receiver, std::shared_ptr<std::function<void()>> task)
+void postToReceiverOwner(Executor* executor, NodePtr<Receiver> receiver, std::shared_ptr<std::function<void()>> task)
 {
-    loop->post([loop, receiver = std::move(receiver), task = std::move(task)]() {
+    executor->post([executor, receiver = std::move(receiver), task = std::move(task)]() {
         if (! canInvokeReceiver(receiver)) {
             return;
         }
-        EventLoop* owner = receiver.ownerEventLoop();
-        if (owner && owner != loop) {
+        Executor* owner = receiver.ownerExecutor();
+        if (owner && owner != executor) {
             postToReceiverOwner(owner, receiver, task);
             return;
         }
@@ -226,16 +227,16 @@ public:
 
             // Read from the control block: the emitter may be on any
             // thread, concurrently with the receiver migrating.
-            auto* loop = type == ConnectionType::Direct ? nullptr : receiver.ownerEventLoop();
+            Executor* owner = type == ConnectionType::Direct ? nullptr : receiver.ownerExecutor();
 
-            // Auto: deliver directly when already on the owner thread. The
-            // owner only changes on its own thread, so it stays the owner
+            // Auto: deliver directly when already inside the owner. The
+            // owner only changes from inside itself, so it stays the owner
             // for the whole direct call.
             const bool queue = type == ConnectionType::Queued
-                || (type == ConnectionType::Auto && loop && ! loop->isInThisThread());
+                || (type == ConnectionType::Auto && owner && ! owner->isCurrent());
 
             if (queue) {
-                if (! loop) {
+                if (! owner) {
                     state->connected.store(false);
                     return;
                 }
@@ -252,7 +253,7 @@ public:
                             },
                             std::move(copiedArgs));
                     });
-                detail::postToReceiverOwner(loop, receiver, std::move(task));
+                detail::postToReceiverOwner(owner, receiver, std::move(task));
                 return;
             }
 

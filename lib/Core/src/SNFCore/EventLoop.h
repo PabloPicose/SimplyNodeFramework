@@ -6,6 +6,8 @@
  * @ingroup SNFCore_Application
  */
 
+#include <SNFCore/Executor.h>
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -49,14 +51,14 @@ class EpollPoller;
  *       call directly. Prefer `Application::run()`, `Timer`, and node signals
  *       for all application-level scheduling.
  */
-class EventLoop
+class EventLoop final : public Executor
 {
 public:
     /** @brief Callable type for tasks posted to the EventLoop. */
-    using Task = std::function<void()>;
+    using Task = Executor::Task;
 
     EventLoop();
-    ~EventLoop();
+    ~EventLoop() override;
 
     /**
      * @brief Posts a task to be executed on this EventLoop's thread.
@@ -64,10 +66,10 @@ public:
      * Thread-safe: may be called from any thread. The task is delivered by the
      * owning event loop thread.
      */
-    void post(Task t);
+    void post(Task t) override;
 
     /** @brief Enqueues @p node for deferred deletion on the next iteration. */
-    void enqueueDelete(Node* node);
+    void enqueueDelete(Node* node) override;
 
     /** @brief Registers @p node so it receives per-iteration `run()` calls. */
     void addNode(Node* node);
@@ -175,7 +177,21 @@ public:
     void retire() noexcept;
 
     /** @brief Returns `true` once retire() has been called. */
-    bool isRetired() const noexcept;
+    bool isRetired() const noexcept override;
+
+    // ── Executor ────────────────────────────────────────────────────────────
+
+    /** @brief Same as isInThisThread(): the loop runs everything on its owner thread. */
+    bool isCurrent() const noexcept override { return isInThisThread(); }
+
+    /** @brief Same as isRunning(). */
+    bool isActive() const noexcept override { return isRunning(); }
+
+    /** @brief Returns `this`. */
+    EventLoop* eventLoop() noexcept override { return this; }
+
+    /** @copydoc eventLoop() */
+    const EventLoop* eventLoop() const noexcept override { return this; }
 
     /** @brief Returns the number of nodes pending deferred deletion. */
     std::size_t pendingDeleteCount() const;

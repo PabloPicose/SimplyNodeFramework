@@ -10,7 +10,7 @@
 
 namespace snf {
 
-class EventLoop;
+class Executor;
 
 /**
  * @struct NodeLifetimeBlock
@@ -32,16 +32,16 @@ class EventLoop;
  * - `alive` is set to `false` at the very beginning of `Node::~Node()`, so
  *   any concurrent `NodePtr` check sees the node as dead as soon as
  *   destruction starts.
- * - `ownerLoop` is the node's current owner EventLoop. It is written only on
- *   the owner thread (construction and migration) and may be read from any
- *   thread, even after the node has been destroyed. A reader that finds its
- *   own loop there is on the owner thread, and the value cannot change until
- *   that thread lets it.
+ * - `owner` is the node's current owner Executor (today always an
+ *   EventLoop). It is written only from inside the owner (construction and
+ *   migration) and may be read from any thread, even after the node has been
+ *   destroyed. A reader running inside the executor it finds there is inside
+ *   the owner, and the value cannot change until the owner lets it.
  */
 struct NodeLifetimeBlock {
     std::atomic<bool> alive{true};
     std::atomic<bool> markedForDelete{false};
-    std::atomic<EventLoop*> ownerLoop{nullptr};
+    std::atomic<Executor*> owner{nullptr};
 };
 
 }  // namespace snf
