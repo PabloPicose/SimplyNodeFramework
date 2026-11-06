@@ -196,10 +196,11 @@ public:
     /**
      * @brief Returns `true` if this node only works on an EventLoop.
      *
-     * Override it to return `true` in nodes that register timers, file
-     * descriptors or other per-thread resources with their EventLoop (Timer,
-     * Process and IOEvent do). Such a node cannot live in a TaskPool: a
-     * subtree containing one is rejected by `PooledNode::moveToTaskPool()`.
+     * Override it to return `true` in nodes that need a resource only an
+     * EventLoop thread provides (Process does). Timers and sockets do not:
+     * they also work inside a TaskPool. Such a node cannot live in a
+     * TaskPool: a subtree containing one is rejected by
+     * `PooledNode::moveToTaskPool()`.
      */
     virtual bool requiresEventLoop() const;
 

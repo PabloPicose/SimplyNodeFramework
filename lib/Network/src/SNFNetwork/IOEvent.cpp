@@ -1,6 +1,7 @@
 #include "SNFNetwork/IOEvent.h"
 
 #include "SNFCore/EventLoop.h"
+#include "SNFCore/Executor.h"
 #include "SNFCore/NodePtr.h"
 
 #include <cerrno>
@@ -10,7 +11,7 @@
 
 namespace snf {
 
-IOEvent::IOEvent(Node* parent) : Node(parent) { requireEventLoopOwner("IOEvent"); }
+IOEvent::IOEvent(Node* parent) : Node(parent) {}
 
 IOEvent::~IOEvent()
 {
@@ -24,8 +25,8 @@ IOEvent::~IOEvent()
 
 void IOEvent::setDescriptor(int fd)
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && ! loop->isInThisThread()) {
-        loop->post([self = NodePtr<IOEvent>(this), fd]() {
+    if (Executor* owner = ownerExecutor(); owner && ! owner->isCurrent()) {
+        owner->post([self = NodePtr<IOEvent>(this), fd]() {
             if (self) {
                 self->setDescriptor(fd);
             }
@@ -51,13 +52,13 @@ void IOEvent::setDescriptor(int fd)
         currentFd = m_fd;
     }
 
-    if (EventLoop* loop = ownerEventLoop(); loop) {
+    if (Executor* owner = ownerExecutor(); owner) {
         if (wasActive && previousFd >= 0) {
-            loop->unregisterIO(previousFd);
+            owner->unregisterIO(previousFd);
         }
 
         if (wasActive && currentFd >= 0) {
-            loop->registerIO(currentFd,
+            owner->registerIO(currentFd,
                              interestToNative(interest()),
                              makeDispatchCallback(currentFd, generation));
         }
@@ -76,8 +77,8 @@ int IOEvent::descriptor() const
 
 void IOEvent::setInterest(IOEventFlags flags)
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && ! loop->isInThisThread()) {
-        loop->post([self = NodePtr<IOEvent>(this), flags]() {
+    if (Executor* owner = ownerExecutor(); owner && ! owner->isCurrent()) {
+        owner->post([self = NodePtr<IOEvent>(this), flags]() {
             if (self) {
                 self->setInterest(flags);
             }
@@ -107,8 +108,8 @@ IOEventFlags IOEvent::interest() const
 
 void IOEvent::start()
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && ! loop->isInThisThread()) {
-        loop->post([self = NodePtr<IOEvent>(this)]() {
+    if (Executor* owner = ownerExecutor(); owner && ! owner->isCurrent()) {
+        owner->post([self = NodePtr<IOEvent>(this)]() {
             if (self) {
                 self->start();
             }
@@ -137,8 +138,8 @@ void IOEvent::start(IOEventFlags flags)
 
 void IOEvent::stop()
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && ! loop->isInThisThread()) {
-        loop->post([self = NodePtr<IOEvent>(this)]() {
+    if (Executor* owner = ownerExecutor(); owner && ! owner->isCurrent()) {
+        owner->post([self = NodePtr<IOEvent>(this)]() {
             if (self) {
                 self->stop();
             }
@@ -159,8 +160,8 @@ void IOEvent::stop()
     }
 
     if (wasActive && fd >= 0) {
-        if (EventLoop* loop = ownerEventLoop()) {
-            loop->unregisterIO(fd);
+        if (Executor* owner = ownerExecutor()) {
+            owner->unregisterIO(fd);
         }
     }
 }
@@ -175,8 +176,8 @@ void IOEvent::update() {}
 
 void IOEvent::onAboutToMoveToThread(EventLoop* /*newLoop*/)
 {
-    // Unregister the fd from the current (old) EventLoop so epoll stops
-    // delivering callbacks on the old thread before the affinity changes.
+    // Unregister the fd from the current (old) owner so it stops delivering
+    // callbacks there before the affinity changes.
     int fd = -1;
     bool wasActive = false;
     {
@@ -186,17 +187,16 @@ void IOEvent::onAboutToMoveToThread(EventLoop* /*newLoop*/)
     }
 
     if (wasActive && fd >= 0) {
-        if (EventLoop* loop = ownerEventLoop()) {
-            loop->unregisterIO(fd);
+        if (Executor* owner = ownerExecutor()) {
+            owner->unregisterIO(fd);
         }
     }
 }
 
 void IOEvent::onMovedToThread(EventLoop* /*oldLoop*/)
 {
-    // Re-register the fd with the new EventLoop (ownerEventLoop() already
-    // points to the new loop at this point because Node::applyMoveToThread
-    // updates the affinity fields before calling this hook).
+    // Re-register the fd with the new owner (ownerExecutor() already is the
+    // new one: Node::applyMoveTo() updates the owner before this hook).
     int fd = -1;
     bool active = false;
     IOEventFlags interestFlags = IOEventFlags::None;
@@ -211,8 +211,8 @@ void IOEvent::onMovedToThread(EventLoop* /*oldLoop*/)
     }
 
     if (active && fd >= 0) {
-        if (EventLoop* loop = ownerEventLoop()) {
-            loop->registerIO(fd, interestToNative(interestFlags), makeDispatchCallback(fd, generation));
+        if (Executor* owner = ownerExecutor()) {
+            owner->registerIO(fd, interestToNative(interestFlags), makeDispatchCallback(fd, generation));
         }
     }
 }
@@ -267,7 +267,7 @@ IOEventFlags IOEvent::nativeToInterest(std::uint32_t nativeEvents) const
 
 void IOEvent::syncRegistration(bool wasActive)
 {
-    if (EventLoop* loop = ownerEventLoop()) {
+    if (Executor* owner = ownerExecutor()) {
         int fd = -1;
         IOEventFlags interestFlags = IOEventFlags::None;
         bool active = false;
@@ -285,13 +285,13 @@ void IOEvent::syncRegistration(bool wasActive)
             return;
         }
 
-        if (wasActive && loop->hasIOWatch(fd)) {
-            loop->modifyIO(fd, interestToNative(interestFlags));
+        if (wasActive && owner->hasIOWatch(fd)) {
+            owner->modifyIO(fd, interestToNative(interestFlags));
             return;
         }
 
         if (active) {
-            loop->registerIO(fd, interestToNative(interestFlags), makeDispatchCallback(fd, generation));
+            owner->registerIO(fd, interestToNative(interestFlags), makeDispatchCallback(fd, generation));
         }
     }
 }
@@ -305,7 +305,16 @@ bool IOEvent::isRegistrationCurrent(int fd, std::uint64_t generation) const
 std::function<void(std::uint32_t)> IOEvent::makeDispatchCallback(int fd, std::uint64_t generation)
 {
     return [self = NodePtr<IOEvent>(this), fd, generation](std::uint32_t events) {
-        if (self && self->isRegistrationCurrent(fd, generation)) {
+        // The callback runs inside the executor that registered the fd. If the
+        // node has moved to another owner since (its readiness was already
+        // queued here), drop it without touching the node: only its new owner
+        // may, and it has the fd registered again. Inside the owner the node
+        // cannot be destroyed under us, so the checks below are stable.
+        const Executor* owner = self.ownerExecutor();
+        if (! owner || ! owner->isCurrent() || ! self) {
+            return;
+        }
+        if (self->isRegistrationCurrent(fd, generation)) {
             self->handleEvents(events);
         }
     };

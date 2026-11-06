@@ -1,6 +1,7 @@
 #include "SNFNetwork/LocalServer.h"
 
 #include "SNFCore/EventLoop.h"
+#include "SNFCore/Executor.h"
 #include "SNFCore/NodePtr.h"
 
 #include <fcntl.h>
@@ -43,8 +44,8 @@ LocalServer::~LocalServer()
 
 bool LocalServer::listen(const std::string& path)
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
-        loop->post([self = NodePtr<LocalServer>(this), path]() {
+    if (Executor* owner = ownerExecutor(); owner && !owner->isCurrent()) {
+        owner->post([self = NodePtr<LocalServer>(this), path]() {
             if (self) {
                 self->listen(path);
             }
@@ -107,8 +108,8 @@ bool LocalServer::listen(const std::string& path)
 
 void LocalServer::close()
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
-        loop->post([self = NodePtr<LocalServer>(this)]() {
+    if (Executor* owner = ownerExecutor(); owner && !owner->isCurrent()) {
+        owner->post([self = NodePtr<LocalServer>(this)]() {
             if (self) {
                 self->close();
             }
@@ -155,7 +156,7 @@ bool LocalServer::hasPendingConnections() const
 
 LocalSocket* LocalServer::nextPendingConnection()
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
+    if (const Executor* owner = ownerExecutor(); owner && !owner->isCurrent()) {
         return nullptr;
     }
 

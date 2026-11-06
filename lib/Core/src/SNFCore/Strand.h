@@ -54,6 +54,9 @@ public:
     /** @brief Drops the reservation taken by acquire(). */
     static void release(Strand* strand);
 
+    /** @brief Returns the strand whose work the calling thread runs, or `nullptr`. */
+    static Strand* current() noexcept;
+
     explicit Strand(TaskPool& pool);
     ~Strand() override;
 
@@ -62,6 +65,9 @@ public:
 
     /** @brief Returns the pool that runs this strand. */
     TaskPool& pool() const noexcept { return m_pool; }
+
+    /** @brief Returns the number of root nodes this strand owns. */
+    std::size_t rootNodeCount() const;
 
     // ── Executor ────────────────────────────────────────────────────────────
     void post(Task task) override;
@@ -73,6 +79,12 @@ public:
     void removeNode(Node* node) override;
     void addRootNode(Node* node) override;
     void removeRootNode(Node* node) override;
+    void scheduleTimer(Timer* timer, std::chrono::steady_clock::time_point deadline, std::uint64_t generation) override;
+    void cancelTimer(Timer* timer) override;
+    void registerIO(int fd, std::uint32_t events, std::function<void(std::uint32_t)> callback) override;
+    void modifyIO(int fd, std::uint32_t events) override;
+    void unregisterIO(int fd) override;
+    bool hasIOWatch(int fd) const override;
 
 private:
     friend class snf::TaskPool;

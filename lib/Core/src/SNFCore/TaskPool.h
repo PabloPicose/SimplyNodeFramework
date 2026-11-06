@@ -20,7 +20,9 @@
 namespace snf {
 
 namespace detail {
+class IoService;
 class Strand;
+class TimerService;
 }
 
 /**
@@ -97,11 +99,13 @@ public:
      *        the workers. Idempotent and thread-safe: every caller returns
      *        once the workers have stopped. Called by the destructor.
      *
+     * Timers and socket watches of pooled nodes stop first: no timeout fires
+     * and no I/O callback is queued once shutdown() has started.
      * Pooled nodes keep running while the queue drains (their queued signal
      * deliveries are processed, and they may queue more). Once the workers
      * are joined, the pooled nodes still alive are destroyed on the calling
      * thread, each as if inside its own strand. A pooled node that keeps
-     * re-queuing work for itself forever would keep shutdown() waiting.
+     * queuing work for itself without pause would keep shutdown() waiting.
      * @throws std::logic_error if called from one of this pool's workers.
      */
     void shutdown();
@@ -121,6 +125,12 @@ public:
     /** @brief Returns how many strands the pool has created (in use or idle, for reuse). */
     std::size_t strandCount() const;
 
+    /** @brief Returns how many Timers of pooled nodes are armed right now. */
+    std::size_t armedTimerCount() const;
+
+    /** @brief Returns how many descriptors of pooled nodes (sockets) are watched right now. */
+    std::size_t ioWatchCount() const;
+
 private:
     friend class detail::Strand;
 
@@ -134,6 +144,10 @@ private:
     void recycleStrandIfIdle(detail::Strand* strand);
     // Like start(), but also accepted while shutdown() drains the queue.
     bool enqueueStrandDrain(detail::Strand* strand);
+    // Deadlines of strand-owned Timers.
+    detail::TimerService& timerService() const { return *m_timerService; }
+    // Descriptors of strand-owned IOEvents.
+    detail::IoService& ioService() const { return *m_ioService; }
 
     mutable std::mutex m_mutex;
     std::mutex m_shutdownMutex;  // serialises shutdown() callers; never taken by workers
@@ -144,6 +158,9 @@ private:
     std::size_t m_activeTasks = 0;
     bool m_stopping = false;
     bool m_joined = false;
+
+    std::unique_ptr<detail::TimerService> m_timerService;
+    std::unique_ptr<detail::IoService> m_ioService;
 
     mutable std::mutex m_strandMutex;
     std::vector<std::unique_ptr<detail::Strand>> m_strands;

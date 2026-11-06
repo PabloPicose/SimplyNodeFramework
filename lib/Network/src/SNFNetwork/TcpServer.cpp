@@ -1,6 +1,7 @@
 #include "SNFNetwork/TcpServer.h"
 
 #include "SNFCore/EventLoop.h"
+#include "SNFCore/Executor.h"
 #include "SNFCore/NodePtr.h"
 #include "SNFNetwork/HostAddress.h"
 
@@ -60,8 +61,8 @@ TcpServer::~TcpServer()
 
 bool TcpServer::listen(const HostAddress& address, std::uint16_t port)
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
-        loop->post([self = NodePtr<TcpServer>(this), address, port]() {
+    if (Executor* owner = ownerExecutor(); owner && !owner->isCurrent()) {
+        owner->post([self = NodePtr<TcpServer>(this), address, port]() {
             if (self) {
                 self->listen(address, port);
             }
@@ -159,8 +160,8 @@ bool TcpServer::listen(const std::string& address, std::uint16_t port)
 
 void TcpServer::close()
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
-        loop->post([self = NodePtr<TcpServer>(this)]() {
+    if (Executor* owner = ownerExecutor(); owner && !owner->isCurrent()) {
+        owner->post([self = NodePtr<TcpServer>(this)]() {
             if (self) {
                 self->close();
             }
@@ -199,7 +200,7 @@ bool TcpServer::hasPendingConnections() const
 
 TcpSocket* TcpServer::nextPendingConnection()
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
+    if (const Executor* owner = ownerExecutor(); owner && !owner->isCurrent()) {
         return nullptr;
     }
 
@@ -301,8 +302,8 @@ void TcpServer::acceptPendingConnections()
 
 void TcpServer::emitNewConnection()
 {
-    if (EventLoop* loop = ownerEventLoop()) {
-        loop->post([self = NodePtr<TcpServer>(this)]() {
+    if (Executor* owner = ownerExecutor()) {
+        owner->post([self = NodePtr<TcpServer>(this)]() {
             if (self) {
                 self->newConnection.emit();
             }
@@ -315,8 +316,8 @@ void TcpServer::emitNewConnection()
 
 void TcpServer::emitErrorOccurred(std::string message)
 {
-    if (EventLoop* loop = ownerEventLoop()) {
-        loop->post([self = NodePtr<TcpServer>(this), message = std::move(message)]() {
+    if (Executor* owner = ownerExecutor()) {
+        owner->post([self = NodePtr<TcpServer>(this), message = std::move(message)]() {
             if (self) {
                 self->errorOccurred.emit(message);
             }

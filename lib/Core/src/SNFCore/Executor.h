@@ -6,12 +6,15 @@
  * @ingroup SNFCore
  */
 
+#include <chrono>
+#include <cstdint>
 #include <functional>
 
 namespace snf {
 
 class EventLoop;
 class Node;
+class Timer;
 
 /**
  * @class Executor
@@ -75,6 +78,28 @@ public:
     virtual void removeNode(Node* node) = 0;
     virtual void addRootNode(Node* node) = 0;
     virtual void removeRootNode(Node* node) = 0;
+    /** @} */
+
+    /** @name Timers
+     *  Called by Timer, from inside the executor. When @p deadline is reached
+     *  the executor calls the timer's timeout dispatch inside itself with
+     *  @p generation; the timer ignores stale generations. Scheduling a timer
+     *  again replaces its previous deadline.
+     *  @{ */
+    virtual void scheduleTimer(Timer* timer, std::chrono::steady_clock::time_point deadline, std::uint64_t generation)
+        = 0;
+    virtual void cancelTimer(Timer* timer) = 0;
+    /** @} */
+
+    /** @name File descriptors
+     *  Called by IOEvent, from inside the executor. While @p fd is ready for
+     *  one of @p events, @p callback runs inside the executor with the native
+     *  epoll mask; a callback is never queued twice for the same descriptor.
+     *  @{ */
+    virtual void registerIO(int fd, std::uint32_t events, std::function<void(std::uint32_t)> callback) = 0;
+    virtual void modifyIO(int fd, std::uint32_t events) = 0;
+    virtual void unregisterIO(int fd) = 0;
+    virtual bool hasIOWatch(int fd) const = 0;
     /** @} */
 
     /** @brief Returns this executor as an EventLoop, or `nullptr` if it is not one. */

@@ -2,7 +2,9 @@
 
 #include "SNFCore/Application.h"
 #include "SNFCore/Logging.h"
+#include "SNFCore/IoService.h"
 #include "SNFCore/Strand.h"
+#include "SNFCore/TimerService.h"
 
 #include <algorithm>
 #include <exception>
@@ -18,6 +20,7 @@ thread_local const TaskPool* t_currentPool = nullptr;
 }  // namespace
 
 TaskPool::TaskPool(std::size_t maxThreadCount)
+    : m_timerService(std::make_unique<detail::TimerService>()), m_ioService(std::make_unique<detail::IoService>())
 {
 #ifdef SNF_PLATFORM_WEB
     // Emscripten single-threaded build: no std::thread. Zero workers, so
@@ -98,6 +101,11 @@ void TaskPool::shutdown()
     // pool stopped (not only the one that took the workers).
     std::lock_guard<std::mutex> shutdownLock(m_shutdownMutex);
 
+    // Pooled timers and socket watches stop before the queue drains, so no
+    // timeout fires and no I/O callback is queued once shutdown has started.
+    m_timerService->stop();
+    m_ioService->stop();
+
     std::vector<std::thread> workers;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -129,6 +137,10 @@ void TaskPool::shutdown()
         strand->destroyRemainingNodes();
     }
 }
+
+std::size_t TaskPool::armedTimerCount() const { return m_timerService->armedCount(); }
+
+std::size_t TaskPool::ioWatchCount() const { return m_ioService->watchCount(); }
 
 std::size_t TaskPool::strandCount() const
 {

@@ -61,7 +61,7 @@ public:
     explicit Process(Node* parent = nullptr);
     ~Process() override;
 
-    /** @brief `true`: it polls the child process from a Timer, so it cannot live in a TaskPool. */
+    /** @brief `true`: it watches the child's pipes through the owner EventLoop, so it cannot live in a TaskPool. */
     bool requiresEventLoop() const override { return true; }
 
     bool start(const std::string& program, const std::vector<std::string>& arguments = {});

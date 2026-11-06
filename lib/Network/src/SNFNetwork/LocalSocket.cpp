@@ -1,6 +1,7 @@
 #include "SNFNetwork/LocalSocket.h"
 
 #include "SNFCore/EventLoop.h"
+#include "SNFCore/Executor.h"
 #include "SNFCore/NodePtr.h"
 
 #include <fcntl.h>
@@ -47,8 +48,8 @@ LocalSocket::~LocalSocket() { close(); }
 
 void LocalSocket::setBlocking(bool blocking)
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
-        loop->post([self = NodePtr<LocalSocket>(this), blocking]() {
+    if (Executor* owner = ownerExecutor(); owner && !owner->isCurrent()) {
+        owner->post([self = NodePtr<LocalSocket>(this), blocking]() {
             if (self) {
                 self->setBlocking(blocking);
             }
@@ -76,8 +77,8 @@ bool LocalSocket::isBlocking() const
 
 void LocalSocket::connectToPath(const std::string& path)
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
-        loop->post([self = NodePtr<LocalSocket>(this), path]() {
+    if (Executor* owner = ownerExecutor(); owner && !owner->isCurrent()) {
+        owner->post([self = NodePtr<LocalSocket>(this), path]() {
             if (self) {
                 self->connectToPath(path);
             }
@@ -138,8 +139,8 @@ void LocalSocket::connectToPath(const std::string& path)
 
 void LocalSocket::close()
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
-        loop->post([self = NodePtr<LocalSocket>(this)]() {
+    if (Executor* owner = ownerExecutor(); owner && !owner->isCurrent()) {
+        owner->post([self = NodePtr<LocalSocket>(this)]() {
             if (self) {
                 self->close();
             }
@@ -164,7 +165,7 @@ std::size_t LocalSocket::write(ByteArray data)
 
     const std::size_t acceptedBytes = data.remainingSize();
 
-    if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
+    if (Executor* owner = ownerExecutor(); owner && !owner->isCurrent()) {
         const bool canQueue = [this]() {
             std::lock_guard<std::mutex> lock(m_mutex);
             return m_state == LocalSocketState::Connected || m_state == LocalSocketState::Connecting;
@@ -174,7 +175,7 @@ std::size_t LocalSocket::write(ByteArray data)
             return 0;
         }
 
-        loop->post([self = NodePtr<LocalSocket>(this), pending = std::move(data)]() mutable {
+        owner->post([self = NodePtr<LocalSocket>(this), pending = std::move(data)]() mutable {
             if (self) {
                 self->write(std::move(pending));
             }

@@ -18,17 +18,23 @@
 
 namespace snf {
 
+namespace detail {
+class TimerService;
+}
+
 class EventLoop;
 
 /**
  * @class Timer
  * @ingroup SNFCore_Timers
- * @brief Repeating or single-shot timer that fires on its owner thread.
+ * @brief Repeating or single-shot timer that fires inside its owner.
  *
- * `Timer` schedules the `timeout` signal to be emitted at a fixed interval
- * via the owner thread's `EventLoop`. Internally it interacts with
- * `EventLoop::scheduleTimer()` and is therefore safe only on the thread
- * that created it.
+ * `Timer` emits `timeout` at a fixed interval, inside the timer's owner
+ * executor: on the owner thread's `EventLoop`, or, for a timer that belongs to
+ * a `PooledNode` subtree, inside that node's strand on a `TaskPool` worker.
+ * The control methods (start(), stop(), setInterval(), setSingleShot()) may
+ * be called from any thread: from outside the owner they are posted to it and
+ * applied in order.
  *
  * **Repeating timer:**
  * @code
@@ -54,9 +60,6 @@ public:
 
     /** @brief Constructs a Timer, optionally attaching it to @p parent. */
     explicit Timer(Node* parent = nullptr);
-
-    /** @brief `true`: its timeouts are scheduled by the owner EventLoop, so it cannot live in a TaskPool. */
-    bool requiresEventLoop() const override { return true; }
     ~Timer() override;
 
     /** @brief Starts the timer using the previously configured interval. */
@@ -168,6 +171,7 @@ protected:
 
 private:
     friend class EventLoop;
+    friend class detail::TimerService;
 
     void dispatchTimeout(std::uint64_t generation);
 

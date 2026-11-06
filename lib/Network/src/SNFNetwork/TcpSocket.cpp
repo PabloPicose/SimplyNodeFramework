@@ -1,6 +1,7 @@
 #include "SNFNetwork/TcpSocket.h"
 
 #include "SNFCore/EventLoop.h"
+#include "SNFCore/Executor.h"
 #include "SNFCore/NodePtr.h"
 #include "SNFNetwork/HostAddress.h"
 
@@ -94,8 +95,8 @@ TcpSocket::~TcpSocket() { close(); }
 
 void TcpSocket::setBlocking(bool blocking)
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && ! loop->isInThisThread()) {
-        loop->post([self = NodePtr<TcpSocket>(this), blocking]() {
+    if (Executor* owner = ownerExecutor(); owner && ! owner->isCurrent()) {
+        owner->post([self = NodePtr<TcpSocket>(this), blocking]() {
             if (self) {
                 self->setBlocking(blocking);
             }
@@ -123,8 +124,8 @@ bool TcpSocket::isBlocking() const
 
 void TcpSocket::connectToHost(const HostAddress& hostAddress, std::uint16_t port)
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && ! loop->isInThisThread()) {
-        loop->post([self = NodePtr<TcpSocket>(this), hostAddress, port]() {
+    if (Executor* owner = ownerExecutor(); owner && ! owner->isCurrent()) {
+        owner->post([self = NodePtr<TcpSocket>(this), hostAddress, port]() {
             if (self) {
                 self->connectToHost(hostAddress, port);
             }
@@ -194,8 +195,8 @@ void TcpSocket::connectToHost(const std::string& host, std::uint16_t port)
 
 void TcpSocket::close()
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && ! loop->isInThisThread()) {
-        loop->post([self = NodePtr<TcpSocket>(this)]() {
+    if (Executor* owner = ownerExecutor(); owner && ! owner->isCurrent()) {
+        owner->post([self = NodePtr<TcpSocket>(this)]() {
             if (self) {
                 self->close();
             }
@@ -220,7 +221,7 @@ std::size_t TcpSocket::write(ByteArray data)
 
     const std::size_t acceptedBytes = data.remainingSize();
 
-    if (EventLoop* loop = ownerEventLoop(); loop && ! loop->isInThisThread()) {
+    if (Executor* owner = ownerExecutor(); owner && ! owner->isCurrent()) {
         const bool canQueue = [this]() {
             std::lock_guard<std::mutex> lock(m_mutex);
             return m_state == TcpSocketState::Connected || m_state == TcpSocketState::Connecting;
@@ -230,7 +231,7 @@ std::size_t TcpSocket::write(ByteArray data)
             return 0;
         }
 
-        loop->post([self = NodePtr<TcpSocket>(this), pending = std::move(data)]() mutable {
+        owner->post([self = NodePtr<TcpSocket>(this), pending = std::move(data)]() mutable {
             if (self) {
                 self->write(std::move(pending));
             }
@@ -516,8 +517,8 @@ void TcpSocket::updateInterestForState()
 
 void TcpSocket::emitConnected()
 {
-    if (EventLoop* loop = ownerEventLoop()) {
-        loop->post([self = NodePtr<TcpSocket>(this)]() {
+    if (Executor* owner = ownerExecutor()) {
+        owner->post([self = NodePtr<TcpSocket>(this)]() {
             if (self) {
                 self->connected.emit();
             }
@@ -530,8 +531,8 @@ void TcpSocket::emitConnected()
 
 void TcpSocket::emitDisconnected()
 {
-    if (EventLoop* loop = ownerEventLoop()) {
-        loop->post([self = NodePtr<TcpSocket>(this)]() {
+    if (Executor* owner = ownerExecutor()) {
+        owner->post([self = NodePtr<TcpSocket>(this)]() {
             if (self) {
                 self->disconnected.emit();
             }
@@ -544,8 +545,8 @@ void TcpSocket::emitDisconnected()
 
 void TcpSocket::emitReadyRead()
 {
-    if (EventLoop* loop = ownerEventLoop()) {
-        loop->post([self = NodePtr<TcpSocket>(this)]() {
+    if (Executor* owner = ownerExecutor()) {
+        owner->post([self = NodePtr<TcpSocket>(this)]() {
             if (self) {
                 self->readyRead.emit();
             }
@@ -558,8 +559,8 @@ void TcpSocket::emitReadyRead()
 
 void TcpSocket::emitBytesWritten(std::size_t written)
 {
-    if (EventLoop* loop = ownerEventLoop()) {
-        loop->post([self = NodePtr<TcpSocket>(this), written]() {
+    if (Executor* owner = ownerExecutor()) {
+        owner->post([self = NodePtr<TcpSocket>(this), written]() {
             if (self) {
                 self->bytesWritten.emit(written);
             }
@@ -572,8 +573,8 @@ void TcpSocket::emitBytesWritten(std::size_t written)
 
 void TcpSocket::emitErrorOccurred(std::string message)
 {
-    if (EventLoop* loop = ownerEventLoop()) {
-        loop->post([self = NodePtr<TcpSocket>(this), message = std::move(message)]() {
+    if (Executor* owner = ownerExecutor()) {
+        owner->post([self = NodePtr<TcpSocket>(this), message = std::move(message)]() {
             if (self) {
                 self->errorOccurred.emit(message);
             }

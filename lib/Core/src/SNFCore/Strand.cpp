@@ -5,6 +5,8 @@
 #include "SNFCore/Node.h"
 #include "SNFCore/NodePtr.h"
 #include "SNFCore/TaskPool.h"
+#include "SNFCore/IoService.h"
+#include "SNFCore/TimerService.h"
 
 #include <algorithm>
 #include <exception>
@@ -15,20 +17,20 @@ namespace snf::detail {
 namespace {
 
 // The strand whose work the current thread is running, or null.
-thread_local const Strand* t_currentStrand = nullptr;
+thread_local Strand* t_currentStrand = nullptr;
 
 // Sets t_currentStrand for a scope and restores the previous value.
 class CurrentStrandScope
 {
 public:
-    explicit CurrentStrandScope(const Strand* strand) : m_previous(t_currentStrand) { t_currentStrand = strand; }
+    explicit CurrentStrandScope(Strand* strand) : m_previous(t_currentStrand) { t_currentStrand = strand; }
     ~CurrentStrandScope() { t_currentStrand = m_previous; }
 
     CurrentStrandScope(const CurrentStrandScope&) = delete;
     CurrentStrandScope& operator=(const CurrentStrandScope&) = delete;
 
 private:
-    const Strand* m_previous;
+    Strand* m_previous;
 };
 
 }  // namespace
@@ -42,7 +44,15 @@ void Strand::release(Strand* strand)
     }
 }
 
+Strand* Strand::current() noexcept { return t_currentStrand; }
+
 Strand::Strand(TaskPool& pool) : m_pool(pool) {}
+
+std::size_t Strand::rootNodeCount() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_rootNodes.size();
+}
 
 Strand::~Strand() = default;
 
@@ -100,6 +110,24 @@ void Strand::removeRootNode(Node* node)
     std::lock_guard<std::mutex> lock(m_mutex);
     m_rootNodes.erase(std::remove(m_rootNodes.begin(), m_rootNodes.end(), node), m_rootNodes.end());
 }
+
+void Strand::scheduleTimer(Timer* timer, std::chrono::steady_clock::time_point deadline, std::uint64_t generation)
+{
+    m_pool.timerService().schedule(this, timer, deadline, generation);
+}
+
+void Strand::cancelTimer(Timer* timer) { m_pool.timerService().cancel(timer); }
+
+void Strand::registerIO(int fd, std::uint32_t events, std::function<void(std::uint32_t)> callback)
+{
+    m_pool.ioService().registerIO(this, fd, events, std::move(callback));
+}
+
+void Strand::modifyIO(int fd, std::uint32_t events) { m_pool.ioService().modifyIO(fd, events); }
+
+void Strand::unregisterIO(int fd) { m_pool.ioService().unregisterIO(fd); }
+
+bool Strand::hasIOWatch(int fd) const { return m_pool.ioService().hasIOWatch(fd); }
 
 void Strand::runPendingDeletes()
 {

@@ -131,10 +131,10 @@ public:
      * Called internally by `Timer::start()`. @p generation is used to
      * discard stale callbacks after a timer has been restarted.
      */
-    void scheduleTimer(Timer* timer, std::chrono::steady_clock::time_point deadline, std::uint64_t generation);
+    void scheduleTimer(Timer* timer, std::chrono::steady_clock::time_point deadline, std::uint64_t generation) override;
 
     /** @brief Cancels a previously scheduled timer. Called by `Timer::stop()`. */
-    void cancelTimer(Timer* timer);
+    void cancelTimer(Timer* timer) override;
 
     /**
      * @brief Registers an epoll interest set for file descriptor @p fd.
@@ -142,16 +142,16 @@ public:
      * @param events   Epoll event flags (e.g. `EPOLLIN | EPOLLOUT`).
      * @param callback Invoked with the ready event mask when events arrive.
      */
-    void registerIO(int fd, std::uint32_t events, std::function<void(std::uint32_t)> callback);
+    void registerIO(int fd, std::uint32_t events, std::function<void(std::uint32_t)> callback) override;
 
     /** @brief Updates the epoll interest set for an already-registered @p fd. */
-    void modifyIO(int fd, std::uint32_t events);
+    void modifyIO(int fd, std::uint32_t events) override;
 
     /** @brief Removes @p fd from epoll watch. */
-    void unregisterIO(int fd);
+    void unregisterIO(int fd) override;
 
     /** @brief Returns `true` if @p fd is currently watched by this EventLoop. */
-    bool hasIOWatch(int fd) const;
+    bool hasIOWatch(int fd) const override;
 
     /** @brief Returns `true` if the calling thread is the owner thread of this EventLoop. */
     bool isInThisThread() const noexcept;

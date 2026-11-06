@@ -1,6 +1,7 @@
 #include "SNFCore/Timer.h"
 
 #include "SNFCore/EventLoop.h"
+#include "SNFCore/Executor.h"
 #include "SNFCore/NodePtr.h"
 
 namespace snf {
@@ -17,7 +18,7 @@ Timer::Duration sanitizeInterval(Timer::Duration interval)
 
 }  // namespace
 
-Timer::Timer(Node* parent) : Node(parent) { requireEventLoopOwner("Timer"); }
+Timer::Timer(Node* parent) : Node(parent) {}
 
 Timer::~Timer()
 {
@@ -27,15 +28,15 @@ Timer::~Timer()
         ++m_generation;
     }
 
-    if (EventLoop* loop = ownerEventLoop()) {
-        loop->cancelTimer(this);
+    if (Executor* owner = ownerExecutor()) {
+        owner->cancelTimer(this);
     }
 }
 
 void Timer::start()
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && ! loop->isInThisThread()) {
-        loop->post([timer = NodePtr<Timer>(this)]() {
+    if (Executor* owner = ownerExecutor(); owner && ! owner->isCurrent()) {
+        owner->post([timer = NodePtr<Timer>(this)]() {
             if (timer) {
                 timer->start();
             }
@@ -56,15 +57,15 @@ void Timer::start()
         m_deadline = deadline;
     }
 
-    if (EventLoop* loop = ownerEventLoop()) {
-        loop->scheduleTimer(this, deadline, generation);
+    if (Executor* owner = ownerExecutor()) {
+        owner->scheduleTimer(this, deadline, generation);
     }
 }
 
 void Timer::start(Duration interval)
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && ! loop->isInThisThread()) {
-        loop->post([timer = NodePtr<Timer>(this), interval]() {
+    if (Executor* owner = ownerExecutor(); owner && ! owner->isCurrent()) {
+        owner->post([timer = NodePtr<Timer>(this), interval]() {
             if (timer) {
                 timer->start(interval);
             }
@@ -84,8 +85,8 @@ void Timer::start(Duration interval)
         m_deadline = deadline;
     }
 
-    if (EventLoop* loop = ownerEventLoop()) {
-        loop->scheduleTimer(this, deadline, generation);
+    if (Executor* owner = ownerExecutor()) {
+        owner->scheduleTimer(this, deadline, generation);
     }
 }
 
@@ -93,8 +94,8 @@ void Timer::start(int intervalMs) { start(Duration(intervalMs)); }
 
 void Timer::stop()
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && ! loop->isInThisThread()) {
-        loop->post([timer = NodePtr<Timer>(this)]() {
+    if (Executor* owner = ownerExecutor(); owner && ! owner->isCurrent()) {
+        owner->post([timer = NodePtr<Timer>(this)]() {
             if (timer) {
                 timer->stop();
             }
@@ -108,15 +109,15 @@ void Timer::stop()
         ++m_generation;
     }
 
-    if (EventLoop* loop = ownerEventLoop()) {
-        loop->cancelTimer(this);
+    if (Executor* owner = ownerExecutor()) {
+        owner->cancelTimer(this);
     }
 }
 
 void Timer::setInterval(Duration interval)
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && ! loop->isInThisThread()) {
-        loop->post([timer = NodePtr<Timer>(this), interval]() {
+    if (Executor* owner = ownerExecutor(); owner && ! owner->isCurrent()) {
+        owner->post([timer = NodePtr<Timer>(this), interval]() {
             if (timer) {
                 timer->setInterval(interval);
             }
@@ -140,8 +141,8 @@ void Timer::setInterval(Duration interval)
     }
 
     if (shouldReschedule) {
-        if (EventLoop* loop = ownerEventLoop()) {
-            loop->scheduleTimer(this, deadline, generation);
+        if (Executor* owner = ownerExecutor()) {
+            owner->scheduleTimer(this, deadline, generation);
         }
     }
 }
@@ -156,8 +157,8 @@ Timer::Duration Timer::interval() const
 
 void Timer::setSingleShot(bool singleShot)
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && ! loop->isInThisThread()) {
-        loop->post([timer = NodePtr<Timer>(this), singleShot]() {
+    if (Executor* owner = ownerExecutor(); owner && ! owner->isCurrent()) {
+        owner->post([timer = NodePtr<Timer>(this), singleShot]() {
             if (timer) {
                 timer->setSingleShot(singleShot);
             }
@@ -185,17 +186,17 @@ void Timer::update() {}
 
 void Timer::onAboutToMoveToThread(EventLoop* /*newLoop*/)
 {
-    // The pending timeout lives in the old loop's timer list. Remove it so the
-    // old thread neither emits timeout nor keeps a pointer to this timer.
-    if (EventLoop* loop = ownerEventLoop()) {
-        loop->cancelTimer(this);
+    // The pending timeout lives with the old owner. Remove it so the old owner
+    // neither emits timeout nor keeps a pointer to this timer.
+    if (Executor* owner = ownerExecutor()) {
+        owner->cancelTimer(this);
     }
 }
 
 void Timer::onMovedToThread(EventLoop* /*oldLoop*/)
 {
-    // ownerEventLoop() already points to the new loop. Re-arm with the same
-    // deadline and generation so the remaining time is preserved.
+    // ownerExecutor() already is the new owner. Re-arm with the same deadline
+    // and generation so the remaining time is preserved.
     bool active = false;
     std::chrono::steady_clock::time_point deadline;
     std::uint64_t generation = 0;
@@ -207,8 +208,8 @@ void Timer::onMovedToThread(EventLoop* /*oldLoop*/)
     }
 
     if (active) {
-        if (EventLoop* loop = ownerEventLoop()) {
-            loop->scheduleTimer(this, deadline, generation);
+        if (Executor* owner = ownerExecutor()) {
+            owner->scheduleTimer(this, deadline, generation);
         }
     }
 }
@@ -240,8 +241,8 @@ void Timer::dispatchTimeout(std::uint64_t generation)
     }
 
     if (shouldReschedule) {
-        if (EventLoop* loop = ownerEventLoop()) {
-            loop->scheduleTimer(this, nextDeadline, nextGeneration);
+        if (Executor* owner = ownerExecutor()) {
+            owner->scheduleTimer(this, nextDeadline, nextGeneration);
         }
     }
 

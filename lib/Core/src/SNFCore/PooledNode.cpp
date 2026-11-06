@@ -45,8 +45,12 @@ bool PooledNode::applyMoveToTaskPool(TaskPool& pool)
     if (subtreeRequiresEventLoop()) {
         return false;
     }
-    if (const auto* strand = dynamic_cast<const detail::Strand*>(ownerExecutor()); strand && &strand->pool() == &pool) {
-        return true;  // already there
+    // Already on a strand of this pool that is its own: nothing to do. A node
+    // that shares its strand with other roots (created inside another pooled
+    // node's slot) gets a strand of its own instead.
+    if (const auto* strand = dynamic_cast<const detail::Strand*>(ownerExecutor());
+        strand && &strand->pool() == &pool && strand->rootNodeCount() == 1) {
+        return true;
     }
 
     detail::Strand* strand = detail::Strand::acquire(pool);

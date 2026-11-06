@@ -4,13 +4,18 @@
 #include "SNFCore/Connection.h"
 #include "SNFCore/EventLoop.h"
 #include "SNFCore/Executor.h"
+#include "SNFCore/IoService.h"
 #include "SNFCore/Node.h"
 #include "SNFCore/NodePtr.h"
 #include "SNFCore/PooledNode.h"
+#include "SNFCore/Process.h"
 #include "SNFCore/Strand.h"
 #include "SNFCore/TaskPool.h"
 #include "SNFCore/ThreadPool.h"
 #include "SNFCore/Timer.h"
+
+#include <sys/epoll.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <atomic>
@@ -499,17 +504,20 @@ TEST_F(PooledFixture, childCreatedInsideASlotSharesTheStrand)
     EXPECT_EQ(children.load(), 1u);
 }
 
-TEST_F(PooledFixture, rootNodeCreatedInsideASlotThrows)
+TEST_F(PooledFixture, rootNodeCreatedInsideASlotJoinsTheStrandAndCanMoveToItsOwn)
 {
-    TaskPool pool(1);
+    TaskPool pool(2);
     auto* worker = new Worker();
-    std::atomic<bool> threw{false};
-    worker->onValueHook = [&](Worker&, int) {
-        try {
-            PlainNode orphan;
-        } catch (const std::logic_error&) {
-            threw.store(true);
-        }
+    std::atomic<bool> joinedTheStrand{false};
+    std::atomic<bool> isRoot{false};
+    std::atomic<bool> moved{false};
+    std::atomic<bool> gotItsOwnStrand{false};
+    worker->onValueHook = [&](const Worker& self, int) {
+        auto* spawned = new Worker();  // a new root, created inside the strand
+        joinedTheStrand.store(spawned->ownerExecutor() == self.ownerExecutor());
+        isRoot.store(spawned->isRoot());
+        moved.store(spawned->moveToTaskPool(&pool));
+        gotItsOwnStrand.store(spawned->ownerExecutor() != self.ownerExecutor());
     };
     Signal<int> input;
     input.connect(NodePtr<Worker>(worker), &Worker::onValue);
@@ -518,10 +526,14 @@ TEST_F(PooledFixture, rootNodeCreatedInsideASlotThrows)
     input.emit(0);
     pool.waitForDone();
 
-    EXPECT_TRUE(threw.load());
+    EXPECT_TRUE(joinedTheStrand.load());
+    EXPECT_TRUE(isRoot.load());
+    EXPECT_TRUE(moved.load());
+    EXPECT_TRUE(gotItsOwnStrand.load());
+    EXPECT_EQ(pool.strandCount(), 2u);
 }
 
-TEST_F(PooledFixture, timerCreatedInsideASlotThrows)
+TEST_F(PooledFixture, processCreatedInsideASlotThrows)
 {
     TaskPool pool(1);
     auto* worker = new Worker();
@@ -529,7 +541,7 @@ TEST_F(PooledFixture, timerCreatedInsideASlotThrows)
     std::atomic<std::size_t> childrenAfter{99};
     worker->onValueHook = [&](Worker& self, int) {
         try {
-            new Timer(&self);
+            new Process(&self);
         } catch (const std::logic_error&) {
             threw.store(true);
         }
@@ -543,7 +555,7 @@ TEST_F(PooledFixture, timerCreatedInsideASlotThrows)
     pool.waitForDone();
 
     EXPECT_TRUE(threw.load());
-    EXPECT_EQ(childrenAfter.load(), 0u);  // the failed Timer left nothing behind
+    EXPECT_EQ(childrenAfter.load(), 0u);  // the failed Process left nothing behind
 }
 
 TEST_F(PooledFixture, deleteLaterInsideASlotDestroysTheNodeInsideItsExecutor)
@@ -619,7 +631,7 @@ TEST_F(PooledFixture, moveToTaskPoolRejectsASubtreeThatNeedsAnEventLoop)
 {
     TaskPool pool(1);
     auto* worker = new Worker();
-    new Timer(worker);
+    new Process(worker);
     EventLoop* mainLoop = worker->ownerEventLoop();
 
     EXPECT_FALSE(worker->moveToTaskPool(&pool));
@@ -1048,4 +1060,524 @@ TEST_F(PooledFixture, asyncMoveToTaskPoolIsDroppedIfThePoolShutsDownBeforeItAppl
 
     EXPECT_EQ(worker->ownerEventLoop(), mainLoop);
     delete worker;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 4: Timers owned by a pooled node
+// ═════════════════════════════════════════════════════════════════════════════
+
+namespace {
+
+// Pooled node with a Timer child; records every timeout.
+class TickingWorker final : public PooledNode
+{
+public:
+    struct Record {
+        std::mutex mutex;
+        std::condition_variable cv;
+        int ticks = 0;
+        int ticksOffOwner = 0;
+        int emitsOffOwner = 0;  // timeout emitted outside the timer's owner
+        std::set<std::thread::id> threads;
+    };
+
+    explicit TickingWorker(std::shared_ptr<Record> record, Node* parent = nullptr)
+        : PooledNode(parent), timer(new Timer(this)), m_record(std::move(record))
+    {
+        timer->timeout.connect(NodePtr<TickingWorker>(this), &TickingWorker::onTick);
+        // Direct, without a receiver: runs wherever timeout is emitted, which
+        // must always be inside the timer's owner.
+        Timer* const ownTimer = timer;
+        std::shared_ptr<Record> shared = m_record;
+        timer->timeout.connect([ownTimer, shared]() {
+            if (! ownTimer->ownerExecutor()->isCurrent()) {
+                std::lock_guard<std::mutex> lock(shared->mutex);
+                ++shared->emitsOffOwner;
+            }
+        });
+    }
+
+    TickingWorker(const TickingWorker&) = delete;
+    TickingWorker& operator=(const TickingWorker&) = delete;
+
+    void onTick()
+    {
+        const bool inside = ownerExecutor()->isCurrent();
+        std::lock_guard<std::mutex> lock(m_record->mutex);
+        ++m_record->ticks;
+        if (! inside) {
+            ++m_record->ticksOffOwner;
+        }
+        m_record->threads.insert(std::this_thread::get_id());
+        m_record->cv.notify_all();
+        if (stopAfter > 0 && m_record->ticks >= stopAfter) {
+            timer->stop();
+        }
+    }
+
+    Timer* timer;
+    int stopAfter = 0;  // only touched inside the node
+
+private:
+    std::shared_ptr<Record> m_record;
+};
+
+bool waitForTicks(TickingWorker::Record& record, int ticks, std::chrono::milliseconds timeout = 2s)
+{
+    std::unique_lock<std::mutex> lock(record.mutex);
+    return record.cv.wait_for(lock, timeout, [&]() { return record.ticks >= ticks; });
+}
+
+int ticksOf(TickingWorker::Record& record)
+{
+    std::lock_guard<std::mutex> lock(record.mutex);
+    return record.ticks;
+}
+
+}  // namespace
+
+TEST_F(PooledFixture, aTimerNoLongerRequiresAnEventLoop)
+{
+    auto* timer = new Timer();
+    EXPECT_FALSE(timer->requiresEventLoop());
+    delete timer;
+
+    auto* process = new Process();
+    EXPECT_TRUE(process->requiresEventLoop());
+    delete process;
+}
+
+TEST_F(PooledFixture, timerStartedOnMainKeepsRunningAfterMoveToTaskPool)
+{
+    TaskPool pool(2);
+    const std::vector<std::thread::id> ids = pool.workerThreadIds();
+    const std::set<std::thread::id> workers(ids.begin(), ids.end());
+    auto record = std::make_shared<TickingWorker::Record>();
+    auto* worker = new TickingWorker(record);
+    worker->timer->setSingleShot(true);
+    worker->timer->start(5ms);
+
+    ASSERT_TRUE(worker->moveToTaskPool(&pool));  // the timer moves with it
+
+    ASSERT_TRUE(waitForTicks(*record, 1));
+    pool.waitForDone();
+    std::lock_guard<std::mutex> lock(record->mutex);
+    EXPECT_EQ(record->ticks, 1);
+    EXPECT_EQ(record->ticksOffOwner, 0);
+    EXPECT_EQ(record->emitsOffOwner, 0);
+    ASSERT_EQ(record->threads.size(), 1u);
+    EXPECT_TRUE(workers.count(*record->threads.begin()) > 0);
+}
+
+TEST_F(PooledFixture, periodicTimerInsideThePoolFiresUntilStopped)
+{
+    TaskPool pool(2);
+    auto record = std::make_shared<TickingWorker::Record>();
+    auto* worker = new TickingWorker(record);
+    worker->stopAfter = 5;
+    worker->timer->start(1ms);
+    ASSERT_TRUE(worker->moveToTaskPool(&pool));
+
+    ASSERT_TRUE(waitForTicks(*record, 5));
+    std::this_thread::sleep_for(30ms);  // a stopped timer must stay quiet
+    pool.waitForDone();
+
+    std::lock_guard<std::mutex> lock(record->mutex);
+    EXPECT_EQ(record->ticks, 5);
+    EXPECT_EQ(record->ticksOffOwner, 0);
+    EXPECT_EQ(record->emitsOffOwner, 0);
+}
+
+TEST_F(PooledFixture, timerCreatedAndStartedInsideASlotFires)
+{
+    TaskPool pool(2);
+    auto* worker = new Worker();
+    std::promise<bool> fired;
+    std::atomic<bool> setOnce{false};
+    worker->onValueHook = [&](Worker& self, int) {
+        auto* timer = new Timer(&self);
+        timer->setSingleShot(true);
+        timer->timeout.connect(NodePtr<Worker>(&self), [&](const Worker& owner) {
+            if (! setOnce.exchange(true)) {
+                fired.set_value(owner.ownerExecutor()->isCurrent());
+            }
+        });
+        timer->start(2ms);
+    };
+    Signal<int> input;
+    input.connect(NodePtr<Worker>(worker), &Worker::onValue);
+    ASSERT_TRUE(worker->moveToTaskPool(&pool));
+
+    input.emit(0);
+    auto future = fired.get_future();
+    ASSERT_EQ(future.wait_for(2s), std::future_status::ready);
+    EXPECT_TRUE(future.get());
+    pool.waitForDone();
+}
+
+TEST_F(PooledFixture, staticSingleShotWithAPooledParentFiresAndCleansUp)
+{
+    TaskPool pool(2);
+    auto* worker = new Worker();
+    std::atomic<int> fired{0};
+    std::atomic<std::size_t> childrenAfter{99};
+    worker->onValueHook = [&](Worker& self, int value) {
+        if (value == 0) {
+            Timer::singleShot(2ms, [&fired]() { fired.fetch_add(1); }, &self);
+        } else {
+            childrenAfter.store(self.childrenCount());
+        }
+    };
+    Signal<int> input;
+    input.connect(NodePtr<Worker>(worker), &Worker::onValue);
+    ASSERT_TRUE(worker->moveToTaskPool(&pool));
+
+    input.emit(0);
+    ASSERT_TRUE(waitUntil([&]() { return fired.load() == 1; }));
+    pool.waitForDone();
+    input.emit(1);
+    pool.waitForDone();
+
+    EXPECT_EQ(fired.load(), 1);
+    EXPECT_EQ(childrenAfter.load(), 0u);  // the single-shot timer deleted itself
+}
+
+TEST_F(PooledFixture, timerControlFromOutsideThePoolIsForwardedToTheStrand)
+{
+    TaskPool pool(2);
+    auto record = std::make_shared<TickingWorker::Record>();
+    auto* worker = new TickingWorker(record);
+    ASSERT_TRUE(worker->moveToTaskPool(&pool));
+
+    // From main: the node lives in the pool, so these are posted to it.
+    worker->timer->setSingleShot(true);
+    worker->timer->setInterval(3ms);
+    worker->timer->start();
+
+    ASSERT_TRUE(waitForTicks(*record, 1));
+    pool.waitForDone();
+
+    worker->timer->start(50ms);
+    worker->timer->stop();  // applied in order: the restart is cancelled
+    std::this_thread::sleep_for(80ms);
+    pool.waitForDone();
+
+    std::lock_guard<std::mutex> lock(record->mutex);
+    EXPECT_EQ(record->ticks, 1);
+    EXPECT_EQ(record->ticksOffOwner, 0);
+    EXPECT_EQ(record->emitsOffOwner, 0);
+}
+
+TEST_F(PooledFixture, timerOfAPooledNodeFollowsItBackToAFixedThread)
+{
+    TaskPool pool(2);
+    auto record = std::make_shared<TickingWorker::Record>();
+    auto* worker = new TickingWorker(record);
+    ASSERT_TRUE(worker->moveToTaskPool(&pool));
+    worker->timer->setSingleShot(true);
+    worker->timer->start(20ms);
+
+    ASSERT_TRUE(worker->moveToThread(std::this_thread::get_id()));  // posted to the strand
+    pool.waitForDone();
+    ASSERT_NE(worker->ownerEventLoop(), nullptr);
+
+    ASSERT_TRUE(waitUntil([&]() {
+        app->loopOnce();
+        return ticksOf(*record) > 0;
+    }));
+    std::lock_guard<std::mutex> lock(record->mutex);
+    EXPECT_EQ(record->ticks, 1);
+    EXPECT_EQ(record->threads.count(std::this_thread::get_id()), 1u);
+}
+
+TEST_F(PooledFixture, destroyingAPooledNodeCancelsItsTimer)
+{
+    TaskPool pool(2);
+    auto record = std::make_shared<TickingWorker::Record>();
+    auto* worker = new TickingWorker(record);
+    ASSERT_TRUE(worker->moveToTaskPool(&pool));
+    worker->timer->start(10ms);
+
+    worker->deleteLater();
+    pool.waitForDone();
+    std::this_thread::sleep_for(40ms);
+    pool.waitForDone();
+
+    EXPECT_EQ(ticksOf(*record), 0);
+}
+
+TEST_F(PooledFixture, shutdownWithAPeriodicPooledTimerDoesNotHang)
+{
+    auto record = std::make_shared<TickingWorker::Record>();
+    auto doneFlag = std::make_shared<std::atomic<bool>>(false);
+    std::thread runner([record, doneFlag]() {
+        TaskPool pool(2);
+        auto* worker = new TickingWorker(record);
+        worker->timer->start(1ms);
+        if (worker->moveToTaskPool(&pool)) {
+            waitForTicks(*record, 3);
+        }
+        pool.shutdown();  // stops the timers, then destroys the node
+        doneFlag->store(true);
+    });
+
+    const bool finished = waitUntil([&]() { return doneFlag->load(); }, 5s);
+    if (finished) {
+        runner.join();
+    } else {
+        runner.detach();  // keep the suite alive; the assertion reports it
+    }
+    ASSERT_TRUE(finished) << "TaskPool::shutdown() hung with a periodic pooled timer";
+    EXPECT_GE(ticksOf(*record), 3);
+}
+
+TEST_F(PooledFixture, stressManyPooledNodesWithPeriodicTimers)
+{
+    TaskPool pool(4);
+    constexpr int kNodes = 32;
+    std::vector<std::shared_ptr<TickingWorker::Record>> records;
+    std::vector<TickingWorker*> workers;
+    for (int i = 0; i < kNodes; ++i) {
+        records.push_back(std::make_shared<TickingWorker::Record>());
+        auto* worker = new TickingWorker(records.back());
+        worker->stopAfter = 10;
+        worker->timer->start(1ms);
+        ASSERT_TRUE(worker->moveToTaskPool(&pool));
+        workers.push_back(worker);
+    }
+
+    for (const auto& record : records) {
+        ASSERT_TRUE(waitForTicks(*record, 10, 5s));
+    }
+    // Destroy half while the rest may still be finishing their last tick.
+    for (int i = 0; i < kNodes; i += 2) {
+        workers[i]->deleteLater();
+    }
+    pool.waitForDone();
+
+    std::set<std::thread::id> allThreads;
+    for (const auto& record : records) {
+        std::lock_guard<std::mutex> lock(record->mutex);
+        EXPECT_EQ(record->ticks, 10);
+        EXPECT_EQ(record->ticksOffOwner, 0);
+        EXPECT_EQ(record->emitsOffOwner, 0);
+        allThreads.insert(record->threads.begin(), record->threads.end());
+    }
+    EXPECT_GT(allThreads.size(), 1u);  // the ticks spread over several workers
+}
+
+TEST_F(PooledFixture, timeoutInFlightWhenThePooledNodeMigratesFiresOnlyOnceOnTheNewOwner)
+{
+    // The timeout is posted to the strand while a slot keeps the strand busy;
+    // that slot then moves the node to main. The posted timeout must be
+    // dropped (the timer no longer belongs to the strand) and the timer, which
+    // main re-armed with the same, already passed deadline, fires once there.
+    TaskPool pool(2);
+    auto record = std::make_shared<TickingWorker::Record>();
+    auto* worker = new TickingWorker(record);
+    const std::thread::id mainId = std::this_thread::get_id();
+    ASSERT_TRUE(worker->moveToTaskPool(&pool));
+
+    Signal<int> input;
+    input.connect(NodePtr<TickingWorker>(worker), [mainId](TickingWorker& self, int) {
+        self.timer->setSingleShot(true);
+        self.timer->start(1ms);
+        std::this_thread::sleep_for(30ms);  // the deadline passes: timeout posted behind us
+        self.moveToThread(mainId);          // inside the owner: applied now
+    });
+    input.emit(0);
+    pool.waitForDone();
+    ASSERT_NE(worker->ownerEventLoop(), nullptr);
+
+    ASSERT_TRUE(waitUntil([&]() {
+        app->loopOnce();
+        return ticksOf(*record) > 0;
+    }));
+    for (int i = 0; i < 10; ++i) {
+        app->loopOnce();
+    }
+    std::lock_guard<std::mutex> lock(record->mutex);
+    EXPECT_EQ(record->ticks, 1);
+    EXPECT_EQ(record->ticksOffOwner, 0);
+    EXPECT_EQ(record->emitsOffOwner, 0);
+    EXPECT_EQ(record->threads.count(mainId), 1u);
+    EXPECT_EQ(record->threads.size(), 1u);
+}
+
+TEST_F(PooledFixture, aPooledTimerDueDuringShutdownDoesNotFire)
+{
+    TaskPool pool(1);
+    auto record = std::make_shared<TickingWorker::Record>();
+    auto* worker = new TickingWorker(record);
+    ASSERT_TRUE(worker->moveToTaskPool(&pool));
+    std::promise<void> armed;
+
+    Signal<int> input;
+    input.connect(NodePtr<TickingWorker>(worker), [&armed](TickingWorker& self, int) {
+        self.timer->setSingleShot(true);
+        self.timer->start(20ms);
+        armed.set_value();
+        std::this_thread::sleep_for(60ms);  // the deadline passes while shutdown() waits
+    });
+    input.emit(0);
+    armed.get_future().wait();
+    pool.shutdown();
+
+    EXPECT_EQ(ticksOf(*record), 0);
+}
+
+TEST_F(PooledFixture, stoppedOrDestroyedPooledTimersAreDisarmedAtOnce)
+{
+    TaskPool pool(2);
+    auto record = std::make_shared<TickingWorker::Record>();
+    auto* worker = new TickingWorker(record);
+    ASSERT_TRUE(worker->moveToTaskPool(&pool));
+    EXPECT_EQ(pool.armedTimerCount(), 0u);
+
+    worker->timer->start(1h);
+    worker->timer->start(1h);  // restarting replaces the deadline, it does not add one
+    pool.waitForDone();
+    EXPECT_EQ(pool.armedTimerCount(), 1u);
+
+    worker->timer->stop();
+    pool.waitForDone();
+    EXPECT_EQ(pool.armedTimerCount(), 0u);
+
+    worker->timer->start(1h);
+    pool.waitForDone();
+    EXPECT_EQ(pool.armedTimerCount(), 1u);
+    worker->deleteLater();
+    pool.waitForDone();
+    EXPECT_EQ(pool.armedTimerCount(), 0u);
+}
+
+TEST_F(PooledFixture, aTimerStartedInsideASlotWhileShutdownDrainsNeverFires)
+{
+    TaskPool pool(1);
+    auto record = std::make_shared<TickingWorker::Record>();
+    auto* worker = new TickingWorker(record);
+    ASSERT_TRUE(worker->moveToTaskPool(&pool));
+    std::promise<void> running;
+
+    Signal<int> input;
+    input.connect(NodePtr<TickingWorker>(worker), [&running](TickingWorker& self, int) {
+        running.set_value();
+        std::this_thread::sleep_for(30ms);  // shutdown() has started meanwhile
+        self.timer->setSingleShot(true);
+        self.timer->start(1ms);  // the timer service is already stopped: ignored
+        std::this_thread::sleep_for(20ms);
+    });
+    input.emit(0);
+    running.get_future().wait();
+    pool.shutdown();
+
+    EXPECT_EQ(ticksOf(*record), 0);
+}
+
+TEST_F(PooledFixture, aTimeoutPostedForATimerDestroyedBeforeItRunsIsDropped)
+{
+    TaskPool pool(1);
+    auto* worker = new Worker();
+    std::atomic<int> fired{0};
+    worker->onValueHook = [&fired](Worker& self, int) {
+        auto* timer = new Timer(&self);
+        timer->setSingleShot(true);
+        timer->timeout.connect([&fired]() { fired.fetch_add(1); });
+        timer->start(1ms);
+        std::this_thread::sleep_for(20ms);  // the timeout is posted behind this slot
+        delete timer;                       // ...and finds the timer gone
+    };
+    Signal<int> input;
+    input.connect(NodePtr<Worker>(worker), &Worker::onValue);
+    ASSERT_TRUE(worker->moveToTaskPool(&pool));
+
+    input.emit(0);
+    pool.waitForDone();
+    std::this_thread::sleep_for(10ms);
+    pool.waitForDone();
+
+    EXPECT_EQ(fired.load(), 0);
+}
+
+TEST_F(PooledFixture, aTimeoutPostedBeforeTheTimerWasRestartedIsIgnored)
+{
+    TaskPool pool(1);
+    auto record = std::make_shared<TickingWorker::Record>();
+    auto* worker = new TickingWorker(record);
+    ASSERT_TRUE(worker->moveToTaskPool(&pool));
+
+    Signal<int> input;
+    input.connect(NodePtr<TickingWorker>(worker), [](TickingWorker& self, int) {
+        self.timer->setSingleShot(true);
+        self.timer->start(1ms);
+        std::this_thread::sleep_for(20ms);  // the 1 ms timeout is posted behind us
+        self.timer->start(1h);              // new generation: that timeout is stale
+    });
+    input.emit(0);
+    pool.waitForDone();
+    std::this_thread::sleep_for(10ms);
+    pool.waitForDone();
+
+    EXPECT_EQ(ticksOf(*record), 0);
+    EXPECT_EQ(pool.armedTimerCount(), 1u);  // only the 1 h deadline is left
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 5: IoService edge cases (sockets are covered in SNFNetworkTests)
+// ═════════════════════════════════════════════════════════════════════════════
+
+TEST_F(PooledFixture, ioServiceIgnoresInvalidUnknownAndLateRequests)
+{
+    TaskPool pool(1);
+    detail::Strand* strand = detail::Strand::acquire(pool);
+    int fds[2] = {-1, -1};
+    ASSERT_EQ(::pipe(fds), 0);
+
+    detail::IoService service;
+    service.registerIO(strand, -1, EPOLLIN, [](std::uint32_t) {});  // negative fd
+    service.modifyIO(fds[0], EPOLLIN);                              // unknown fd
+    service.unregisterIO(fds[0]);                                    // unknown fd
+    EXPECT_EQ(service.watchCount(), 0u);
+    EXPECT_FALSE(service.hasIOWatch(fds[0]));
+
+    service.stop();
+    service.registerIO(strand, fds[0], EPOLLIN, [](std::uint32_t) {});  // after stop
+    EXPECT_EQ(service.watchCount(), 0u);
+
+    ::close(fds[0]);
+    ::close(fds[1]);
+    detail::Strand::release(strand);
+}
+
+TEST_F(PooledFixture, ioServiceDeliversReadinessAndSurvivesAClosedDescriptor)
+{
+    TaskPool pool(1);
+    detail::Strand* strand = detail::Strand::acquire(pool);
+    int fds[2] = {-1, -1};
+    ASSERT_EQ(::pipe(fds), 0);
+
+    detail::IoService service;
+    std::atomic<int> calls{0};
+    std::atomic<bool> insideStrand{false};
+    service.registerIO(strand, fds[0], EPOLLIN, [&](std::uint32_t events) {
+        insideStrand.store(strand->isCurrent() && (events & EPOLLIN) != 0);
+        char byte = 0;
+        (void)::read(fds[0], &byte, 1);
+        calls.fetch_add(1);
+    });
+    ASSERT_EQ(::write(fds[1], "x", 1), 1);
+    ASSERT_TRUE(waitUntil([&]() { return calls.load() == 1; }));
+    pool.waitForDone();
+    EXPECT_TRUE(insideStrand.load());
+
+    // Closing the descriptor behind the service's back must not throw when
+    // the watch is changed or removed afterwards.
+    ::close(fds[0]);
+    EXPECT_NO_THROW(service.modifyIO(fds[0], EPOLLIN | EPOLLOUT));
+    EXPECT_NO_THROW(service.unregisterIO(fds[0]));
+    EXPECT_EQ(service.watchCount(), 0u);
+
+    service.stop();
+    ::close(fds[1]);
+    detail::Strand::release(strand);
 }

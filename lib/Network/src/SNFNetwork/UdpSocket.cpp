@@ -1,6 +1,7 @@
 #include "SNFNetwork/UdpSocket.h"
 
 #include "SNFCore/EventLoop.h"
+#include "SNFCore/Executor.h"
 #include "SNFCore/NodePtr.h"
 #include "SNFNetwork/HostAddress.h"
 
@@ -76,14 +77,14 @@ std::uint16_t addressToPort(const sockaddr_storage& addr)
 }
 
 template <typename Fn>
-bool invokeOnOwnerThreadAndWait(EventLoop* loop, Fn&& fn, bool fallback = false)
+bool invokeOnOwnerThreadAndWait(Executor* owner, Fn&& fn, bool fallback = false)
 {
-    if (! loop) {
+    if (! owner) {
         return fallback;
     }
 
     // Shared with the posted task, which may outlive this call: if the owner
-    // loop does not pick the task up in time we return and the task, when it
+    // does not pick the task up in time we return and the task, when it
     // eventually runs, must not touch this stack frame.
     struct State {
         std::mutex mutex;
@@ -95,7 +96,7 @@ bool invokeOnOwnerThreadAndWait(EventLoop* loop, Fn&& fn, bool fallback = false)
     };
     auto state = std::make_shared<State>();
 
-    loop->post([state, fn = std::forward<Fn>(fn)]() mutable {
+    owner->post([state, fn = std::forward<Fn>(fn)]() mutable {
         {
             std::lock_guard<std::mutex> lock(state->mutex);
             if (state->abandoned) {
@@ -133,8 +134,8 @@ UdpSocket::~UdpSocket() { transitionToUnbound(); }
 
 void UdpSocket::setBlocking(bool blocking)
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
-        loop->post([self = NodePtr<UdpSocket>(this), blocking]() {
+    if (Executor* owner = ownerExecutor(); owner && !owner->isCurrent()) {
+        owner->post([self = NodePtr<UdpSocket>(this), blocking]() {
             if (self) {
                 self->setBlocking(blocking);
             }
@@ -174,9 +175,9 @@ bool UdpSocket::reuseAddress() const
 
 bool UdpSocket::bind(const HostAddress& hostAddress, std::uint16_t port)
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
+    if (Executor* owner = ownerExecutor(); owner && !owner->isCurrent()) {
         return invokeOnOwnerThreadAndWait(
-            loop,
+            owner,
             [self = NodePtr<UdpSocket>(this), hostAddress, port]() {
                 return self ? self->bind(hostAddress, port) : false;
             },
@@ -267,7 +268,7 @@ std::size_t UdpSocket::sendDatagram(Span<const std::byte> data,
         return 0;
     }
 
-    if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
+    if (Executor* owner = ownerExecutor(); owner && !owner->isCurrent()) {
         const bool canQueue = [this]() {
             std::lock_guard<std::mutex> lock(m_mutex);
             return m_state == UdpSocketState::Bound;
@@ -278,7 +279,7 @@ std::size_t UdpSocket::sendDatagram(Span<const std::byte> data,
         }
 
         const ByteArray::Storage pending(data.begin(), data.end());
-        loop->post([self = NodePtr<UdpSocket>(this), pending, destAddress, destPort]() {
+        owner->post([self = NodePtr<UdpSocket>(this), pending, destAddress, destPort]() {
             if (self) {
                 self->sendDatagram(Span<const std::byte>(pending.data(), pending.size()), destAddress, destPort);
             }
@@ -336,9 +337,9 @@ NetworkDatagram UdpSocket::pendingDatagram()
 
 bool UdpSocket::joinMulticastGroup(const HostAddress& groupAddress, const HostAddress& interfaceAddress)
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
+    if (Executor* owner = ownerExecutor(); owner && !owner->isCurrent()) {
         return invokeOnOwnerThreadAndWait(
-            loop,
+            owner,
             [self = NodePtr<UdpSocket>(this), groupAddress, interfaceAddress]() {
                 return self ? self->joinMulticastGroup(groupAddress, interfaceAddress) : false;
             },
@@ -402,9 +403,9 @@ bool UdpSocket::joinMulticastGroup(const HostAddress& groupAddress, const HostAd
 
 bool UdpSocket::leaveMulticastGroup(const HostAddress& groupAddress, const HostAddress& interfaceAddress)
 {
-    if (EventLoop* loop = ownerEventLoop(); loop && !loop->isInThisThread()) {
+    if (Executor* owner = ownerExecutor(); owner && !owner->isCurrent()) {
         return invokeOnOwnerThreadAndWait(
-            loop,
+            owner,
             [self = NodePtr<UdpSocket>(this), groupAddress, interfaceAddress]() {
                 return self ? self->leaveMulticastGroup(groupAddress, interfaceAddress) : false;
             },
@@ -605,8 +606,8 @@ void UdpSocket::updateInterestForState()
 
 void UdpSocket::emitReadyRead()
 {
-    if (EventLoop* loop = ownerEventLoop()) {
-        loop->post([self = NodePtr<UdpSocket>(this)]() {
+    if (Executor* owner = ownerExecutor()) {
+        owner->post([self = NodePtr<UdpSocket>(this)]() {
             if (self) {
                 self->readyRead.emit();
             }
@@ -619,8 +620,8 @@ void UdpSocket::emitReadyRead()
 
 void UdpSocket::emitBytesWritten(std::size_t written)
 {
-    if (EventLoop* loop = ownerEventLoop()) {
-        loop->post([self = NodePtr<UdpSocket>(this), written]() {
+    if (Executor* owner = ownerExecutor()) {
+        owner->post([self = NodePtr<UdpSocket>(this), written]() {
             if (self) {
                 self->bytesWritten.emit(written);
             }
@@ -633,8 +634,8 @@ void UdpSocket::emitBytesWritten(std::size_t written)
 
 void UdpSocket::emitErrorOccurred(std::string message)
 {
-    if (EventLoop* loop = ownerEventLoop()) {
-        loop->post([self = NodePtr<UdpSocket>(this), message = std::move(message)]() {
+    if (Executor* owner = ownerExecutor()) {
+        owner->post([self = NodePtr<UdpSocket>(this), message = std::move(message)]() {
             if (self) {
                 self->errorOccurred.emit(message);
             }

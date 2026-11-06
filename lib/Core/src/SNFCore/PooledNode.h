@@ -29,11 +29,20 @@ class TaskPool;
  *   `std::this_thread::get_id()`, `thread_local` or `ThreadStorage` (for
  *   example a per-thread database connection) across calls.
  * - There is no event-loop tick: `update()` is final and never called.
- * - No Timer, Process or I/O node in the subtree (anything whose
- *   `requiresEventLoop()` is true): moveToTaskPool() rejects such a subtree,
- *   and creating one as a child inside a slot throws. Drive the node from
- *   a Timer on a thread with an EventLoop through a signal instead.
- * - Root nodes cannot be created inside a slot; children of this node can.
+ * - Timers work: a Timer in the subtree fires inside the node's strand (a
+ *   per-pool deadline thread posts each timeout to it), keeps its remaining
+ *   time when the node moves in or out of the pool, and is disarmed when the
+ *   pool shuts down.
+ * - Sockets work (TcpSocket, TcpServer, UdpSocket, LocalSocket,
+ *   LocalServer): a per-pool I/O thread watches their descriptors and runs
+ *   their callbacks inside the node's strand. A descriptor stays quiet while
+ *   its callback is queued or running, and is watched again right after.
+ * - No Process in the subtree, nor anything else whose `requiresEventLoop()`
+ *   is true: moveToTaskPool() rejects such a subtree, and creating one as a
+ *   child inside a slot throws.
+ * - Nodes created inside a slot belong to the node's strand: children of it,
+ *   or new roots. A new PooledNode root can then call moveToTaskPool() to get
+ *   a strand of its own (e.g. one per accepted connection).
  * - A slot must not wait for other work of the same pool.
  *
  * Signals emitted inside the node to nodes of the same subtree are delivered
@@ -70,7 +79,9 @@ public:
      * @return `false` if the node has a parent (only whole subtrees move),
      *         the subtree contains a node that requiresEventLoop(), or the
      *         pool has shut down. `true` if moved, accepted, or already on a
-     *         strand of @p pool. When called from outside the owner only the
+     *         strand of @p pool of its own. A node created inside another
+     *         pooled node's slot starts on that node's strand; calling this
+     *         from there gives it a strand of its own. When called from outside the owner only the
      *         pool check is done before accepting; the others are done when
      *         the move is applied (a rejected move leaves the node where it
      *         is). @p pool must outlive an accepted request.

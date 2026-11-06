@@ -5,6 +5,7 @@ add_executable(SNFNetworkTests
     "${CMAKE_CURRENT_SOURCE_DIR}/LocalSocketTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/LocalServerTests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/UdpSocketTests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/PooledSocketTests.cpp"
 )
 
 target_link_libraries(SNFNetworkTests

@@ -10,6 +10,7 @@
 #include "SNFCore/EventLoop.h"
 #include "SNFCore/Executor.h"
 #include "SNFCore/NodePtr.h"
+#include "SNFCore/Strand.h"
 #include "SNFCore/TaskPool.h"
 #include "SNFCore/ThreadPool.h"
 
@@ -288,15 +289,18 @@ std::uint64_t Node::generation() const { return m_generation; }
 Node::Node(Node* parent) : m_parent(parent)
 {
     // Checked before any registration, so a throw leaves nothing behind. A
-    // TaskPool worker has no EventLoop: only a child of a pooled node, created
-    // inside that node's strand, can be created there (it joins the strand).
+    // TaskPool worker has no EventLoop: a node can only be created there
+    // inside a strand (a PooledNode's slot), and it belongs to that strand:
+    // as a child of a node of it, or as a new root of it.
+    detail::Strand* const creatingStrand = TaskPool::isWorkerThread() ? detail::Strand::current() : nullptr;
     if (TaskPool::isWorkerThread()) {
         const Executor* parentOwner = m_parent ? m_parent->ownerExecutor() : nullptr;
-        if (! parentOwner || ! parentOwner->isCurrent()) {
+        const bool valid = m_parent ? (parentOwner && parentOwner->isCurrent()) : (creatingStrand != nullptr);
+        if (! valid) {
             throw std::logic_error(
-                "snf::Node cannot be created on a TaskPool worker: it has no EventLoop to deliver the node's "
-                "queued signals and deferred deletes. Create nodes on a thread with an EventLoop (e.g. a "
-                "ThreadPool worker), or as children of a PooledNode from inside its slots");
+                "snf::Node cannot be created on a TaskPool worker outside a strand: it has no EventLoop to deliver "
+                "the node's queued signals and deferred deletes. Create nodes on a thread with an EventLoop (e.g. a "
+                "ThreadPool worker), or from inside a PooledNode's slots");
         }
     }
 
@@ -321,7 +325,11 @@ Node::Node(Node* parent) : m_parent(parent)
         setOwnerExecutor(owner);
         m_parent->addChild(this);
     } else {
-        owner = app->getOrCreateCurrentThreadEventLoop();
+        if (creatingStrand) {
+            owner = creatingStrand;  // a new root of the strand that creates it
+        } else {
+            owner = app->getOrCreateCurrentThreadEventLoop();
+        }
         setOwnerExecutor(owner);
         m_isRoot = true;
         owner->addRootNode(this);

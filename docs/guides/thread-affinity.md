@@ -254,13 +254,20 @@ Deriving from `PooledNode` means accepting its contract:
   (`thread_local`, `ThreadStorage`, a per-thread database connection) across
   calls.
 - `update()` is final and never called: there is no loop tick.
-- No `Timer`, `Process` or I/O node in the subtree (anything whose
-  `requiresEventLoop()` is true). `moveToTaskPool()` returns `false` for such a
-  subtree, and creating one as a child inside a slot throws. To act on a
-  schedule, connect a `Timer` that lives on a thread with an `EventLoop` to
-  the pooled node.
-- Children can be created inside a slot (they join the node's strand); root
-  nodes cannot.
+- `Timer`s work: a timer in the subtree fires inside the node's strand, keeps
+  its remaining time when the node moves into or out of the pool, and stops
+  when the pool shuts down (no timeout fires once `shutdown()` has started).
+- Sockets work: `TcpSocket`, `TcpServer`, `UdpSocket`, `LocalSocket` and
+  `LocalServer` in the subtree have their descriptors watched by the pool's
+  I/O thread, and their signals (`readyRead`, `newConnection`...) run inside
+  the node's strand. They keep working when the node moves into or out of the
+  pool.
+- No `Process` in the subtree (nor anything whose `requiresEventLoop()` is
+  true). `moveToTaskPool()` returns `false` for such a subtree, and creating
+  one as a child inside a slot throws.
+- Nodes created inside a slot belong to the node's strand: children of it, or
+  new roots. A new `PooledNode` root can call `moveToTaskPool()` to get a
+  strand of its own.
 - Only whole subtrees move: a node with a parent is rejected.
 
 Inside the node, `Auto` signals to nodes of the same subtree are synchronous;
@@ -271,6 +278,34 @@ work; the ones still alive afterwards are destroyed.
 
 The migration hooks (`onAboutToMoveToThread`, `onMovedToThread`) receive
 `nullptr` for the pool side of a move.
+
+### One pooled handler per connection
+
+Each connection gets its own strand, so connections are served in parallel
+on all the workers while every handler is written without locks:
+
+```cpp
+class ClientHandler : public snf::PooledNode {
+public:
+    explicit ClientHandler(snf::TcpSocket* socket) : m_socket(socket) {
+        m_socket->setParent(this);   // the socket moves with its handler
+        m_socket->readyRead.connect(NodePtr<ClientHandler>(this), &ClientHandler::onReadyRead);
+    }
+    void onReadyRead() { m_socket->write(process(m_socket->readAll())); }
+private:
+    snf::TcpSocket* m_socket;
+};
+
+server.newConnection.connect([&server]() {
+    while (snf::TcpSocket* socket = server.nextPendingConnection()) {
+        (new ClientHandler(socket))->moveToTaskPool();
+    }
+});
+```
+
+The acceptor can live on a thread with an `EventLoop`, as above, or be a
+`PooledNode` itself: a handler created inside its slot starts on the
+acceptor's strand and moves to its own with `moveToTaskPool()`.
 
 ---
 
