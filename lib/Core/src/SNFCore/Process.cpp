@@ -87,6 +87,7 @@ void applyEnvironment(const std::vector<std::string>& entries)
 
 Process::Process(Node* parent) : Node(parent)
 {
+    requireEventLoopOwner("Process");
     m_exitPollTimer = new Timer(this);
     m_exitPollTimer->setInterval(15);
     m_exitPollTimer->timeout.connect(NodePtr<Process>(this), [](Process& self) { self.pollChildExit(); });

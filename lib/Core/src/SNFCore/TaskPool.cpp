@@ -2,6 +2,7 @@
 
 #include "SNFCore/Application.h"
 #include "SNFCore/Logging.h"
+#include "SNFCore/Strand.h"
 
 #include <algorithm>
 #include <exception>
@@ -110,6 +111,83 @@ void TaskPool::shutdown()
     for (std::thread& worker : workers) {
         worker.join();
     }
+
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_joined = true;
+    }
+
+    // No worker can run a strand any more: destroy the pooled nodes left.
+    std::vector<detail::Strand*> strands;
+    {
+        std::lock_guard<std::mutex> lock(m_strandMutex);
+        strands.resize(m_strands.size());
+        std::transform(m_strands.begin(), m_strands.end(), strands.begin(),
+                       [](const std::unique_ptr<detail::Strand>& strand) { return strand.get(); });
+    }
+    for (detail::Strand* strand : strands) {
+        strand->destroyRemainingNodes();
+    }
+}
+
+std::size_t TaskPool::strandCount() const
+{
+    std::lock_guard<std::mutex> lock(m_strandMutex);
+    return m_strands.size();
+}
+
+detail::Strand* TaskPool::acquireStrand()
+{
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_stopping || m_workers.empty()) {
+            return nullptr;
+        }
+    }
+    std::lock_guard<std::mutex> lock(m_strandMutex);
+    detail::Strand* strand = nullptr;
+    if (! m_freeStrands.empty()) {
+        strand = m_freeStrands.back();
+        m_freeStrands.pop_back();
+    } else {
+        m_strands.push_back(std::make_unique<detail::Strand>(*this));
+        strand = m_strands.back().get();
+    }
+    strand->m_free = false;
+    strand->m_reserved = true;
+    return strand;
+}
+
+void TaskPool::releaseStrandReservation(detail::Strand* strand)
+{
+    std::lock_guard<std::mutex> lock(m_strandMutex);
+    strand->m_reserved = false;
+    if (strand->isRecyclable()) {
+        strand->m_free = true;
+        m_freeStrands.push_back(strand);
+    }
+}
+
+void TaskPool::recycleStrandIfIdle(detail::Strand* strand)
+{
+    std::lock_guard<std::mutex> lock(m_strandMutex);
+    if (strand->isRecyclable()) {
+        strand->m_free = true;
+        m_freeStrands.push_back(strand);
+    }
+}
+
+bool TaskPool::enqueueStrandDrain(detail::Strand* strand)
+{
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_joined || (m_workers.empty() && ! m_stopping)) {
+            return false;
+        }
+        m_queue.push_back([strand]() { strand->drain(); });
+    }
+    m_workAvailable.notify_one();
+    return true;
 }
 
 std::size_t TaskPool::maxThreadCount() const

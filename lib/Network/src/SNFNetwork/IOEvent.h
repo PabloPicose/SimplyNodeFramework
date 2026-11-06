@@ -80,6 +80,9 @@ public:
     explicit IOEvent(Node* parent = nullptr);
     ~IOEvent() override;
 
+    /** @brief `true`: its descriptor is watched by the owner EventLoop, so it cannot live in a TaskPool. */
+    bool requiresEventLoop() const override { return true; }
+
     /** @brief Sets the file descriptor to watch. Must be called before `start()`. */
     void setDescriptor(int fd);
 

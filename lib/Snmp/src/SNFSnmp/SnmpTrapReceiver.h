@@ -72,6 +72,9 @@ public:
     explicit SnmpTrapReceiver(Node* parent = nullptr);
     ~SnmpTrapReceiver() override;
 
+    /** @brief `true`: its socket is watched by the owner EventLoop, so it cannot live in a TaskPool. */
+    bool requiresEventLoop() const override { return true; }
+
     /**
      * @brief Sets the UDP port to listen on (default: 162).
      *

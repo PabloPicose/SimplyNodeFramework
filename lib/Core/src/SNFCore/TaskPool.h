@@ -19,6 +19,10 @@
 
 namespace snf {
 
+namespace detail {
+class Strand;
+}
+
 /**
  * @class TaskPool
  * @ingroup SNFCore
@@ -35,6 +39,10 @@ namespace snf {
  *
  * A task must not block waiting for another task of the same pool: with every
  * worker blocked that way, the pool deadlocks.
+ *
+ * The pool also runs `PooledNode`s (see `PooledNode::moveToTaskPool()`):
+ * each pooled subtree gets a strand that runs its work serially on whichever
+ * worker is free.
  *
  * @code
  * snf::TaskPool::globalInstance()->start([]() { crunchNumbers(); });
@@ -88,6 +96,12 @@ public:
      * @brief Stops accepting tasks, runs the ones already queued, and joins
      *        the workers. Idempotent and thread-safe: every caller returns
      *        once the workers have stopped. Called by the destructor.
+     *
+     * Pooled nodes keep running while the queue drains (their queued signal
+     * deliveries are processed, and they may queue more). Once the workers
+     * are joined, the pooled nodes still alive are destroyed on the calling
+     * thread, each as if inside its own strand. A pooled node that keeps
+     * re-queuing work for itself forever would keep shutdown() waiting.
      * @throws std::logic_error if called from one of this pool's workers.
      */
     void shutdown();
@@ -104,9 +118,22 @@ public:
     /** @brief Returns the number of tasks waiting for a worker. */
     std::size_t queuedTaskCount() const;
 
+    /** @brief Returns how many strands the pool has created (in use or idle, for reuse). */
+    std::size_t strandCount() const;
+
 private:
+    friend class detail::Strand;
+
     void workerLoop();
     bool isOwnWorkerThread() const;
+
+    // Strand support. Strands are created on demand, never freed while the
+    // pool lives, and recycled once idle without nodes.
+    detail::Strand* acquireStrand();
+    void releaseStrandReservation(detail::Strand* strand);
+    void recycleStrandIfIdle(detail::Strand* strand);
+    // Like start(), but also accepted while shutdown() drains the queue.
+    bool enqueueStrandDrain(detail::Strand* strand);
 
     mutable std::mutex m_mutex;
     std::mutex m_shutdownMutex;  // serialises shutdown() callers; never taken by workers
@@ -116,6 +143,11 @@ private:
     std::vector<std::thread> m_workers;
     std::size_t m_activeTasks = 0;
     bool m_stopping = false;
+    bool m_joined = false;
+
+    mutable std::mutex m_strandMutex;
+    std::vector<std::unique_ptr<detail::Strand>> m_strands;
+    std::vector<detail::Strand*> m_freeStrands;
 };
 
 }  // namespace snf

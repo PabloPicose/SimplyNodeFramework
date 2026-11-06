@@ -72,16 +72,16 @@ public:
     void enqueueDelete(Node* node) override;
 
     /** @brief Registers @p node so it receives per-iteration `run()` calls. */
-    void addNode(Node* node);
+    void addNode(Node* node) override;
 
     /** @brief Unregisters @p node from per-iteration `run()` calls. */
-    void removeNode(Node* node);
+    void removeNode(Node* node) override;
 
     /** @brief Adds @p node to the root-node list managed by this EventLoop. */
-    void addRootNode(Node* node);
+    void addRootNode(Node* node) override;
 
     /** @brief Removes @p node from the root-node list. */
-    void removeRootNode(Node* node);
+    void removeRootNode(Node* node) override;
 
     /** @brief Returns the number of root nodes registered with this EventLoop. */
     std::size_t getRootNodesCount() const;

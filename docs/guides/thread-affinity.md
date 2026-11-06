@@ -223,10 +223,54 @@ job->finished.connect(NodePtr<Ui>(ui), &Ui::onParsed);  // Auto: runs on ui's th
 snf::TaskPool::globalInstance()->start(job);
 ```
 
-A `TaskPool` worker cannot host nodes: constructing a `Node` there throws
-`std::logic_error`. A task must not wait for another task of the same pool, or
-the pool can deadlock once every worker waits. `waitForDone()` and `shutdown()`
-throw if called from one of the pool's own workers.
+A `TaskPool` worker cannot host ordinary nodes: constructing a root `Node`
+there throws `std::logic_error`. A task must not wait for another task of the
+same pool, or the pool can deadlock once every worker waits. `waitForDone()`
+and `shutdown()` throw if called from one of the pool's own workers.
+
+### Nodes that run on the TaskPool: `PooledNode`
+
+A class derived from `snf::PooledNode` can live in a `TaskPool` instead of on
+one thread. After `moveToTaskPool()` its slots run on whichever worker is free,
+but never two at a time and always in the order they were queued, so the class
+is still written without locks. Many pooled nodes spread over all the workers
+by themselves, and a node that receives more work simply takes more turns.
+
+```cpp
+class Analyzer : public snf::PooledNode {
+public:
+    void onSample(double value);       // no locks needed
+};
+
+auto* analyzer = new Analyzer();
+analyzer->moveToTaskPool();            // the Application's TaskPool
+// sampleReady: a snf::Signal<double> of any node, on any thread
+source->sampleReady.connect(NodePtr<Analyzer>(analyzer), &Analyzer::onSample);
+```
+
+Deriving from `PooledNode` means accepting its contract:
+
+- The thread changes from one call to the next: do not keep per-thread state
+  (`thread_local`, `ThreadStorage`, a per-thread database connection) across
+  calls.
+- `update()` is final and never called: there is no loop tick.
+- No `Timer`, `Process` or I/O node in the subtree (anything whose
+  `requiresEventLoop()` is true). `moveToTaskPool()` returns `false` for such a
+  subtree, and creating one as a child inside a slot throws. To act on a
+  schedule, connect a `Timer` that lives on a thread with an `EventLoop` to
+  the pooled node.
+- Children can be created inside a slot (they join the node's strand); root
+  nodes cannot.
+- Only whole subtrees move: a node with a parent is rejected.
+
+Inside the node, `Auto` signals to nodes of the same subtree are synchronous;
+signals to other nodes are queued to the receiver. `deleteLater()` destroys the
+node inside its strand. `moveToThread()` takes it back to a fixed thread.
+During `TaskPool::shutdown()` the pooled nodes keep processing their queued
+work; the ones still alive afterwards are destroyed.
+
+The migration hooks (`onAboutToMoveToThread`, `onMovedToThread`) receive
+`nullptr` for the pool side of a move.
 
 ---
 

@@ -54,6 +54,9 @@ public:
 
     /** @brief Constructs a Timer, optionally attaching it to @p parent. */
     explicit Timer(Node* parent = nullptr);
+
+    /** @brief `true`: its timeouts are scheduled by the owner EventLoop, so it cannot live in a TaskPool. */
+    bool requiresEventLoop() const override { return true; }
     ~Timer() override;
 
     /** @brief Starts the timer using the previously configured interval. */

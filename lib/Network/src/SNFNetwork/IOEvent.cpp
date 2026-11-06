@@ -10,7 +10,7 @@
 
 namespace snf {
 
-IOEvent::IOEvent(Node* parent) : Node(parent) {}
+IOEvent::IOEvent(Node* parent) : Node(parent) { requireEventLoopOwner("IOEvent"); }
 
 IOEvent::~IOEvent()
 {

@@ -32,9 +32,9 @@ Node::~Node()
     detail::NodeRegistry::instance().unregisterNode(this);
 
     const auto app = Application::instance();
-    EventLoop* const ownerLoop = ownerEventLoop();
-    if (m_isRoot && ownerLoop) {
-        ownerLoop->removeRootNode(this);
+    Executor* const owner = ownerExecutor();
+    if (m_isRoot && owner) {
+        owner->removeRootNode(this);
     } else if (m_parent) {
         // Remove from active children
         auto& children = m_parent->m_children;
@@ -53,8 +53,8 @@ Node::~Node()
         delete child;
     }
 
-    if (ownerLoop) {
-        ownerLoop->removeNode(this);
+    if (owner) {
+        owner->removeNode(this);
     }
     app->unregisterAliveNode(this);
 }
@@ -72,8 +72,8 @@ void Node::addChild(Node* child)
     // if the child is a root node, remove it from its owner loop's root list
     if (child->isRoot()) {
         child->m_isRoot = false;
-        if (EventLoop* childLoop = child->ownerEventLoop()) {
-            childLoop->removeRootNode(child);
+        if (Executor* childOwner = child->ownerExecutor()) {
+            childOwner->removeRootNode(child);
         }
     }
     child->m_parent = this;
@@ -122,7 +122,11 @@ void Node::deleteLater()
     }
 
     app->markToDelete(this);
-    if (m_parent) {
+    if (owner && ! owner->eventLoop()) {
+        // Not an EventLoop (a strand): nothing walks the tree to delete
+        // marked children, so every deferred delete goes to the executor.
+        owner->enqueueDelete(this);
+    } else if (m_parent) {
         m_parent->pushDeleteChild(this);
     } else if (owner) {
         owner->enqueueDelete(this);
@@ -150,9 +154,9 @@ void Node::postDeleteToOwner(Node* node, std::shared_ptr<NodeLifetimeBlock> bloc
 void Node::postMoveToOwner(Node* node,
                            std::shared_ptr<NodeLifetimeBlock> block,
                            Executor* executor,
-                           EventLoop* targetLoop)
+                           std::function<void(Node*)> apply)
 {
-    executor->post([node, block = std::move(block), executor, targetLoop]() {
+    executor->post([node, block = std::move(block), executor, apply = std::move(apply)]() {
         if (! block->alive.load(std::memory_order_acquire)) {
             return;
         }
@@ -160,20 +164,11 @@ void Node::postMoveToOwner(Node* node,
         if (owner && owner != executor) {
             // The node migrated again before this request ran: apply it on
             // the current owner instead.
-            postMoveToOwner(node, block, owner, targetLoop);
+            postMoveToOwner(node, block, owner, apply);
             return;
         }
-        // Inside the owner from here on. The preconditions were checked on
-        // the calling thread; the node may have been re-parented since then.
-        // Never split a child from its parent.
-        if (node->m_parent && node->m_parent->ownerEventLoop() != targetLoop) {
-            return;
-        }
-        // The target may have been retired since the request was accepted.
-        if (targetLoop->isRetired()) {
-            return;
-        }
-        node->applyMoveToThread(targetLoop);
+        // Inside the owner from here on.
+        apply(node);
     });
 }
 
@@ -212,14 +207,14 @@ void Node::setParent(Node* parent)
                 break;
             }
         }
-    } else if (EventLoop* loop = ownerEventLoop()) {
-        loop->removeRootNode(this);
+    } else if (Executor* owner = ownerExecutor()) {
+        owner->removeRootNode(this);
     }
     if (! parent) {
         m_parent = nullptr;
         m_isRoot = true;
-        if (EventLoop* loop = ownerEventLoop()) {
-            loop->addRootNode(this);
+        if (Executor* owner = ownerExecutor()) {
+            owner->addRootNode(this);
         }
     } else {
         m_isRoot = false;
@@ -267,16 +262,42 @@ void Node::warnIfTouchedOffOwner(const char* what, const char* hint) const
 #endif
 }
 
+void Node::requireEventLoopOwner(const char* className) const
+{
+    if (! ownerEventLoop()) {
+        throw std::logic_error(std::string("snf::") + className
+                               + " needs an EventLoop owner: it cannot be created as a child of a node that lives in a "
+                                 "TaskPool");
+    }
+}
+
+bool Node::requiresEventLoop() const { return false; }
+
+bool Node::subtreeRequiresEventLoop() const
+{
+    if (requiresEventLoop()) {
+        return true;
+    }
+    return std::any_of(m_children.begin(), m_children.end(), [](const Node* child) {
+        return child->subtreeRequiresEventLoop();
+    });
+}
+
 std::uint64_t Node::generation() const { return m_generation; }
 
 Node::Node(Node* parent) : m_parent(parent)
 {
-    // Checked before any registration, so a throw leaves nothing behind.
+    // Checked before any registration, so a throw leaves nothing behind. A
+    // TaskPool worker has no EventLoop: only a child of a pooled node, created
+    // inside that node's strand, can be created there (it joins the strand).
     if (TaskPool::isWorkerThread()) {
-        throw std::logic_error(
-            "snf::Node cannot be created on a TaskPool worker: it has no EventLoop to deliver the node's "
-            "queued signals and deferred deletes. Create nodes on a thread with an EventLoop (e.g. a ThreadPool "
-            "worker) and emit signals to them from the task");
+        const Executor* parentOwner = m_parent ? m_parent->ownerExecutor() : nullptr;
+        if (! parentOwner || ! parentOwner->isCurrent()) {
+            throw std::logic_error(
+                "snf::Node cannot be created on a TaskPool worker: it has no EventLoop to deliver the node's "
+                "queued signals and deferred deletes. Create nodes on a thread with an EventLoop (e.g. a "
+                "ThreadPool worker), or as children of a PooledNode from inside its slots");
+        }
     }
 
     static std::atomic<std::uint64_t> s_nextGeneration{1};
@@ -293,21 +314,21 @@ Node::Node(Node* parent) : m_parent(parent)
         throw std::runtime_error("Application instance not created");
     }
 
-    EventLoop* ownerLoop = nullptr;
+    Executor* owner = nullptr;
     if (m_parent) {
         m_parent->warnIfTouchedOffOwner("given a child", "create children inside the parent's owner");
-        setOwnerExecutor(m_parent->ownerExecutor());
-        ownerLoop = m_parent->ownerEventLoop();
+        owner = m_parent->ownerExecutor();
+        setOwnerExecutor(owner);
         m_parent->addChild(this);
     } else {
-        ownerLoop = app->getOrCreateCurrentThreadEventLoop();
-        setOwnerExecutor(ownerLoop);
+        owner = app->getOrCreateCurrentThreadEventLoop();
+        setOwnerExecutor(owner);
         m_isRoot = true;
-        ownerLoop->addRootNode(this);
+        owner->addRootNode(this);
     }
 
-    if (ownerLoop) {
-        ownerLoop->addNode(this);
+    if (owner) {
+        owner->addNode(this);
     }
 
     app->registerAliveNode(this);
@@ -366,13 +387,23 @@ bool Node::moveToThread(std::thread::id targetThreadId)
 
     if (currentOwner->isCurrent()) {
         // Synchronous path: execute migration immediately.
-        applyMoveToThread(targetLoop);
+        applyMoveTo(targetLoop);
         return true;
     }
 
     // Asynchronous path: post to the current owner (forwarded if the node
-    // migrates again before the request runs).
-    postMoveToOwner(this, m_lifetimeBlock, currentOwner, targetLoop);
+    // migrates again before the request runs). The preconditions were checked
+    // here; the node may have been re-parented since then, and the target may
+    // have been retired.
+    postMoveToOwner(this, m_lifetimeBlock, currentOwner, [targetLoop](Node* node) {
+        if (node->m_parent && node->m_parent->ownerEventLoop() != targetLoop) {
+            return;  // never split a child from its parent
+        }
+        if (targetLoop->isRetired()) {
+            return;
+        }
+        node->applyMoveTo(targetLoop);
+    });
     return true;
 }
 
@@ -404,38 +435,39 @@ bool Node::moveToThreadPool(ThreadPool* pool)
     return false;
 }
 
-void Node::applyMoveToThread(EventLoop* targetLoop)
+void Node::applyMoveTo(Executor* target)
 {
-    EventLoop* oldLoop = ownerEventLoop();
-    if (oldLoop == targetLoop) {
-        // Already on that loop — nothing to do.
+    Executor* old = ownerExecutor();
+    if (old == target) {
+        // Already owned by it: nothing to do.
         return;
     }
 
-    // 1. Let the subclass release resources on the old loop.
-    onAboutToMoveToThread(targetLoop);
+    // 1. Let the subclass release resources on the old owner. The hooks get
+    //    EventLoops; a strand side is passed as nullptr.
+    onAboutToMoveToThread(target->eventLoop());
 
-    // 2. Update EventLoop node registrations.
-    if (oldLoop) {
-        oldLoop->removeNode(this);
+    // 2. Update the executors' node registrations.
+    if (old) {
+        old->removeNode(this);
         if (m_isRoot) {
-            oldLoop->removeRootNode(this);
+            old->removeRootNode(this);
         }
     }
 
-    setOwnerExecutor(targetLoop);
+    setOwnerExecutor(target);
 
-    targetLoop->addNode(this);
+    target->addNode(this);
     if (m_isRoot) {
-        targetLoop->addRootNode(this);
+        target->addRootNode(this);
     }
 
-    // 3. Let the subclass acquire resources on the new loop.
-    onMovedToThread(oldLoop);
+    // 3. Let the subclass acquire resources on the new owner.
+    onMovedToThread(old ? old->eventLoop() : nullptr);
 
     // 4. Recurse into children.
     for (Node* child : m_children) {
-        child->applyMoveToThread(targetLoop);
+        child->applyMoveTo(target);
     }
 }
 

@@ -21,8 +21,9 @@ class Node;
  * Every node has an owner executor. Queued and `Auto` signal deliveries,
  * `Node::deleteLater()` and asynchronous migrations go through it, so a
  * node's slots, deferred deletion and migration hooks always run inside its
- * owner. Today the only executor is `EventLoop`, which runs everything on one
- * fixed thread.
+ * owner. `EventLoop` runs everything on one fixed thread; the strand behind a
+ * `PooledNode` runs on whichever `TaskPool` worker is free, one task at a
+ * time.
  *
  * Contract for implementations:
  * - `post()` is thread-safe and never runs @p task inline.
@@ -64,6 +65,17 @@ public:
      * destroyed later, also inside it.
      */
     virtual void enqueueDelete(Node* node) = 0;
+
+    /** @name Node bookkeeping
+     *  Called by Node when one of the executor's nodes is created, destroyed,
+     *  migrated or re-parented. A root node is one without a parent; the
+     *  executor destroys the roots it still owns when it is torn down.
+     *  @{ */
+    virtual void addNode(Node* node) = 0;
+    virtual void removeNode(Node* node) = 0;
+    virtual void addRootNode(Node* node) = 0;
+    virtual void removeRootNode(Node* node) = 0;
+    /** @} */
 
     /** @brief Returns this executor as an EventLoop, or `nullptr` if it is not one. */
     virtual EventLoop* eventLoop() noexcept { return nullptr; }

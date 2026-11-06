@@ -86,6 +86,9 @@ public:
     explicit SnmpV3Session(Node* parent = nullptr);
     ~SnmpV3Session() override;
 
+    /** @brief `true`: it delivers results through the owner EventLoop, so it cannot live in a TaskPool. */
+    bool requiresEventLoop() const override { return true; }
+
     // ── Configuration ─────────────────────────────────────────────────────
 
     /**

@@ -17,7 +17,7 @@ Timer::Duration sanitizeInterval(Timer::Duration interval)
 
 }  // namespace
 
-Timer::Timer(Node* parent) : Node(parent) {}
+Timer::Timer(Node* parent) : Node(parent) { requireEventLoopOwner("Timer"); }
 
 Timer::~Timer()
 {

@@ -9,6 +9,7 @@
 #include <SNFCore/NodeLifetimeBlock.h>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <thread>
@@ -193,6 +194,19 @@ public:
     bool moveToThreadPool(ThreadPool* pool = nullptr);
 
     /**
+     * @brief Returns `true` if this node only works on an EventLoop.
+     *
+     * Override it to return `true` in nodes that register timers, file
+     * descriptors or other per-thread resources with their EventLoop (Timer,
+     * Process and IOEvent do). Such a node cannot live in a TaskPool: a
+     * subtree containing one is rejected by `PooledNode::moveToTaskPool()`.
+     */
+    virtual bool requiresEventLoop() const;
+
+    /** @brief Returns `true` if this node or any descendant requiresEventLoop(). */
+    bool subtreeRequiresEventLoop() const;
+
+    /**
      * @brief Returns the generation counter used by the Application registry.
      *
      * The counter is unique per node allocation and is incremented when the
@@ -212,6 +226,14 @@ public:
     std::shared_ptr<NodeLifetimeBlock> lifetimeBlock() const;
 
 protected:
+    /**
+     * @brief Throws std::logic_error unless the node's owner is an EventLoop.
+     *
+     * Call it from the constructor of a node that requiresEventLoop(), so that
+     * creating one as a child of a node living in a TaskPool fails loudly.
+     */
+    void requireEventLoopOwner(const char* className) const;
+
     /**
      * @brief Constructs a Node, optionally attaching it to @p parent.
      * @param parent If non-null, the new node becomes a child of @p parent.
@@ -262,11 +284,15 @@ private:
     // node, which the owner may destroy at any moment.
     static void postDeleteToOwner(Node* node, std::shared_ptr<NodeLifetimeBlock> block, Executor* executor);
 
-    // Same forwarding scheme for a migration requested off the owner thread.
+    // Same forwarding scheme for a migration requested from outside the
+    // owner: @p apply runs inside the node's owner, whichever it is by then.
     static void postMoveToOwner(Node* node,
                                 std::shared_ptr<NodeLifetimeBlock> block,
                                 Executor* executor,
-                                EventLoop* targetLoop);
+                                std::function<void(Node*)> apply);
+
+    // Moves this subtree to @p target. Must run inside the current owner.
+    void applyMoveTo(Executor* target);
 
     // Sets the owner; only from inside the owner (or during construction).
     void setOwnerExecutor(Executor* executor);
@@ -276,8 +302,7 @@ private:
     // races with the owner touching the same node. No-op in release builds.
     void warnIfTouchedOffOwner(const char* what, const char* hint) const;
 
-    // Performs the actual recursive migration; must be called on owner thread.
-    void applyMoveToThread(EventLoop* targetLoop);
+    friend class PooledNode;
 
 private:
     Node* m_parent = nullptr;
