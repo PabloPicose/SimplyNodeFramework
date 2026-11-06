@@ -2,7 +2,7 @@
 
 /**
  * @file Runnable.h
- * @brief Base class for work executed directly by ThreadPool.
+ * @brief Base class for work executed by TaskPool.
  * @ingroup SNFCore
  */
 
@@ -16,7 +16,7 @@ namespace snf {
 /**
  * @class Runnable
  * @ingroup SNFCore
- * @brief Unit of work that can be submitted directly to ThreadPool.
+ * @brief Unit of work that can be submitted to TaskPool (or, deprecated, ThreadPool).
  */
 class Runnable
 {
@@ -26,7 +26,7 @@ public:
     /**
      * @brief Executes the runnable body and emits finished().
      *
-     * ThreadPool calls this method. Exceptions thrown by run() are caught and
+     * TaskPool (or ThreadPool) calls this method. Exceptions thrown by run() are caught and
      * stored in exception().
      */
     void execute();

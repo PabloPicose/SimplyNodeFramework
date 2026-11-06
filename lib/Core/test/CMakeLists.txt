@@ -10,6 +10,7 @@ add_executable(SNFCoreTests
     VariantTests.cpp
     RunnableTests.cpp
     ThreadPoolTests.cpp
+    TaskPoolTests.cpp
     FileTests.cpp
     TempFileTests.cpp
     ByteArrayTests.cpp

@@ -207,6 +207,29 @@ to the new owner.
 
 ---
 
+## Hosting nodes vs running CPU work
+
+The `Application` owns two pools with different jobs:
+
+| Pool | Workers | Use it for |
+|---|---|---|
+| `ThreadPool` (`app.threadPool()`) | Each runs an `EventLoop` | Hosting nodes: `moveToThreadPool()` places a node on one worker for good |
+| `TaskPool` (`app.taskPool()`) | Share one task queue, no `EventLoop` | CPU work: `Runnable`s and plain callables; a free worker takes the next task |
+
+```cpp
+// Heavy work off the main thread; the result comes back as a signal.
+auto job = std::make_shared<ParseJob>(data);
+job->finished.connect(NodePtr<Ui>(ui), &Ui::onParsed);  // Auto: runs on ui's thread
+snf::TaskPool::globalInstance()->start(job);
+```
+
+A `TaskPool` worker cannot host nodes: constructing a `Node` there throws
+`std::logic_error`. A task must not wait for another task of the same pool, or
+the pool can deadlock once every worker waits. `waitForDone()` and `shutdown()`
+throw if called from one of the pool's own workers.
+
+---
+
 ## Destroying nodes
 
 A node may only be destroyed on its owner thread. While the owner `EventLoop`

@@ -24,6 +24,7 @@ class Node;
 class EventLoop;
 class CommandLineParser;
 class ThreadPool;
+class TaskPool;
 class Logger;
 
 /**
@@ -183,8 +184,11 @@ public:
      */
     bool allEventLoopsIdle() const;
 
-    /** @brief Returns the Application-owned global ThreadPool. */
+    /** @brief Returns the Application-owned global ThreadPool (EventLoop workers that host nodes). */
     ThreadPool* threadPool() const;
+
+    /** @brief Returns the Application-owned global TaskPool (shared-queue workers for CPU tasks). */
+    TaskPool* taskPool() const;
 
     /**
      * @brief Returns the central Logger owned by this Application.
@@ -263,6 +267,7 @@ private:
 
     std::unique_ptr<CommandLineParser> m_commandLineParser;
     std::unique_ptr<ThreadPool> m_threadPool;
+    std::unique_ptr<TaskPool> m_taskPool;
     std::unique_ptr<Logger> m_logger;
     RunLoopDriver m_runLoopDriver;
     void* m_runLoopDriverOwner = nullptr;

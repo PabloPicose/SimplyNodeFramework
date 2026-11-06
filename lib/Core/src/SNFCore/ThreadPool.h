@@ -2,7 +2,7 @@
 
 /**
  * @file ThreadPool.h
- * @brief Fixed-size worker pool for Runnable execution.
+ * @brief Fixed-size pool of EventLoop worker threads that host nodes.
  * @ingroup SNFCore
  */
 
@@ -23,7 +23,15 @@ class EventLoop;
 /**
  * @class ThreadPool
  * @ingroup SNFCore
- * @brief Executes Runnable instances on a bounded set of worker threads.
+ * @brief Bounded set of worker threads, each running its own EventLoop.
+ *
+ * Its purpose is hosting nodes: `Node::moveToThreadPool()` places a node on
+ * one worker, where its timers, I/O and queued signals are processed.
+ *
+ * For CPU work use `TaskPool`: its workers share one queue, so an idle worker
+ * always takes the next task. `ThreadPool::start()` is kept for
+ * compatibility, but it assigns tasks to workers in turn without looking at
+ * their load, and a long task blocks every node hosted on that worker.
  */
 class ThreadPool
 {
@@ -42,7 +50,12 @@ public:
     /** @brief Returns the default worker count used by new pools. */
     static std::size_t defaultThreadCount();
 
-    /** @brief Queues @p runnable for execution. */
+    /**
+     * @brief Queues @p runnable on the next worker in turn.
+     * @deprecated Use `TaskPool::start()`: here a long task delays the tasks
+     *             queued behind it on the same worker and blocks the nodes
+     *             that worker hosts.
+     */
     bool start(std::shared_ptr<Runnable> runnable);
 
     /** @brief Blocks until all currently queued/running tasks are complete. */

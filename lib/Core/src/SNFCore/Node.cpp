@@ -9,6 +9,7 @@
 #include "SNFCore/Application.h"
 #include "SNFCore/EventLoop.h"
 #include "SNFCore/NodePtr.h"
+#include "SNFCore/TaskPool.h"
 #include "SNFCore/ThreadPool.h"
 
 namespace snf {
@@ -251,6 +252,14 @@ std::uint64_t Node::generation() const { return m_generation; }
 
 Node::Node(Node* parent) : m_parent(parent)
 {
+    // Checked before any registration, so a throw leaves nothing behind.
+    if (TaskPool::isWorkerThread()) {
+        throw std::logic_error(
+            "snf::Node cannot be created on a TaskPool worker: it has no EventLoop to deliver the node's "
+            "queued signals and deferred deletes. Create nodes on a thread with an EventLoop (e.g. a ThreadPool "
+            "worker) and emit signals to them from the task");
+    }
+
     static std::atomic<std::uint64_t> s_nextGeneration{1};
     m_generation = s_nextGeneration.fetch_add(1, std::memory_order_relaxed);
 

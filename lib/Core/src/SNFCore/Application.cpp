@@ -16,6 +16,7 @@
 #include "EventLoop.h"
 #include "Node.h"
 #include "NodePtr.h"
+#include "TaskPool.h"
 #include "ThreadPool.h"
 
 // Weak no-op fallbacks for the profiler integration points.
@@ -47,11 +48,15 @@ Application::Application(int argc, char** argv) : m_threadId(std::this_thread::g
     // Eagerly create the main-thread EventLoop so it is always available.
     getOrCreateCurrentThreadEventLoop();
     m_threadPool = std::make_unique<ThreadPool>();
+    m_taskPool = std::make_unique<TaskPool>();
     snf::profiler::detail::init();
 }
 
 Application::~Application()
 {
+    // Tasks may still post to EventLoops or emit to nodes, so the TaskPool
+    // drains and joins first, while the loops and the logger still exist.
+    m_taskPool.reset();
     m_threadPool.reset();
     snf::profiler::detail::shutdown();
     // Stop the logger after the thread pool so that pool tasks can still log,
@@ -314,6 +319,8 @@ ThreadPool* Application::threadPool() const
 {
     return m_threadPool.get();
 }
+
+TaskPool* Application::taskPool() const { return m_taskPool.get(); }
 
 void Application::setRunLoopDriver(void* owner, RunLoopDriver driver)
 {
