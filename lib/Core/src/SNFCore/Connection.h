@@ -2,7 +2,7 @@
 
 /**
  * @file Connection.h
- * @brief Type-safe signal/slot system with Direct and Queued delivery.
+ * @brief Type-safe signal/slot system with Direct, Queued and Auto delivery.
  * @ingroup SNFCore_Signals
  */
 
@@ -30,10 +30,19 @@ namespace snf {
  * |----------|----------|-------------|
  * | `Direct` | Synchronous, on the emitter's thread | Same-thread connections |
  * | `Queued` | Posted to the receiver's EventLoop   | Cross-thread connections |
+ * | `Auto` (default) | `Direct` if emitted on the receiver's owner thread, `Queued` otherwise | Any receiver node |
+ *
+ * `Auto` decides on every `emit()`, so it follows the receiver after
+ * `Node::moveToThread()`. The same `emit()` may therefore run the slot before
+ * returning (same thread) or later on the receiver's loop (other thread).
+ * Connections without a receiver node are always `Direct`. Pass `Direct`
+ * explicitly to run a receiver's slot on the emitter's thread whatever thread
+ * the receiver lives on (the receiver must then be thread-safe).
  */
 enum class ConnectionType {
     Direct,
     Queued,
+    Auto,
 };
 
 namespace detail {
@@ -164,16 +173,17 @@ public:
      * @brief Connects a member function slot with automatic lifetime tracking.
      *
      * The connection is automatically invalidated when @p receiver is
-     * deleted. Use `ConnectionType::Queued` for cross-thread delivery.
+     * deleted. Use `ConnectionType::Queued` or `ConnectionType::Auto` for
+     * cross-thread delivery.
      *
      * @param receiver Safe reference to the receiver node.
      * @param method   Member function pointer matching `void (Receiver::*)(Args...)`.
-     * @param type     `Direct` (default) or `Queued`.
+     * @param type     `Auto` (default), `Direct` or `Queued`.
      */
     template <typename Receiver>
     Connection connect(NodePtr<Receiver> receiver,
                        void (Receiver::*method)(Args...),
-                       ConnectionType type = ConnectionType::Direct)
+                       ConnectionType type = ConnectionType::Auto)
     {
         return connect(
             receiver,
@@ -186,10 +196,10 @@ public:
      *
      * @param receiver Safe reference to the receiver node.
      * @param func     Callable matching `void(Receiver&, Args...)`.
-     * @param type     `Direct` (default) or `Queued`.
+     * @param type     `Auto` (default), `Direct` or `Queued`.
      */
     template <typename Receiver, typename Func>
-    Connection connect(NodePtr<Receiver> receiver, Func&& func, ConnectionType type = ConnectionType::Direct)
+    Connection connect(NodePtr<Receiver> receiver, Func&& func, ConnectionType type = ConnectionType::Auto)
     {
         auto state = std::make_shared<detail::ConnectionState>();
         auto entry = std::make_shared<SlotEntry>();
@@ -214,10 +224,17 @@ public:
                 (*callable)(*receiver, std::forward<Args>(forwardedArgs)...);
             };
 
-            if (type == ConnectionType::Queued) {
-                // Read from the control block: the emitter may be on any
-                // thread, concurrently with the receiver migrating.
-                auto* loop = receiver.ownerEventLoop();
+            // Read from the control block: the emitter may be on any
+            // thread, concurrently with the receiver migrating.
+            auto* loop = type == ConnectionType::Direct ? nullptr : receiver.ownerEventLoop();
+
+            // Auto: deliver directly when already on the owner thread. The
+            // owner only changes on its own thread, so it stays the owner
+            // for the whole direct call.
+            const bool queue = type == ConnectionType::Queued
+                || (type == ConnectionType::Auto && loop && ! loop->isInThisThread());
+
+            if (queue) {
                 if (! loop) {
                     state->connected.store(false);
                     return;
@@ -250,8 +267,10 @@ public:
     /**
      * @brief Emits the signal, invoking all active connected slots.
      *
-     * `Direct` slots are called synchronously in the order they were
-     * connected. `Queued` slots are posted to the receiver's EventLoop.
+     * `Direct` slots, and `Auto` slots whose receiver lives on the emitting
+     * thread, are called synchronously in the order they were connected.
+     * `Queued` slots, and the other `Auto` slots, are posted to the
+     * receiver's EventLoop.
      *
      * Disconnected or receiver-expired slots are pruned lazily.
      */

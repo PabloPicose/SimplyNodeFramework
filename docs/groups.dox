@@ -5,7 +5,7 @@
  * SNFCore is the foundational package of SimplyNodeFramework. It provides:
  * - A hierarchical **Node** tree with deterministic ownership and deletion.
  * - A per-thread **EventLoop** for scheduling tasks, timers, and I/O.
- * - A type-safe **Signal/Connection** system with Direct and Queued delivery.
+ * - A type-safe **Signal/Connection** system with Direct, Queued and Auto delivery.
  * - **Timer** for repeating and one-shot callbacks on the owner thread.
  * - **NodePtr\<T\>** for safe, generation-tracked node references.
  *
@@ -29,8 +29,8 @@
 /**
  * @defgroup SNFCore_Signals Signals & Connections
  * @ingroup SNFCore
- * @brief Type-safe signal/slot system with Direct (synchronous) and
- *        Queued (cross-thread) delivery.
+ * @brief Type-safe signal/slot system with Direct (synchronous), Queued
+ *        (cross-thread) and Auto (chosen per emit, the default) delivery.
  */
 
 /**

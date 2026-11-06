@@ -290,15 +290,16 @@ if (ptr) { ptr->doWork(); }
 
 ### Signals and connections
 
-| `ConnectionType`     | Delivery                             |
-| -------------------- | ------------------------------------ |
-| `Direct` *(default)* | Synchronous on the emitter's thread  |
-| `Queued`             | Posted to the receiver's `EventLoop` |
+| `ConnectionType`   | Delivery                                                       |
+| ------------------ | -------------------------------------------------------------- |
+| `Auto` *(default)* | `Direct` on the receiver's thread, `Queued` from other threads |
+| `Direct`           | Synchronous on the emitter's thread                            |
+| `Queued`           | Posted to the receiver's `EventLoop`                           |
 
 ```cpp
 Signal<int> sig;
-sig.connect([](int v) { /* direct */ });
-sig.connect(NodePtr<Worker>(w), &Worker::onValue, ConnectionType::Queued);
+sig.connect([](int v) { /* no receiver node: always direct */ });
+sig.connect(NodePtr<Worker>(w), &Worker::onValue);  // Auto: runs on w's thread
 ```
 
 ### Application and EventLoop

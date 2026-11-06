@@ -23,7 +23,7 @@ Node::~Node()
     // Contract: a node is destroyed only on its owner thread (use
     // deleteLater() from other threads). Destroying it elsewhere while the
     // owner loop is running races with that loop ticking the node.
-    if (EventLoop* owner = ownerEventLoop(); owner && ! owner->isInThisThread() && owner->isRunning()) {
+    if (const EventLoop* owner = ownerEventLoop(); owner && ! owner->isInThisThread() && owner->isRunning()) {
         std::cerr << "snf::Node: node '" << m_name
                   << "' destroyed from a thread other than its owner while the owner EventLoop is running;"
                      " use deleteLater() from other threads"

@@ -191,8 +191,19 @@ overload, which has no lifetime tracking.
 
 | `ConnectionType` | Delivery | Use when |
 |---|---|---|
-| `Direct` *(default)* | Synchronous on the emitter's thread | Same-thread connections |
-| `Queued` | Posted to the receiver's `EventLoop` | Cross-thread signal delivery |
+| `Auto` *(default)* | `Direct` when emitted on the receiver's owner thread, `Queued` otherwise | Any receiver node |
+| `Direct` | Synchronous on the emitter's thread | Thread-safe receivers that must run inside `emit()` |
+| `Queued` | Posted to the receiver's `EventLoop`, even from the owner thread | Always deferring the slot to the next loop iteration |
+
+`Auto` decides on every `emit()`, comparing the emitting thread with the
+receiver's current owner, so it keeps working after `moveToThread()`. Keep in
+mind that the same `emit()` may run the slot before returning (same thread) or
+later on the receiver's loop (other thread): do not rely on the slot having run
+when `emit()` returns. Arguments must be copyable, as with `Queued`.
+
+A queued delivery always runs on the receiver's owner thread, even if the
+receiver migrates between the `emit()` and the delivery: the task is forwarded
+to the new owner.
 
 ---
 
@@ -219,9 +230,11 @@ destroyed from a thread other than its owner while the owner loop is running.
 
 ## Common mistakes
 
-**Forgetting `ConnectionType::Queued`**
-Without it, `Direct` is used: the slot runs on the emitter's thread, not the
-receiver's. Thread affinity is not applied.
+**Using `ConnectionType::Direct` with a receiver on another thread**
+`Direct` runs the slot on the emitter's thread, not the receiver's, so thread
+affinity is not applied. Leave the default (`Auto`) unless the receiver is
+thread-safe. Connections to a lambda without a receiver node are always
+`Direct`: pass a `NodePtr` receiver to get thread affinity.
 
 **Calling `moveToThread` before the worker registers its EventLoop**
 `moveToThread` looks up the target EventLoop by thread ID at call time. If the
