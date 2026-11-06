@@ -110,8 +110,11 @@ void ThreadPool::shutdown()
         workerLoops = m_workerLoops;
     }
 
+    // Retire before stopping: from here on no node may migrate to a worker,
+    // since its loop will never run again.
     for (EventLoop* loop : workerLoops) {
         if (loop) {
+            loop->retire();
             loop->stop();
         }
     }

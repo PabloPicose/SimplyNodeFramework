@@ -11,23 +11,21 @@ std::size_t DefaultWorkerSelectionPolicy::selectWorkerIndex(const std::vector<Wo
         return snapshots.size();
     }
 
+    // Lexicographic score, lower is better. The node count comes first: it is
+    // the stable measure of how much a worker hosts. hasPendingWork is not
+    // used, because an armed timer or an I/O watch keeps it permanently true
+    // on an otherwise idle worker; it remains in the snapshot for custom
+    // policies.
+    using Score = std::tuple<std::size_t, std::size_t, std::size_t, std::uint64_t, std::uint64_t>;
+
     std::size_t bestIndex = snapshots.size();
-    std::tuple<bool, std::size_t, std::size_t, std::size_t, std::uint64_t, std::uint64_t> bestScore{
-        true,
-        std::numeric_limits<std::size_t>::max(),
-        std::numeric_limits<std::size_t>::max(),
-        std::numeric_limits<std::size_t>::max(),
-        std::numeric_limits<std::uint64_t>::max(),
-        0,
-    };
+    Score bestScore{};
 
     for (std::size_t index = 0; index < snapshots.size(); ++index) {
         const WorkerLoadSnapshot& snapshot = snapshots[index];
-        const std::size_t pendingWorkScore = snapshot.pendingDeleteCount + (snapshot.hasPendingWork ? 1 : 0);
-        const std::tuple<bool, std::size_t, std::size_t, std::size_t, std::uint64_t, std::uint64_t> score{
-            snapshot.hasPendingWork,
-            pendingWorkScore,
+        const Score score{
             snapshot.registeredNodesCount,
+            snapshot.pendingDeleteCount,
             snapshot.activeTimerCount,
             snapshot.lastIterationDurationNanoseconds,
             std::numeric_limits<std::uint64_t>::max() - snapshot.lastActivityAgeNanoseconds,

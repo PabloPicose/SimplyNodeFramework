@@ -50,7 +50,12 @@ public:
 /**
  * @class DefaultWorkerSelectionPolicy
  * @ingroup SNFCore
- * @brief Default heuristic that prefers less loaded and more idle workers.
+ * @brief Default heuristic that prefers the worker hosting fewer nodes.
+ *
+ * Workers are compared by, in order: registered nodes, pending deletes,
+ * active timers, duration of the last loop iteration, and time since the
+ * last activity (longer idle wins). `hasPendingWork` is ignored: an armed
+ * timer or an I/O watch keeps it true on an otherwise idle worker.
  */
 class DefaultWorkerSelectionPolicy final : public IWorkerSelectionPolicy
 {

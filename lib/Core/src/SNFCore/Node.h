@@ -149,6 +149,9 @@ public:
      * - The target thread must already have an EventLoop registered with the
      *   Application (call `Application::getOrCreateCurrentThreadEventLoop()`
      *   from that thread before migrating to it).
+     * - The target EventLoop must not be retired (see `EventLoop::retire()`),
+     *   e.g. a worker of a ThreadPool that has shut down. An asynchronous
+     *   request whose target is retired before it applies is dropped.
      *
      * @param targetThreadId Thread ID to migrate to.
      * @return `true` if the migration was applied or successfully enqueued;
@@ -157,11 +160,25 @@ public:
     bool moveToThread(std::thread::id targetThreadId);
 
     /**
-     * @brief Migrates this node and its descendants to any worker in @p pool.
+     * @brief Migrates this node and its descendants to one worker of @p pool.
+     *
+     * The worker is chosen once, by the pool's WorkerSelectionPolicy (by
+     * default the one hosting fewer nodes), and the node then stays there:
+     * this is placement, not dynamic load balancing. It behaves like
+     * `moveToThread()` to that worker, with the same preconditions.
+     *
+     * If the node already lives on one of the pool's workers it is left
+     * where it is and `true` is returned.
+     *
+     * Called off the owner thread, the migration is applied later on the
+     * owner thread, so the chosen worker's node count does not grow until
+     * then: a burst of such calls may pick the same worker. Call it from the
+     * owner thread to spread consecutive nodes.
      *
      * If @p pool is null, the Application-owned global ThreadPool is used.
      * Throws if the Application-owned global ThreadPool does not exist.
-     * Returns false when no worker EventLoop is available.
+     * Returns false when no worker EventLoop is available (e.g. after the
+     * pool has shut down) or the preconditions of `moveToThread()` fail.
      */
     bool moveToThreadPool(ThreadPool* pool = nullptr);
 

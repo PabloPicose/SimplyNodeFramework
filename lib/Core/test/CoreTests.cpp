@@ -2422,6 +2422,142 @@ TEST_F(CoreFixture, asyncMoveToThreadRunsOnNewOwnerWhenNodeMigratesBeforeItAppli
     ASSERT_TRUE(runOnLoopAndWait(loopB, [node]() { delete node; }));
 }
 
+// ---- Phase 0: moveToThreadPool placement and shut-down pools ----
+
+TEST_F(CoreFixture, moveToThreadPoolPrefersWorkerWithFewerNodesOverOneWithAnIdleTimer)
+{
+    using namespace std::chrono_literals;
+
+    ThreadPool pool(2);
+    const std::vector<std::thread::id> workerIds = pool.workerThreadIds();
+    ASSERT_EQ(workerIds.size(), 2u);
+    EventLoop* loopA = Application::instance()->getEventLoopByThreadId(workerIds[0]);
+    EventLoop* loopB = Application::instance()->getEventLoopByThreadId(workerIds[1]);
+    ASSERT_NE(loopA, nullptr);
+    ASSERT_NE(loopB, nullptr);
+
+    // A: one node, an armed timer (keeps hasPendingWork true while idle).
+    auto* timer = new Timer();
+    timer->start(10s);
+    ASSERT_TRUE(timer->moveToThread(workerIds[0]));
+
+    // B: five plain nodes.
+    std::vector<TestNode*> plain;
+    for (int i = 0; i < 5; ++i) {
+        plain.push_back(new TestNode());
+        ASSERT_TRUE(plain.back()->moveToThread(workerIds[1]));
+    }
+
+    auto* candidate = new TestNode();
+    ASSERT_TRUE(candidate->moveToThreadPool(&pool));
+    EXPECT_EQ(candidate->ownerThreadId(), workerIds[0]);
+
+    EventLoop* candidateLoop = candidate->ownerEventLoop();
+    ASSERT_TRUE(runOnLoopAndWait(candidateLoop, [candidate]() { delete candidate; }));
+    ASSERT_TRUE(runOnLoopAndWait(loopA, [timer]() { delete timer; }));
+    ASSERT_TRUE(runOnLoopAndWait(loopB, [plain]() {
+        for (TestNode* node : plain) {
+            delete node;
+        }
+    }));
+}
+
+TEST_F(CoreFixture, moveToThreadPoolSpreadsConsecutiveNodesEvenlyAcrossWorkers)
+{
+    ThreadPool pool(4);
+    const std::vector<std::thread::id> workerIds = pool.workerThreadIds();
+    ASSERT_EQ(workerIds.size(), 4u);
+
+    std::vector<TestNode*> nodes;
+    for (int i = 0; i < 40; ++i) {
+        nodes.push_back(new TestNode());
+        ASSERT_TRUE(nodes.back()->moveToThreadPool(&pool));  // synchronous: main is the owner
+    }
+
+    for (const std::thread::id& workerId : workerIds) {
+        const auto count = std::count_if(nodes.begin(), nodes.end(), [&](const TestNode* node) {
+            return node->ownerThreadId() == workerId;
+        });
+        EXPECT_EQ(count, 10);
+    }
+
+    for (TestNode* node : nodes) {
+        ASSERT_TRUE(runOnLoopAndWait(node->ownerEventLoop(), [node]() { delete node; }));
+    }
+}
+
+TEST_F(CoreFixture, moveToThreadPoolKeepsNodeThatAlreadyLivesOnThePool)
+{
+    ThreadPool pool(2);
+    const std::vector<std::thread::id> workerIds = pool.workerThreadIds();
+    ASSERT_EQ(workerIds.size(), 2u);
+    EventLoop* loopB = Application::instance()->getEventLoopByThreadId(workerIds[1]);
+    ASSERT_NE(loopB, nullptr);
+
+    // B hosts the node; A is empty and therefore looks less loaded.
+    auto* node = new TestNode();
+    ASSERT_TRUE(node->moveToThread(workerIds[1]));
+
+    EXPECT_TRUE(node->moveToThreadPool(&pool));
+    ASSERT_TRUE(runOnLoopAndWait(loopB, []() {}));  // let any posted migration apply
+    EXPECT_EQ(node->ownerEventLoop(), loopB);
+
+    ASSERT_TRUE(runOnLoopAndWait(node->ownerEventLoop(), [node]() { delete node; }));
+}
+
+TEST_F(CoreFixture, moveToThreadPoolRejectsChildWhoseParentStaysOnAnotherThread)
+{
+    ThreadPool pool(1);
+
+    auto* parent = new TestNode();
+    auto* child = new TestNode(parent);
+    const std::thread::id mainId = std::this_thread::get_id();
+
+    EXPECT_FALSE(child->moveToThreadPool(&pool));
+    EXPECT_EQ(child->ownerThreadId(), mainId);
+    EXPECT_EQ(parent->ownerThreadId(), mainId);
+
+    delete parent;
+}
+
+TEST_F(CoreFixture, moveToThreadRejectsWorkerOfAShutDownPool)
+{
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+    pool.shutdown();
+
+    // The worker's loop stays registered with the Application, but it will
+    // never run again: a node moved there would be stranded.
+    auto* node = new TestNode();
+    const std::thread::id before = node->ownerThreadId();
+
+    EXPECT_FALSE(node->moveToThread(workerId));
+    EXPECT_EQ(node->ownerThreadId(), before);
+
+    delete node;
+}
+
+TEST_F(CoreFixture, asyncMoveToThreadIsDroppedIfTargetPoolShutsDownBeforeItApplies)
+{
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+
+    auto* node = new TestNode();
+    EventLoop* mainLoop = node->ownerEventLoop();
+
+    // Accepted from another thread while the worker is still alive...
+    std::thread caller([&]() { EXPECT_TRUE(node->moveToThread(workerId)); });
+    caller.join();
+
+    // ...but the pool shuts down before main applies it.
+    pool.shutdown();
+    mainLoop->runPendingWork();
+
+    EXPECT_EQ(node->ownerEventLoop(), mainLoop);
+
+    delete node;
+}
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);

@@ -49,6 +49,10 @@ std::thread::id EventLoop::ownerThreadId() const noexcept { return m_owner; }
 
 bool EventLoop::isRunning() const noexcept { return m_running.load(std::memory_order_acquire); }
 
+void EventLoop::retire() noexcept { m_retired.store(true, std::memory_order_release); }
+
+bool EventLoop::isRetired() const noexcept { return m_retired.load(std::memory_order_acquire); }
+
 void EventLoop::enqueueDelete(Node* node)
 {
     {

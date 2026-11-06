@@ -241,6 +241,18 @@ thread-safe. Connections to a lambda without a receiver node are always
 worker hasn't called `getOrCreateCurrentThreadEventLoop()` yet, the call fails
 silently (returns `false`).
 
+**Moving a node to a worker of a pool that has shut down**
+After `ThreadPool::shutdown()` its worker loops are retired: they never run
+again. `moveToThread` to one of those workers returns `false`, and an
+asynchronous request whose target is retired before it applies is dropped, so
+the node stays where it was.
+
+**Expecting `moveToThreadPool` to balance load over time**
+It picks one worker when called (by default the one hosting fewer nodes) and
+the node stays there. Call it from the node's owner thread when moving many
+nodes in a row: called from another thread, the migration applies later and
+consecutive calls may pick the same worker.
+
 **Moving a node that has a parent on a different thread**
 `moveToThread` only allows moving root nodes or complete subtrees. Moving a child
 whose parent lives on a different thread is rejected.

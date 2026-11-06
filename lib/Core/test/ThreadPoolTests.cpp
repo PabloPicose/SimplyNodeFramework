@@ -150,3 +150,47 @@ TEST(ThreadPoolTests, shutdownWithoutApplicationDoesNotTouchDestroyedWorkerLoops
         ASSERT_EQ(pool.workerThreadIds().size(), 4U);
     }
 }
+
+TEST(WorkerSelectionPolicyTests, defaultPolicyPrefersFewerNodesOverAnIdleTimerOrSocket)
+{
+    // Worker 0 hosts a single node with an armed timer (or an I/O watch),
+    // which makes hasPendingWork permanently true. Worker 1 hosts five plain
+    // nodes and happens to have nothing queued right now.
+    snf::WorkerLoadSnapshot withTimer;
+    withTimer.hasPendingWork = true;
+    withTimer.registeredNodesCount = 1;
+    withTimer.activeTimerCount = 1;
+
+    snf::WorkerLoadSnapshot manyNodes;
+    manyNodes.hasPendingWork = false;
+    manyNodes.registeredNodesCount = 5;
+
+    const snf::DefaultWorkerSelectionPolicy policy;
+    EXPECT_EQ(policy.selectWorkerIndex({withTimer, manyNodes}), 0u);
+    EXPECT_EQ(policy.selectWorkerIndex({manyNodes, withTimer}), 1u);
+}
+
+TEST(WorkerSelectionPolicyTests, defaultPolicyBreaksNodeTiesWithPendingDeletesThenTimers)
+{
+    snf::WorkerLoadSnapshot a;
+    a.registeredNodesCount = 2;
+    a.pendingDeleteCount = 1;
+
+    snf::WorkerLoadSnapshot b;
+    b.registeredNodesCount = 2;
+    b.activeTimerCount = 3;
+
+    snf::WorkerLoadSnapshot c;
+    c.registeredNodesCount = 2;
+    c.activeTimerCount = 1;
+
+    const snf::DefaultWorkerSelectionPolicy policy;
+    EXPECT_EQ(policy.selectWorkerIndex({a, b, c}), 2u);
+    EXPECT_EQ(policy.selectWorkerIndex({a, b}), 1u);
+}
+
+TEST(WorkerSelectionPolicyTests, defaultPolicyReturnsNoSelectionForNoWorkers)
+{
+    const snf::DefaultWorkerSelectionPolicy policy;
+    EXPECT_EQ(policy.selectWorkerIndex({}), 0u);
+}

@@ -174,6 +174,10 @@ void Node::postMoveToOwner(Node* node,
         if (node->m_parent && node->m_parent->ownerEventLoop() != targetLoop) {
             return;
         }
+        // The target may have been retired since the request was accepted.
+        if (targetLoop->isRetired()) {
+            return;
+        }
         node->applyMoveToThread(targetLoop);
     });
 }
@@ -315,6 +319,10 @@ bool Node::moveToThread(std::thread::id targetThreadId)
         // Target thread has no EventLoop registered yet.
         return false;
     }
+    if (targetLoop->isRetired()) {
+        // The target loop will never run again (its ThreadPool shut down).
+        return false;
+    }
 
     EventLoop* currentLoop = ownerEventLoop();
     if (! currentLoop) {
@@ -346,6 +354,14 @@ bool Node::moveToThreadPool(ThreadPool* pool)
     }
     if (! pool) {
         throw std::runtime_error("Application global ThreadPool does not exist");
+    }
+
+    // Already on one of the pool's workers: keep it there. The selection
+    // policy would otherwise see the node's own load on its current worker
+    // and hop it to another one for no reason.
+    const std::vector<std::thread::id> workerIds = pool->workerThreadIds();
+    if (std::find(workerIds.begin(), workerIds.end(), ownerThreadId()) != workerIds.end()) {
+        return true;
     }
 
     const std::thread::id workerThreadId = pool->preferredWorkerThreadId();

@@ -165,6 +165,18 @@ public:
      */
     bool isRunning() const noexcept;
 
+    /**
+     * @brief Marks the loop as permanently finished: it will never run again.
+     *
+     * Thread-safe and irreversible. `ThreadPool::shutdown()` retires its
+     * worker loops before stopping them. `Node::moveToThread()` refuses a
+     * retired target, so no node is stranded on a loop that no longer runs.
+     */
+    void retire() noexcept;
+
+    /** @brief Returns `true` once retire() has been called. */
+    bool isRetired() const noexcept;
+
     /** @brief Returns the number of nodes pending deferred deletion. */
     std::size_t pendingDeleteCount() const;
 
@@ -234,6 +246,7 @@ private:
     std::atomic_bool m_ioThreadStop{false};
     bool m_stop = false;
     std::atomic_bool m_running{false};
+    std::atomic_bool m_retired{false};
     const std::thread::id m_owner;
     TimeLapse* m_timeLapse = nullptr;
 };
