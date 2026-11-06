@@ -93,6 +93,17 @@ public:
     }
 
     /**
+     * @brief Returns the owner EventLoop recorded in the control block.
+     *
+     * Lock-free and safe from any thread, even after the node is destroyed
+     * (it then returns the last owner). Returns `nullptr` for a null pointer.
+     */
+    EventLoop* ownerEventLoop() const
+    {
+        return m_block ? m_block->ownerLoop.load(std::memory_order_acquire) : nullptr;
+    }
+
+    /**
      * @brief Dereferences the pointer.
      * @return A raw pointer to the node, or `nullptr` if the node is no
      *         longer alive.

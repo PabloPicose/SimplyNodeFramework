@@ -2257,6 +2257,171 @@ TEST_F(CoreFixture, destroyingNodeAfterOwnerLoopStoppedDoesNotWarn)
     EXPECT_EQ(output.find(kForeignDestroyWarning), std::string::npos) << output;
 }
 
+// ---- Affinity read from foreign threads while the node migrates ----
+
+namespace {
+
+// Records, for every slot call and every migration hook, whether it ran on
+// the node's owner thread. Every field is only touched under the mutex.
+class AffinityProbeNode final : public snf::Node
+{
+public:
+    struct Record {
+        std::mutex mutex;
+        std::condition_variable cv;
+        int slotCalls = 0;
+        int slotCallsOffOwner = 0;
+        std::thread::id slotThread;
+        int hooksOffOwner = 0;
+    };
+
+    explicit AffinityProbeNode(std::shared_ptr<Record> record, Node* parent = nullptr)
+        : Node(parent), m_record(std::move(record))
+    {
+    }
+
+    void onSignal()
+    {
+        const bool onOwner = ownerEventLoop()->isInThisThread();
+        std::lock_guard<std::mutex> lock(m_record->mutex);
+        ++m_record->slotCalls;
+        if (! onOwner) {
+            ++m_record->slotCallsOffOwner;
+        }
+        m_record->slotThread = std::this_thread::get_id();
+        m_record->cv.notify_all();
+    }
+
+protected:
+    void update() override {}
+
+    void onAboutToMoveToThread(EventLoop* /*newLoop*/) override
+    {
+        const bool onOwner = ownerEventLoop()->isInThisThread();
+        std::lock_guard<std::mutex> lock(m_record->mutex);
+        if (! onOwner) {
+            ++m_record->hooksOffOwner;
+        }
+    }
+
+private:
+    std::shared_ptr<Record> m_record;
+};
+
+}  // namespace
+
+TEST_F(CoreFixture, queuedEmitFromAnotherThreadWhileReceiverMigratesIsRaceFree)
+{
+    // The emitter reads the receiver's owner loop while the receiver keeps
+    // migrating between main and a worker. The data race this guards against
+    // is only reported when the suite runs under ThreadSanitizer.
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerId);
+    ASSERT_NE(workerLoop, nullptr);
+
+    auto* node = new TestNode();
+    EventLoop* mainLoop = node->ownerEventLoop();
+    const std::thread::id mainId = std::this_thread::get_id();
+
+    std::atomic<int> delivered{0};
+    Signal<> sig;
+    sig.connect(
+        NodePtr<TestNode>(node), [&delivered](TestNode&) { delivered.fetch_add(1); }, ConnectionType::Queued);
+
+    std::atomic<bool> stop{false};
+    std::thread emitter([&]() {
+        while (! stop.load()) {
+            sig.emit();
+        }
+    });
+
+    for (int i = 0; i < 200; ++i) {
+        ASSERT_TRUE(node->moveToThread(workerId));  // synchronous: main is the owner
+        ASSERT_TRUE(node->moveToThread(mainId));    // asynchronous: posted to the worker
+        ASSERT_TRUE(runOnLoopAndWait(workerLoop, []() {}));
+        mainLoop->runPendingWork();
+    }
+
+    stop.store(true);
+    emitter.join();
+
+    // Drain deliveries still queued on either loop (they may forward once).
+    for (int i = 0; i < 2; ++i) {
+        ASSERT_TRUE(runOnLoopAndWait(workerLoop, []() {}));
+        mainLoop->runPendingWork();
+    }
+
+    EXPECT_GT(delivered.load(), 0);
+    delete node;
+}
+
+TEST_F(CoreFixture, queuedSlotRunsOnNewOwnerWhenReceiverMigratesBeforeDelivery)
+{
+    using namespace std::chrono_literals;
+
+    ThreadPool pool(1);
+    const std::thread::id workerId = pool.workerThreadIds().at(0);
+    EventLoop* workerLoop = Application::instance()->getEventLoopByThreadId(workerId);
+    ASSERT_NE(workerLoop, nullptr);
+
+    auto record = std::make_shared<AffinityProbeNode::Record>();
+    auto* node = new AffinityProbeNode(record);
+    EventLoop* mainLoop = node->ownerEventLoop();
+
+    Signal<> sig;
+    sig.connect(NodePtr<AffinityProbeNode>(node), &AffinityProbeNode::onSignal, ConnectionType::Queued);
+
+    // The delivery is queued on main, the current owner...
+    sig.emit();
+    // ...but the receiver moves to the worker before main processes it.
+    ASSERT_TRUE(node->moveToThread(workerId));
+    mainLoop->runPendingWork();
+
+    {
+        std::unique_lock<std::mutex> lock(record->mutex);
+        ASSERT_TRUE(record->cv.wait_for(lock, 1s, [&]() { return record->slotCalls > 0; }));
+        EXPECT_EQ(record->slotCalls, 1);
+        EXPECT_EQ(record->slotCallsOffOwner, 0);
+        EXPECT_EQ(record->slotThread, workerId);
+    }
+
+    ASSERT_TRUE(runOnLoopAndWait(workerLoop, [node]() { delete node; }));
+}
+
+TEST_F(CoreFixture, asyncMoveToThreadRunsOnNewOwnerWhenNodeMigratesBeforeItApplies)
+{
+    ThreadPool pool(2);
+    const std::vector<std::thread::id> workerIds = pool.workerThreadIds();
+    ASSERT_EQ(workerIds.size(), 2u);
+    EventLoop* loopA = Application::instance()->getEventLoopByThreadId(workerIds[0]);
+    EventLoop* loopB = Application::instance()->getEventLoopByThreadId(workerIds[1]);
+    ASSERT_NE(loopA, nullptr);
+    ASSERT_NE(loopB, nullptr);
+
+    auto record = std::make_shared<AffinityProbeNode::Record>();
+    auto* node = new AffinityProbeNode(record);
+    EventLoop* mainLoop = node->ownerEventLoop();
+
+    // Request main -> B from another thread: posted to main, the owner.
+    std::thread caller([&]() { EXPECT_TRUE(node->moveToThread(workerIds[1])); });
+    caller.join();
+
+    // Before main processes it, the node moves to A.
+    ASSERT_TRUE(node->moveToThread(workerIds[0]));
+    mainLoop->runPendingWork();
+    ASSERT_TRUE(runOnLoopAndWait(loopA, []() {}));
+
+    // The pending request is honoured, but applied on A (the owner by then).
+    EXPECT_EQ(node->ownerEventLoop(), loopB);
+    {
+        std::lock_guard<std::mutex> lock(record->mutex);
+        EXPECT_EQ(record->hooksOffOwner, 0);
+    }
+
+    ASSERT_TRUE(runOnLoopAndWait(loopB, [node]() { delete node; }));
+}
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);

@@ -117,7 +117,11 @@ public:
     /** @brief Returns the number of children currently pending deferred deletion. */
     size_t childrenToDeleteCount() const;
 
-    /** @brief Returns the thread ID of the thread that constructed this node. */
+    /**
+     * @brief Returns the thread ID of the thread this node currently lives on.
+     *
+     * Derived from `ownerEventLoop()`; safe to call from any thread.
+     */
     std::thread::id ownerThreadId() const;
 
     /** @brief Returns the thread ID of the thread this node currently lives on. */
@@ -224,11 +228,21 @@ protected:
 private:
     void pushDeleteChild(Node* child);
 
-    // Posts the deferred delete of this node to @p loop. If by the time the
+    // Posts the deferred delete of @p node to @p loop. If by the time the
     // task runs the node has migrated to another loop, the task forwards
     // itself to the current owner so the node is always destroyed on its
-    // owner thread.
-    void postDeleteToOwner(EventLoop* loop);
+    // owner thread. Off the owner thread only @p block is read, never the
+    // node, which the owner may destroy at any moment.
+    static void postDeleteToOwner(Node* node, std::shared_ptr<NodeLifetimeBlock> block, EventLoop* loop);
+
+    // Same forwarding scheme for a migration requested off the owner thread.
+    static void postMoveToOwner(Node* node,
+                                std::shared_ptr<NodeLifetimeBlock> block,
+                                EventLoop* loop,
+                                EventLoop* targetLoop);
+
+    // Sets the owner loop; only on the owner thread (or during construction).
+    void setOwnerEventLoop(EventLoop* loop);
 
     // Performs the actual recursive migration; must be called on owner thread.
     void applyMoveToThread(EventLoop* targetLoop);
@@ -239,8 +253,6 @@ private:
     std::vector<Node*> m_childrenToDelete;
     bool m_isRoot = false;
     std::string m_name;
-    std::thread::id m_ownerThreadId;
-    EventLoop* m_ownerEventLoop = nullptr;
     std::uint64_t m_generation = 0;
     std::shared_ptr<NodeLifetimeBlock> m_lifetimeBlock;
 };

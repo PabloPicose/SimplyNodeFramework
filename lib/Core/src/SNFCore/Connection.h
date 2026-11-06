@@ -48,6 +48,26 @@ bool canInvokeReceiver(const NodePtr<Receiver>& receiver)
     return static_cast<bool>(receiver) && ! receiver.isMarkedToDelete();
 }
 
+// Posts @p task to @p loop. When it runs, if the receiver has migrated to
+// another loop in the meantime, it is forwarded to the current owner, so the
+// slot always runs on the receiver's owner thread. Off the owner thread only
+// the receiver's control block is read, never the node itself.
+template <typename Receiver>
+void postToReceiverOwner(EventLoop* loop, NodePtr<Receiver> receiver, std::shared_ptr<std::function<void()>> task)
+{
+    loop->post([loop, receiver = std::move(receiver), task = std::move(task)]() {
+        if (! canInvokeReceiver(receiver)) {
+            return;
+        }
+        EventLoop* owner = receiver.ownerEventLoop();
+        if (owner && owner != loop) {
+            postToReceiverOwner(owner, receiver, task);
+            return;
+        }
+        (*task)();
+    });
+}
+
 }  // namespace detail
 
 /**
@@ -195,23 +215,27 @@ public:
             };
 
             if (type == ConnectionType::Queued) {
-                auto* loop = receiver->ownerEventLoop();
+                // Read from the control block: the emitter may be on any
+                // thread, concurrently with the receiver migrating.
+                auto* loop = receiver.ownerEventLoop();
                 if (! loop) {
                     state->connected.store(false);
                     return;
                 }
 
                 auto copiedArgs = std::make_tuple(std::decay_t<Args>(std::forward<Args>(args))...);
-                loop->post([receiver, callable, state, copiedArgs = std::move(copiedArgs)]() mutable {
-                    if (! state->connected.load() || ! detail::canInvokeReceiver(receiver)) {
-                        return;
-                    }
-                    std::apply(
-                        [&receiver, &callable](auto&&... unpackedArgs) {
-                            (*callable)(*receiver, std::forward<decltype(unpackedArgs)>(unpackedArgs)...);
-                        },
-                        std::move(copiedArgs));
-                });
+                auto task = std::make_shared<std::function<void()>>(
+                    [receiver, callable, state, copiedArgs = std::move(copiedArgs)]() mutable {
+                        if (! state->connected.load() || ! detail::canInvokeReceiver(receiver)) {
+                            return;
+                        }
+                        std::apply(
+                            [&receiver, &callable](auto&&... unpackedArgs) {
+                                (*callable)(*receiver, std::forward<decltype(unpackedArgs)>(unpackedArgs)...);
+                            },
+                            std::move(copiedArgs));
+                    });
+                detail::postToReceiverOwner(loop, receiver, std::move(task));
                 return;
             }
 
