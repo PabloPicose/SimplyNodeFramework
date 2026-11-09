@@ -104,6 +104,14 @@ public:
     std::size_t write(const std::string& data);
 
     /**
+     * @brief Returns the number of queued bytes not yet handed to the kernel.
+     *
+     * `close()` discards these bytes; callers that need a graceful shutdown
+     * can wait for `bytesWritten` until this returns 0.
+     */
+    std::size_t bytesToWrite() const;
+
+    /**
      * @brief Reads and returns all data currently in the read buffer.
      *
      * Typically called from a `readyRead` slot. Returns an empty vector if
@@ -137,7 +145,7 @@ private:
     void handleWritable();
     void applyConnectedState();
     void applyDisconnectedState(bool emitSignal);
-    bool transitionToDisconnected(bool emitSignal);
+    bool transitionToDisconnected(bool emitSignal, bool discardReadBuffer);
     void failWithErrno(const std::string& prefix, int errorCode);
     void updateInterestForState();
     void emitConnected();

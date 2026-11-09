@@ -1373,3 +1373,59 @@ TEST_F(TcpSocketFixture, socketStateConsistency)
     EXPECT_TRUE(sawConnected);
     EXPECT_TRUE(sawDisconnected);
 }
+
+TEST_F(TcpSocketFixture, dataSentRightBeforePeerCloseIsDelivered)
+{
+    // The peer writes and immediately closes: the final bytes arrive together
+    // with the FIN (EPOLLIN | EPOLLRDHUP) and must still reach readyRead.
+    int descriptors[2] = {-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, descriptors), 0);
+
+    const std::string payload = "last words before close";
+    ASSERT_EQ(::send(descriptors[1], payload.data(), payload.size(), 0), static_cast<ssize_t>(payload.size()));
+    ::close(descriptors[1]);
+
+    TcpSocket socket(descriptors[0], false);
+    std::string received;
+    bool disconnected = false;
+    socket.readyRead.connect([&]() { received += socket.readAll().toString(); });
+    socket.disconnected.connect([&]() {
+        received += socket.readAll().toString();
+        disconnected = true;
+    });
+
+    ASSERT_TRUE(pumpPendingWorkUntil(*app, [&]() { return disconnected; }, 2s));
+    EXPECT_EQ(received, payload);
+}
+
+TEST_F(TcpSocketFixture, bytesToWriteReportsQueuedBytes)
+{
+    int descriptors[2] = {-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, descriptors), 0);
+    int sendBufferSize = 4096;
+    ASSERT_EQ(::setsockopt(descriptors[0], SOL_SOCKET, SO_SNDBUF, &sendBufferSize, sizeof(sendBufferSize)), 0);
+
+    TcpSocket socket(descriptors[0], false);
+    EXPECT_EQ(socket.bytesToWrite(), 0u);
+
+    const std::vector<std::uint8_t> big(1024 * 1024, 0x42);
+    socket.write(ByteArray(big));
+    const std::size_t queued = socket.bytesToWrite();
+    EXPECT_GT(queued, 0u);
+    EXPECT_LE(queued, big.size());
+
+    // Drain the peer until everything is sent.
+    std::size_t drained = 0;
+    std::uint8_t buffer[64 * 1024];
+    ASSERT_TRUE(pumpPendingWorkUntil(*app, [&]() {
+        while (true) {
+            const ssize_t n = ::recv(descriptors[1], buffer, sizeof(buffer), MSG_DONTWAIT);
+            if (n <= 0) break;
+            drained += static_cast<std::size_t>(n);
+        }
+        return socket.bytesToWrite() == 0 && drained == big.size();
+    }, 3s));
+
+    socket.close();
+    ::close(descriptors[1]);
+}

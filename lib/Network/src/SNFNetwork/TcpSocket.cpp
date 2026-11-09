@@ -204,7 +204,7 @@ void TcpSocket::close()
         return;
     }
 
-    const bool shouldEmit = transitionToDisconnected(true);
+    const bool shouldEmit = transitionToDisconnected(true, true);
     stop();
     setDescriptor(-1);
 
@@ -262,6 +262,16 @@ std::size_t TcpSocket::write(const std::string& data)
     return write(ByteArray(data));
 }
 
+std::size_t TcpSocket::bytesToWrite() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::size_t total = 0;
+    for (const ByteArray& chunk : m_writeQueue) {
+        total += chunk.remainingSize();
+    }
+    return total;
+}
+
 ByteArray TcpSocket::readAll()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -301,6 +311,16 @@ std::uint16_t TcpSocket::peerPort() const
 void TcpSocket::handleEvents(std::uint32_t nativeEvents)
 {
     IOEvent::handleEvents(nativeEvents);
+
+    // A peer that writes and closes right away delivers its last bytes in the
+    // same wakeup as the hang-up. Drain them first; handleReadable() reports
+    // the disconnect itself once recv() returns 0.
+    if ((nativeEvents & (EPOLLIN | EPOLLHUP | EPOLLRDHUP)) != 0u && state() == TcpSocketState::Connected) {
+        handleReadable();
+        if (state() != TcpSocketState::Connected) {
+            return;
+        }
+    }
 
     if ((nativeEvents & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) != 0u) {
         if (state() == TcpSocketState::Connecting) {
@@ -418,6 +438,9 @@ void TcpSocket::handleReadable()
         }
 
         if (readBytes == 0) {
+            if (appended) {
+                emitReadyRead();
+            }
             applyDisconnectedState(true);
             return;
         }
@@ -463,7 +486,9 @@ void TcpSocket::applyConnectedState()
 
 void TcpSocket::applyDisconnectedState(bool emitSignal)
 {
-    const bool shouldEmit = transitionToDisconnected(emitSignal);
+    // Remote close or error: keep bytes that were already received so that a
+    // readyRead/disconnected slot can still read them.
+    const bool shouldEmit = transitionToDisconnected(emitSignal, false);
 
     stop();
     setDescriptor(-1);
@@ -473,13 +498,15 @@ void TcpSocket::applyDisconnectedState(bool emitSignal)
     }
 }
 
-bool TcpSocket::transitionToDisconnected(bool emitSignal)
+bool TcpSocket::transitionToDisconnected(bool emitSignal, bool discardReadBuffer)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
 
     const bool wasConnected = m_state == TcpSocketState::Connected || m_state == TcpSocketState::Connecting;
     m_state = TcpSocketState::Disconnected;
-    m_readBuffer.clear();
+    if (discardReadBuffer) {
+        m_readBuffer.clear();
+    }
     m_writeQueue.clear();
 
     return emitSignal && wasConnected;
