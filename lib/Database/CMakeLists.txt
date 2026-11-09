@@ -21,6 +21,11 @@ set(SNFDATABASE_HEADERS
 
 if(SNF_ENABLE_SQLITE)
     find_package(SQLite3 QUIET)
+    # CMake's FindSQLite3 names its imported target SQLite::SQLite3 (it honours SQLite3_LIBRARY, e.g. a static
+    # libsqlite3.a). Use it before falling back to pkg-config.
+    if(TARGET SQLite::SQLite3 AND NOT TARGET SQLite3::SQLite3)
+        add_library(SQLite3::SQLite3 ALIAS SQLite::SQLite3)
+    endif()
     if(NOT TARGET SQLite3::SQLite3)
         # Fallback: some distros ship a SQLite3Config.cmake that sets SQLite3_FOUND
         # but does not define the imported target. Use pkg-config to fill the gap.
