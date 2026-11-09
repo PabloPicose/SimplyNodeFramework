@@ -70,6 +70,19 @@ public:
     std::size_t rootNodeCount() const;
 
     // ── Executor ────────────────────────────────────────────────────────────
+    /**
+     * @brief Stops running tasks until resume(); posted tasks (I/O and timer
+     *        callbacks included) are queued meanwhile.
+     *
+     * Used while a subtree moves onto the strand, so that none of its
+     * callbacks runs before every node of it has moved. A task already
+     * running finishes; no further task starts.
+     */
+    void hold();
+
+    /** @brief Undoes hold() and runs the tasks queued meanwhile. */
+    void resume();
+
     void post(Task task) override;
     bool isCurrent() const noexcept override;
     bool isActive() const noexcept override;
@@ -111,6 +124,7 @@ private:
     std::vector<Node*> m_rootNodes;
     std::vector<Node*> m_pendingDeletes;  // only touched inside the strand
     bool m_scheduled = false;             // a drain is queued or running
+    bool m_held = false;                  // reserved: tasks queue but do not run
 
     std::atomic<bool> m_active{false};  // mirrors m_scheduled for lock-free reads
     std::atomic<bool> m_retired{false};

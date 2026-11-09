@@ -57,7 +57,12 @@ bool PooledNode::applyMoveToTaskPool(TaskPool& pool)
     if (! strand) {
         return false;  // the pool stopped accepting work
     }
+    // The subtree is published to the strand node by node; a child's hook may
+    // already arm I/O or timers there. Hold the strand so none of those
+    // callbacks runs (and maybe destroys the subtree) before the move is done.
+    strand->hold();
     applyMoveTo(strand);
+    strand->resume();
     detail::Strand::release(strand);  // the subtree keeps it in use from now on
     return true;
 }

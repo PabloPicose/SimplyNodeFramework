@@ -65,7 +65,7 @@ void Strand::post(Task task)
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_queue.push_back(std::move(task));
-        if (! m_scheduled) {
+        if (! m_scheduled && ! m_held) {
             m_scheduled = true;
             m_active.store(true, std::memory_order_release);
             needsSchedule = true;
@@ -84,6 +84,29 @@ void Strand::schedule()
         std::lock_guard<std::mutex> lock(m_mutex);
         m_scheduled = false;
         m_active.store(false, std::memory_order_release);
+    }
+}
+
+void Strand::hold()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_held = true;
+}
+
+void Strand::resume()
+{
+    bool needsSchedule = false;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_held = false;
+        if (! m_scheduled && ! m_queue.empty()) {
+            m_scheduled = true;
+            m_active.store(true, std::memory_order_release);
+            needsSchedule = true;
+        }
+    }
+    if (needsSchedule) {
+        schedule();
     }
 }
 
@@ -153,7 +176,7 @@ void Strand::drain()
             Task task;
             {
                 std::lock_guard<std::mutex> lock(m_mutex);
-                if (m_queue.empty()) {
+                if (m_queue.empty() || m_held) {
                     break;
                 }
                 task = std::move(m_queue.front());
@@ -176,7 +199,7 @@ void Strand::drain()
     bool more = false;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        more = ! m_queue.empty();
+        more = ! m_queue.empty() && ! m_held;  // a held strand is rescheduled by resume()
         if (! more) {
             m_scheduled = false;
             m_active.store(false, std::memory_order_release);

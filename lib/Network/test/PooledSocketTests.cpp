@@ -329,6 +329,81 @@ TEST_F(PooledSocketFixture, acceptorOnMainHandsEachConnectionToAPooledHandler)
     EXPECT_EQ(record->callbacksOffOwner, 0);
 }
 
+namespace {
+
+// Moved after the socket: its hook runs on the moving thread while the socket
+// already watches its descriptor in the strand.
+class SlowMoveProbe final : public Node
+{
+public:
+    SlowMoveProbe(Node* parent, const std::atomic<bool>& readSeen, std::atomic<bool>& readSeenDuringMove)
+        : Node(parent), m_readSeen(readSeen), m_readSeenDuringMove(readSeenDuringMove)
+    {
+    }
+
+protected:
+    void onMovedToThread(EventLoop* /*oldLoop*/) override
+    {
+        std::this_thread::sleep_for(100ms);
+        m_readSeenDuringMove.store(m_readSeen.load());
+    }
+
+private:
+    const std::atomic<bool>& m_readSeen;
+    std::atomic<bool>& m_readSeenDuringMove;
+};
+
+class EarlyDataHandler final : public PooledNode
+{
+public:
+    EarlyDataHandler(TcpSocket* socket, std::atomic<bool>& readSeen, std::atomic<bool>& readSeenDuringMove)
+        : m_socket(socket), m_readSeen(readSeen)
+    {
+        m_socket->setParent(this);
+        new SlowMoveProbe(this, readSeen, readSeenDuringMove);
+        m_socket->readyRead.connect(NodePtr<EarlyDataHandler>(this), [](EarlyDataHandler& self) {
+            self.m_readSeen.store(true);
+            self.m_socket->write(self.m_socket->readAll());
+        });
+        m_socket->disconnected.connect(NodePtr<EarlyDataHandler>(this), [](EarlyDataHandler& self) {
+            self.deleteLater();
+        });
+    }
+
+private:
+    TcpSocket* m_socket;
+    std::atomic<bool>& m_readSeen;
+};
+
+}  // namespace
+
+TEST_F(PooledSocketFixture, strandRunsNoCallbackBeforeTheWholeSubtreeHasMoved)
+{
+    // The subtree is published to the strand node by node. If the strand ran
+    // the socket's callbacks before the move finished, the handler could be
+    // destroyed there while the moving thread still walks its children.
+    TaskPool pool(2);
+    TcpServer server;
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+
+    const int fd = connectTcp(server.serverPort());
+    ASSERT_GE(fd, 0);
+    ASSERT_TRUE(sendAll(fd, "early"));  // already pending when the socket moves
+
+    TcpSocket* socket = nullptr;
+    ASSERT_TRUE(waitUntil([&]() { return (socket = server.nextPendingConnection()) != nullptr; }, 3s,
+                          [&]() { app->loopOnce(); }));
+
+    std::atomic<bool> readSeen{false};
+    std::atomic<bool> readSeenDuringMove{false};
+    auto* handler = new EarlyDataHandler(socket, readSeen, readSeenDuringMove);
+    ASSERT_TRUE(handler->moveToTaskPool(&pool));
+
+    EXPECT_FALSE(readSeenDuringMove.load());
+    EXPECT_EQ(receiveExactly(fd, 5), "early");
+    ::close(fd);
+}
+
 TEST_F(PooledSocketFixture, slowHandlerStillReceivesEveryChunk)
 {
     // While a read callback runs, the descriptor stays disarmed; once it
