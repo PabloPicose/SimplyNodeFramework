@@ -55,9 +55,9 @@ int main(int argc, char** argv)
         // This is where the magic happens.
         peer->moveToThreadPool();
 
-        // Here is the magic: the framework has a pool of sleeping threads, and it also keeps track
-        // of how long each "loop" takes to process. So this client will go to the thread with the
-        // lowest workload, and all its events (the slots) will run on that thread.
+        // Here is the magic: the framework has a pool of sleeping threads, each one with its own
+        // event loop, and it knows how many nodes every thread is already looking after. So this
+        // client will go to the least crowded thread, and all its events (the slots) will run there.
         //
         // In this specific example it may not make a huge difference, but we could have a TcpSocket
         // subclass with its own variables, and whenever something happens, those variables would be
@@ -71,14 +71,76 @@ int main(int argc, char** argv)
 ```
 And there we go. We already have a multithreaded TCP server in about 20 lines of code, comments included.
 
+### And what if some clients work much harder than others?
+
+`moveToThreadPool()` picks a thread once, when the client arrives, and the client stays there for good. Most of the time that is exactly what you want. But imagine that one client sends ten times more than the rest, or that every message needs some heavy processing: its thread gets busy while the others are just sitting there, bored.
+
+For that case we have `PooledNode`. A pooled node does not live on one thread: it lives on the `TaskPool`, and its slots run on whichever thread happens to be free at that moment. And here comes the nice part: you still write it as if it had a thread of its own. Two slots of the same node never run at the same time, and they always run in the order they arrived, so you do not need a single mutex.
+
+Let us give every client its own handler:
+
+```cpp
+#include <SNFCore/Application.h>
+#include <SNFCore/NodePtr.h>
+#include <SNFCore/PooledNode.h>
+#include <SNFNetwork/TcpServer.h>
+#include <SNFNetwork/TcpSocket.h>
+
+using namespace snf;
+
+// One handler per client. It can keep its own state without any locks.
+class ClientHandler : public PooledNode
+{
+public:
+    explicit ClientHandler(TcpSocket* socket) : m_socket(socket)
+    {
+        // The socket becomes part of the handler, so it travels with it
+        m_socket->setParent(this);
+        m_socket->readyRead.connect(NodePtr<ClientHandler>(this), &ClientHandler::onReadyRead);
+        m_socket->disconnected.connect(NodePtr<ClientHandler>(this), &ClientHandler::onDisconnected);
+    }
+
+private:
+    void onReadyRead()
+    {
+        ++m_messages;  // only this handler touches it, never from two threads at once
+        m_socket->write(m_socket->readAll());
+    }
+
+    void onDisconnected() { deleteLater(); }
+
+    TcpSocket* m_socket;
+    int m_messages = 0;
+};
+
+int main(int argc, char** argv)
+{
+    Application app(argc, argv);
+
+    TcpServer server;
+    server.listen(HostAddress::LocalHost, 9000);
+
+    server.newConnection.connect([&]() {
+        while (TcpSocket* peer = server.nextPendingConnection()) {
+            // Off it goes: from now on any free thread can serve this client
+            (new ClientHandler(peer))->moveToTaskPool();
+        }
+    });
+
+    return app.run();
+}
+```
+
+If one client gets very chatty, it simply takes more turns, and the other threads keep serving everybody else. Timers and sockets work inside a pooled node too; the only thing that cannot live there for now is `Process`. If you are curious about the details, they are all in the [thread affinity guide](docs/guides/thread-affinity.md).
+
 To be fair, thanks to AI we have also added quite a lot of functionality, backed by plenty of tests, including coverage tests.
 
 ## Modules
 
 | Package             | Contents                                                                         | Dependencies           |
 | ------------------- | -------------------------------------------------------------------------------- | ---------------------- |
-| **`SNFCore`**       | Event loop, node ownership tree, timers, signals, cross-thread dispatch          | pthread                |
-| **`SNFNetwork`**    | TCP/Unix sockets (non-blocking, epoll-based). Linux only.                        | SNFCore                |
+| **`SNFCore`**       | Event loop, node ownership tree, timers, signals, thread and task pools, pooled nodes | pthread           |
+| **`SNFNetwork`**    | TCP/UDP/Unix sockets (non-blocking, epoll-based). Linux only.                    | SNFCore                |
 | **`SNFWidgets`**    | Dear ImGui + GLFW integration, main loop abstraction for desktop and WebAssembly | SNFCore, ImGui, GLFW   |
 | **`SNFDatabase`**   | SQLite wrapper and `SqlTableModel`                                               | SNFCore, SQLite        |
 | **`SNFSnmp`**       | SNMP client and agent implementation (Linux only)                                | SNFCore, net-snmp      |
@@ -251,7 +313,9 @@ int main(int argc, char** argv)
 
     NodePtr<Receiver> ptr(receiver);
     Signal<int> signal;
-    signal.connect(ptr, &Receiver::slotRecv, ConnectionType::Queued);
+    // No connection type needed: the default (Auto) notices that the receiver
+    // lives on another thread and queues the call there.
+    signal.connect(ptr, &Receiver::slotRecv);
 
     std::cout << "Emitting from main thread " << std::this_thread::get_id() << '\n';
     signal.emit(42);
@@ -308,8 +372,8 @@ sig.connect(NodePtr<Worker>(w), &Worker::onValue);  // Auto: runs on w's thread
 Application app(argc, argv);
 return app.run();   // blocks until quit()
 
-// Register a new thread and post work to it:
-app.getOrCreateCurrentThreadEventLoop();
+// From a thread of your own: give it an event loop and post work to it
+EventLoop* loop = app.getOrCreateCurrentThreadEventLoop();
 loop->post([]() { /* runs on this thread */ });
 ```
 
@@ -321,6 +385,21 @@ t.timeout.connect([]() { /* every 500 ms */ });
 t.start(500ms);
 
 Timer::singleShot(1000ms, []() { /* once */ });
+```
+
+### Thread pools
+
+The `Application` comes with two pools, and each one has its own job:
+
+| What you want                                    | Use                                     |
+| ------------------------------------------------ | --------------------------------------- |
+| A node that stays on one thread                  | `node->moveToThreadPool()` (`ThreadPool`) |
+| A node whose work spreads over all the threads   | derive from `PooledNode`, then `moveToTaskPool()` (`TaskPool`) |
+| Just run some heavy function in the background   | `TaskPool::globalInstance()->start(...)` |
+
+```cpp
+// A one-off job: any free thread picks it up
+TaskPool::globalInstance()->start([]() { crunchNumbers(); });
 ```
 
 ---
@@ -349,7 +428,7 @@ Step-by-step documentation lives in [`docs/guides/`](docs/guides/):
 | Guide                                                               | Description                                                                                                |
 | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | [Building with Emscripten](docs/guides/building-with-emscripten.md) | Compile an SNFWidgets app to WebAssembly and run it in a browser or Node.js — no platform `#ifdef`s needed |
-| [Thread Affinity](docs/guides/thread-affinity.md)                   | Cross-thread signal delivery with `moveToThread()` and `Queued` connections                                |
+| [Thread Affinity](docs/guides/thread-affinity.md)                   | Threads without headaches: `moveToThread()`, connection types, the two pools and `PooledNode`             |
 | [Logging](docs/guides/logging.md)                                   | Emit structured log messages, configure the central logger, and plug in custom sinks                       |
 
 ---
@@ -380,6 +459,8 @@ doxygen docs/Doxyfile
 - [ ] Plugin system (runtime shared-library loading)
 - [ ] Per-node update flag (skip `update()` when no work is pending)
 - [x] Logging framework (log levels, formatting, file output)
+- [x] Task pool and pooled nodes (work spread over every thread, timers and sockets included)
+- [ ] `Process` inside a pooled node
 
 ### Profiling
 - [ ] Classes and macros for measuring execution time, memory usage, and other metrics
