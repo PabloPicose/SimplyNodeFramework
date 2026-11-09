@@ -89,6 +89,8 @@ std::string HttpResponse::serialize() const
         statusText = "Method Not Allowed";
     else if (statusCode == 411)
         statusText = "Length Required";
+    else if (statusCode == 426)
+        statusText = "Upgrade Required";
     else if (statusCode == 500)
         statusText = "Internal Server Error";
     else if (statusCode == 503)

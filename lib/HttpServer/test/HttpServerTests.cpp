@@ -1,9 +1,13 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <memory>
 #include <string>
 
 #include "SNFCore/Application.h"
+#include "SNFCore/EventLoop.h"
+#include "SNFCore/Timer.h"
+#include "SNFNetwork/TcpSocket.h"
 #include "SNFHttpServer/HttpServer.h"
 #include "SNFHttpServer/HttpRequest.h"
 #include "SNFHttpServer/HttpResponse.h"
@@ -388,4 +392,212 @@ TEST_F(HttpServerComponentTest, MultipleMethodsOnSamePath)
     // but we're ensuring the API allows multiple methods on the same path
     // without crashing
     EXPECT_TRUE(true);
+}
+
+// ============================================================================
+// Upgrade hand-off (HttpServer::upgrade)
+// ============================================================================
+
+namespace {
+
+struct RawExchange
+{
+    std::string received;
+    bool closedByServer = false;
+};
+
+void stopLoopOf(Node& node)
+{
+    if (EventLoop* loop = node.ownerEventLoop())
+        loop->post([loop]() { loop->stop(); });
+}
+
+// Sends `request` to 127.0.0.1:`port` and collects the reply until the server
+// closes the connection or `timeout` expires.
+RawExchange rawExchange(std::uint16_t port, const std::string& request,
+                        std::chrono::milliseconds timeout = std::chrono::milliseconds(1500))
+{
+    RawExchange result;
+    TcpSocket client(false);
+    client.connected.connect([&]() { client.write(request); });
+    client.readyRead.connect([&]() { result.received += client.readAll().toString(); });
+    client.disconnected.connect([&]() {
+        result.closedByServer = true;
+        stopLoopOf(client);
+    });
+
+    Timer shutdown;
+    shutdown.setSingleShot(true);
+    shutdown.timeout.connect([&]() { stopLoopOf(shutdown); });
+    shutdown.start(timeout);
+
+    client.connectToHost(HostAddress::LocalHost, port);
+    Application::instance()->run();
+    client.close();
+    return result;
+}
+
+const std::string kUpgradeRequest = "GET /ws HTTP/1.1\r\n"
+                                    "Host: 127.0.0.1\r\n"
+                                    "Upgrade: websocket\r\n"
+                                    "Connection: Upgrade\r\n"
+                                    "\r\n";
+
+} // namespace
+
+TEST_F(HttpServerComponentTest, UpgradeHandlerTakesSocketAndAllBytesRead)
+{
+    HttpServer server;
+    std::string handed;
+    int handlerCalls = 0;
+    TcpSocket* adopted = nullptr;
+
+    server.upgrade("/ws", [&](TcpSocket* socket, std::string data) {
+        ++handlerCalls;
+        adopted = socket;
+        handed = std::move(data);
+        // Bytes that arrive after the hand-off are read by the new owner.
+        socket->readyRead.connect([&, socket]() {
+            handed += socket->readAll().toString();
+            if (handed.find("TRAILING") != std::string::npos)
+                socket->write(std::string("ADOPTED"));
+        });
+        if (handed.find("TRAILING") != std::string::npos)
+            socket->write(std::string("ADOPTED"));
+    });
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+
+    std::string received;
+    TcpSocket client(false);
+    client.connected.connect([&]() { client.write(kUpgradeRequest + "TRAILING"); });
+    client.readyRead.connect([&]() {
+        received += client.readAll().toString();
+        if (received == "ADOPTED")
+            stopLoopOf(client);
+    });
+    Timer shutdown;
+    shutdown.setSingleShot(true);
+    shutdown.timeout.connect([&]() { stopLoopOf(shutdown); });
+    shutdown.start(std::chrono::milliseconds(1500));
+
+    client.connectToHost(HostAddress::LocalHost, server.serverPort());
+    app->run();
+
+    EXPECT_EQ(handlerCalls, 1);
+    EXPECT_EQ(handed, kUpgradeRequest + "TRAILING");
+    // No HTTP response was written by the server: only the handler's bytes.
+    EXPECT_EQ(received, "ADOPTED");
+    ASSERT_NE(adopted, nullptr);
+    EXPECT_EQ(adopted->state(), TcpSocketState::Connected);
+
+    client.close();
+    delete adopted;
+}
+
+TEST_F(HttpServerComponentTest, AdoptedSocketSurvivesServerCloseAndDestruction)
+{
+    auto server = std::make_unique<HttpServer>();
+    TcpSocket* adopted = nullptr;
+    server->upgrade("/ws", [&](TcpSocket* socket, std::string) {
+        adopted = socket;
+        stopLoopOf(*socket);
+    });
+    ASSERT_TRUE(server->listen(HostAddress::LocalHost, 0));
+
+    std::string received;
+    bool clientDisconnected = false;
+    TcpSocket client(false);
+    client.connected.connect([&]() { client.write(kUpgradeRequest); });
+    client.readyRead.connect([&]() {
+        received += client.readAll().toString();
+        stopLoopOf(client);
+    });
+    client.disconnected.connect([&]() { clientDisconnected = true; });
+    Timer shutdown;
+    shutdown.setSingleShot(true);
+    shutdown.timeout.connect([&]() { stopLoopOf(shutdown); });
+    shutdown.start(std::chrono::milliseconds(1500));
+
+    client.connectToHost(HostAddress::LocalHost, server->serverPort());
+    app->run();
+    ASSERT_NE(adopted, nullptr);
+
+    server->close();
+    server.reset();
+
+    shutdown.start(std::chrono::milliseconds(1500));
+    adopted->write(std::string("still here"));
+    app->run();
+
+    EXPECT_EQ(received, "still here");
+    EXPECT_FALSE(clientDisconnected);
+
+    client.close();
+    delete adopted;
+}
+
+TEST_F(HttpServerComponentTest, UpgradeRouteWithoutUpgradeHeaderGets426)
+{
+    HttpServer server;
+    int handlerCalls = 0;
+    server.upgrade("/ws", [&](TcpSocket* socket, std::string) {
+        ++handlerCalls;
+        socket->close();
+        socket->deleteLater();
+    });
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+
+    const auto r = rawExchange(server.serverPort(), "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+    EXPECT_EQ(r.received.rfind("HTTP/1.1 426 Upgrade Required", 0), 0u) << r.received;
+    EXPECT_NE(r.received.find("Upgrade: websocket"), std::string::npos) << r.received;
+    EXPECT_TRUE(r.closedByServer);
+    EXPECT_EQ(handlerCalls, 0);
+}
+
+TEST_F(HttpServerComponentTest, UpgradeToUnregisteredPathGets404)
+{
+    HttpServer server;
+    int handlerCalls = 0;
+    server.upgrade("/ws", [&](TcpSocket* socket, std::string) {
+        ++handlerCalls;
+        socket->close();
+        socket->deleteLater();
+    });
+    // A plain GET route on the same path does not accept upgrades either.
+    server.get("/other", [](const HttpRequest&) {
+        HttpResponse resp;
+        resp.text("plain");
+        return resp;
+    });
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+
+    for (const std::string path : {"/nope", "/other"})
+    {
+        std::string request = kUpgradeRequest;
+        request.replace(request.find("/ws"), 3, path);
+        const auto r = rawExchange(server.serverPort(), request);
+        EXPECT_EQ(r.received.rfind("HTTP/1.1 404", 0), 0u) << path << "\n" << r.received;
+        EXPECT_TRUE(r.closedByServer) << path;
+    }
+    EXPECT_EQ(handlerCalls, 0);
+}
+
+TEST_F(HttpServerComponentTest, PlainRoutesStillWorkWithUpgradeRoutes)
+{
+    HttpServer server;
+    server.upgrade("/ws", [](TcpSocket* socket, std::string) {
+        socket->close();
+        socket->deleteLater();
+    });
+    server.get("/api/status", [](const HttpRequest&) {
+        HttpResponse resp;
+        resp.json(R"({"ok":true})");
+        return resp;
+    });
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+
+    const auto r = rawExchange(server.serverPort(), "GET /api/status HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+    EXPECT_EQ(r.received.rfind("HTTP/1.1 200 OK", 0), 0u) << r.received;
+    EXPECT_NE(r.received.find(R"({"ok":true})"), std::string::npos) << r.received;
+    EXPECT_TRUE(r.closedByServer);
 }

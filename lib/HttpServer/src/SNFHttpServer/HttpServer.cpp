@@ -6,11 +6,49 @@
 #include "SNFHttpServer/HttpRequestParser.h"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <utility>
 
 namespace snf {
+
+namespace {
+
+std::string toLowerAscii(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return value;
+}
+
+bool requestsWebSocketUpgrade(const HttpRequest& request)
+{
+    // "Upgrade" is a comma-separated list of protocol tokens.
+    std::stringstream tokens(toLowerAscii(request.getHeader("Upgrade")));
+    std::string token;
+    while (std::getline(tokens, token, ','))
+    {
+        token.erase(0, token.find_first_not_of(" \t"));
+        token.erase(token.find_last_not_of(" \t") + 1);
+        if (token == "websocket")
+            return true;
+    }
+    return false;
+}
+
+HttpResponse upgradeRequired()
+{
+    HttpResponse resp(426);
+    resp.body = "426 Upgrade Required";
+    resp.headers["Content-Type"] = "text/plain";
+    resp.headers["Upgrade"] = "websocket";
+    resp.headers["Connection"] = "Upgrade, close";
+    return resp;
+}
+
+} // namespace
 
 HttpServer::HttpServer(Node* parent)
     : Node()
@@ -36,6 +74,11 @@ void HttpServer::post(const std::string& path, const RequestHandler& handler)
 void HttpServer::serve_static(const std::string& urlPrefix, const std::string& fsPath)
 {
     _staticPrefixes.push_back({urlPrefix, fsPath});
+}
+
+void HttpServer::upgrade(const std::string& path, const UpgradeHandler& handler)
+{
+    _upgradeRoutes[path] = handler;
 }
 
 bool HttpServer::listen(const HostAddress& host, std::uint16_t port)
@@ -90,15 +133,17 @@ void HttpServer::_onNewConnection()
             continue;
 
         // Initialize socket state (parser)
-        _socketStates[socket] = SocketState();
+        SocketState& state = _socketStates[socket];
 
-        // Connect signals
-        socket->readyRead.connect([this, socket]() { _onSocketReadyRead(socket); });
-        socket->disconnected.connect([this, socket]() { _closeSocket(socket); });
-        socket->errorOccurred.connect([this, socket](const std::string& msg) {
-            _onSocketError(socket, msg);
-        });
-        socket->bytesWritten.connect([this, socket](std::size_t n) {
+        // Connect signals; the handles are kept so an upgrade hand-off can
+        // drop them and leave the socket free of HttpServer slots.
+        state.slots.push_back(
+            socket->readyRead.connect([this, socket]() { _onSocketReadyRead(socket); }));
+        state.slots.push_back(
+            socket->disconnected.connect([this, socket]() { _closeSocket(socket); }));
+        state.slots.push_back(socket->errorOccurred.connect(
+            [this, socket](const std::string& msg) { _onSocketError(socket, msg); }));
+        state.slots.push_back(socket->bytesWritten.connect([this, socket](std::size_t n) {
             auto stateIt = _socketStates.find(socket);
             if (stateIt == _socketStates.end())
                 return;
@@ -106,7 +151,7 @@ void HttpServer::_onNewConnection()
             state.totalSent += n;
             if (state.pendingClose && state.totalSent >= state.totalToSend)
                 _closeSocket(socket);
-        });
+        }));
     }
 }
 
@@ -125,7 +170,15 @@ void HttpServer::_onSocketReadyRead(TcpSocket* socket)
     if (stateIt == _socketStates.end())
         return;
 
-    HttpRequestParser& parser = stateIt->second.parser;
+    SocketState& socketState = stateIt->second;
+    if (socketState.pendingClose)
+        return; // Response already queued; ignore anything else the client sends.
+
+    HttpRequestParser& parser = socketState.parser;
+
+    // Keep a raw copy only when an upgrade hand-off may need it.
+    if (!_upgradeRoutes.empty())
+        socketState.raw.append(data.toString());
 
     // Feed data to parser
     parser.feed(data.bytesView());
@@ -135,11 +188,29 @@ void HttpServer::_onSocketReadyRead(TcpSocket* socket)
     {
         HttpRequest request = parser.parse();
 
+        HttpResponse response;
+
+        const auto upgradeIt = _upgradeRoutes.find(request.path);
+        const bool wantsUpgrade = requestsWebSocketUpgrade(request);
+        if (upgradeIt != _upgradeRoutes.end())
+        {
+            if (wantsUpgrade && request.method == "GET")
+            {
+                _handOff(socket, upgradeIt->second);
+                return;
+            }
+            _sendAndClose(socket, upgradeRequired());
+            return;
+        }
+        if (wantsUpgrade)
+        {
+            _sendAndClose(socket, HttpResponse::notFound());
+            return;
+        }
+
         // Find matching route
         RouteKey key{request.method, request.path};
         auto routeIt = _routes.find(key);
-
-        HttpResponse response;
 
         if (routeIt != _routes.end())
         {
@@ -187,33 +258,57 @@ void HttpServer::_onSocketReadyRead(TcpSocket* socket)
             }
         }
 
-        // Send response
-        std::string serialized = response.serialize();
-
-        // Schedule close only after all bytes are confirmed flushed by bytesWritten signal.
-        // For large files the kernel send buffer fills up and flushPendingWrites() returns
-        // EAGAIN; closing immediately would discard the unsent bytes still in m_writeBuffer.
-        auto& state = _socketStates[socket];
-        state.pendingClose = true;
-        state.totalToSend  = serialized.size();
-        state.totalSent    = 0;
-
-        socket->write(serialized);
+        _sendAndClose(socket, response);
         return;
     }
 
     if (parser.hasError())
     {
-        HttpResponse errorResponse = HttpResponse::badRequest(parser.error());
-        std::string serialized = errorResponse.serialize();
-
-        auto& state = _socketStates[socket];
-        state.pendingClose = true;
-        state.totalToSend  = serialized.size();
-        state.totalSent    = 0;
-
-        socket->write(serialized);
+        _sendAndClose(socket, HttpResponse::badRequest(parser.error()));
     }
+}
+
+void HttpServer::_sendAndClose(TcpSocket* socket, const HttpResponse& response)
+{
+    auto stateIt = _socketStates.find(socket);
+    if (stateIt == _socketStates.end())
+        return;
+
+    std::string serialized = response.serialize();
+
+    // Schedule close only after all bytes are confirmed flushed by bytesWritten signal.
+    // For large files the kernel send buffer fills up and flushPendingWrites() returns
+    // EAGAIN; closing immediately would discard the unsent bytes still in m_writeBuffer.
+    SocketState& state = stateIt->second;
+    state.pendingClose = true;
+    state.totalToSend  = serialized.size();
+    state.totalSent    = 0;
+    state.raw.clear();
+
+    socket->write(serialized);
+}
+
+void HttpServer::_handOff(TcpSocket* socket, const UpgradeHandler& handler)
+{
+    auto stateIt = _socketStates.find(socket);
+    if (stateIt == _socketStates.end())
+        return;
+
+    // From here on the socket is the handler's: no HttpServer slot may touch it.
+    for (Connection& slot : stateIt->second.slots)
+        slot.disconnect();
+    std::string alreadyRead = std::move(stateIt->second.raw);
+    _socketStates.erase(stateIt);
+
+    // Copy: the handler may re-register the route (replacing the stored function).
+    UpgradeHandler callback = handler;
+    if (!callback)
+    {
+        socket->close();
+        socket->deleteLater();
+        return;
+    }
+    callback(socket, std::move(alreadyRead));
 }
 
 void HttpServer::_onSocketError(TcpSocket* socket, const std::string& errorMsg)

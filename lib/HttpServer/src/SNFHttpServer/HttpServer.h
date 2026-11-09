@@ -18,6 +18,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace snf {
 
@@ -38,6 +39,8 @@ class TcpSocket;
  * - Signal-based callbacks (on_started, on_error)
  * - Thread-safe: each connection served on the owner's EventLoop thread
  *
+ * - Protocol upgrade hand-off (e.g. WebSocket on the same port) via upgrade()
+ *
  * Note: HTTP/1.1 without persistence; each request closes the connection.
  *       Not suitable for production use; designed for local development only.
  *
@@ -48,17 +51,21 @@ class TcpSocket;
  *     std::cout << "Server started on port " << port << "\n";
  * });
  *
- * server.on_error.connect([](const Error& error) {
- *     std::cerr << error.message() << "\n";
+ * server.on_error.connect([](const std::string& error) {
+ *     std::cerr << error << "\n";
  * });
  *
  * server.get("/api/status", [](const HttpRequest&) {
- *     return HttpResponse::json(R"({"ok":true})");
+ *     HttpResponse resp;
+ *     resp.json(R"({"ok":true})");
+ *     return resp;
  * });
  *
  * server.post("/api/command", [](const HttpRequest& req) {
- *     std::cout << req.body() << "\n";
- *     return HttpResponse::text("received");
+ *     std::cout << req.body << "\n";
+ *     HttpResponse resp;
+ *     resp.text("received");
+ *     return resp;
  * });
  *
  * server.serve_static("/", "./www");
@@ -70,6 +77,16 @@ class HttpServer : public Node
 public:
     /** @brief Request handler function type. */
     using RequestHandler = std::function<HttpResponse(const HttpRequest&)>;
+
+    /**
+     * @brief Upgrade handler function type.
+     *
+     * Receives the connection socket and every byte read from it so far: the
+     * complete Upgrade request followed by any bytes the client sent after it.
+     * The handler takes ownership of the socket (it must eventually close and
+     * delete it, e.g. with `deleteLater()`).
+     */
+    using UpgradeHandler = std::function<void(TcpSocket* socket, std::string alreadyRead)>;
 
     /** @brief Constructs an HTTP server, optionally attaching to @p parent. */
     explicit HttpServer(Node* parent = nullptr);
@@ -106,6 +123,35 @@ public:
     void serve_static(const std::string& urlPrefix, const std::string& fsPath);
 
     /**
+     * @brief Registers a protocol upgrade route (e.g. WebSocket on the same port).
+     * @param path The exact path to match (e.g., "/ws").
+     * @param handler Callback that receives the connection.
+     *
+     * When a GET request to @p path carries `Upgrade: websocket`, the server
+     * does not answer it: it stops reading the socket, forgets it and passes
+     * it to @p handler together with the bytes already read (see
+     * UpgradeHandler). From then on the socket belongs to the handler;
+     * close() does not affect it.
+     *
+     * Error cases answered by the server itself (then the connection closes):
+     * - A request to @p path without `Upgrade: websocket`: 426 Upgrade Required.
+     * - `Upgrade: websocket` to a path not registered here: 404 Not Found.
+     *
+     * The handler runs on the server's EventLoop thread; whatever adopts the
+     * socket (e.g. `WebSocketServer::handleUpgrade`) must live on that thread.
+     *
+     * @code
+     * HttpServer http;
+     * WebSocketServer ws;
+     * http.upgrade("/ws", [&](TcpSocket* s, std::string data) {
+     *     ws.handleUpgrade(s, std::move(data));
+     * });
+     * http.listen(HostAddress::LocalHost, 8080);
+     * @endcode
+     */
+    void upgrade(const std::string& path, const UpgradeHandler& handler);
+
+    /**
      * @brief Starts listening for incoming connections.
      * @param host Local address to bind to (e.g., HostAddress::LocalHost or HostAddress::AnyIPv4).
      * @param port Port number (0 to let the OS choose).
@@ -117,7 +163,9 @@ public:
     bool listen(const HostAddress& host, std::uint16_t port);
 
     /**
-     * @brief Stops the server and closes all connections.
+     * @brief Stops listening for new connections.
+     *
+     * Sockets already handed to an upgrade handler are not affected.
      */
     void close();
 
@@ -157,6 +205,8 @@ private:
     struct SocketState
     {
         HttpRequestParser parser;
+        std::string raw;                   ///< Bytes read so far (only kept when upgrade routes exist).
+        std::vector<Connection> slots;     ///< Signal connections to drop on upgrade hand-off.
         bool        pendingClose  = false; ///< Close socket after write buffer drains.
         std::size_t totalToSend   = 0;     ///< Bytes expected to be sent for current response.
         std::size_t totalSent     = 0;     ///< Bytes confirmed sent via bytesWritten so far.
@@ -165,6 +215,7 @@ private:
     std::unique_ptr<TcpServer> _tcpServer;
     std::map<RouteKey, RequestHandler> _routes;
     std::vector<StaticPrefix> _staticPrefixes;
+    std::map<std::string, UpgradeHandler> _upgradeRoutes;
     std::map<TcpSocket*, SocketState> _socketStates;
 
     // Private methods
@@ -172,6 +223,8 @@ private:
     void _onSocketReadyRead(TcpSocket* socket);
     void _onSocketError(TcpSocket* socket, const std::string& errorMsg);
     void _closeSocket(TcpSocket* socket);
+    void _sendAndClose(TcpSocket* socket, const HttpResponse& response);
+    void _handOff(TcpSocket* socket, const UpgradeHandler& handler);
     std::string _guessContentType(const std::string& filePath) const;
     bool _fileExists(const std::string& path) const;
     std::string _readFile(const std::string& path) const;

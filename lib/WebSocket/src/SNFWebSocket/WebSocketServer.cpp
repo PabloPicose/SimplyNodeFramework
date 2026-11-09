@@ -136,31 +136,52 @@ void WebSocketServer::handleTcpNewConnection()
             continue;
         }
 
-        auto pending = std::make_shared<PendingUpgrade>();
-        pending->socket = std::move(socket);
-
-        // The slots live inside pending->socket, which PendingUpgrade owns:
-        // capture a weak_ptr so they do not keep their own owner alive.
-        std::weak_ptr<PendingUpgrade> weak = pending;
-        pending->readyReadConnection = pending->socket->readyRead.connect([this, weak]() {
-            if (auto locked = weak.lock()) {
-                handlePendingReadyRead(locked);
-            }
-        });
-        pending->disconnectedConnection = pending->socket->disconnected.connect([this, weak]() {
-            if (auto locked = weak.lock()) {
-                handlePendingDisconnected(locked);
-            }
-        });
-        pending->errorConnection = pending->socket->errorOccurred.connect(
-            [this, weak](const std::string& errorMessage) {
-                if (auto locked = weak.lock()) {
-                    failPending(locked, errorMessage);
-                }
-            });
-
-        m_pendingUpgrades.push_back(pending);
+        adoptPending(std::move(socket));
     }
+}
+
+std::shared_ptr<WebSocketServer::PendingUpgrade> WebSocketServer::adoptPending(std::unique_ptr<TcpSocket> socket)
+{
+    auto pending = std::make_shared<PendingUpgrade>();
+    pending->socket = std::move(socket);
+
+    // The slots live inside pending->socket, which PendingUpgrade owns:
+    // capture a weak_ptr so they do not keep their own owner alive.
+    std::weak_ptr<PendingUpgrade> weak = pending;
+    pending->readyReadConnection = pending->socket->readyRead.connect([this, weak]() {
+        if (auto locked = weak.lock()) {
+            handlePendingReadyRead(locked);
+        }
+    });
+    pending->disconnectedConnection = pending->socket->disconnected.connect([this, weak]() {
+        if (auto locked = weak.lock()) {
+            handlePendingDisconnected(locked);
+        }
+    });
+    pending->errorConnection = pending->socket->errorOccurred.connect(
+        [this, weak](const std::string& errorMessage) {
+            if (auto locked = weak.lock()) {
+                failPending(locked, errorMessage);
+            }
+        });
+
+    m_pendingUpgrades.push_back(pending);
+    return pending;
+}
+
+void WebSocketServer::handleUpgrade(TcpSocket* socket, std::string alreadyRead)
+{
+    if (!socket) {
+        return;
+    }
+
+    auto pending = adoptPending(std::unique_ptr<TcpSocket>(socket));
+    if (socket->state() != TcpSocketState::Connected) {
+        failPending(pending, "WebSocket upgrade: socket is not connected");
+        return;
+    }
+    pending->buffer = std::move(alreadyRead);
+    processPendingBuffer(pending);
 }
 
 void WebSocketServer::handleTcpServerError(const std::string& errorMessage)
@@ -176,7 +197,11 @@ void WebSocketServer::handlePendingReadyRead(const std::shared_ptr<PendingUpgrad
 
     const ByteArray data = pending->socket->readAll();
     pending->buffer += data.toString();
+    processPendingBuffer(pending);
+}
 
+void WebSocketServer::processPendingBuffer(const std::shared_ptr<PendingUpgrade>& pending)
+{
     const auto headerEnd = pending->buffer.find("\r\n\r\n");
     if (headerEnd == std::string::npos) {
         if (pending->buffer.size() > kMaxHandshakeSize) {
