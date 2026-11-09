@@ -16,6 +16,8 @@
 #include <atomic>
 #include <chrono>
 #include <dirent.h>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -70,7 +72,30 @@ public:
     Application* m_app = nullptr;
 };
 
-// ── Helper ────────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+// ProfilerNode lives in the ThreadPool, so broadcastMessage is emitted from a
+// worker thread and keeps firing until Application is destroyed in TearDown().
+// Slots therefore share their state through a shared_ptr (never by reference
+// to test locals) and are disconnected when the test body ends.
+struct BroadcastProbe {
+    std::atomic<bool> done{false};
+    std::atomic<int>  count{0};
+    std::mutex        mutex;
+    std::string       firstMessage;  // guarded by mutex
+};
+
+class ScopedConnection
+{
+public:
+    explicit ScopedConnection(Connection connection) : m_connection(std::move(connection)) {}
+    ~ScopedConnection() { m_connection.disconnect(); }
+    ScopedConnection(const ScopedConnection&) = delete;
+    ScopedConnection& operator=(const ScopedConnection&) = delete;
+
+private:
+    Connection m_connection;
+};
 
 static void pushEvents(int n,
                        const char* cat  = "test_cat",
@@ -102,22 +127,20 @@ TEST_F(ProfilerNodeFixture, BroadcastMessageSignalFiresAfterChunkFull)
     auto* pn = snf::profiler::detail::profilerNode();
     ASSERT_NE(pn, nullptr);
 
-    std::atomic<bool> received{false};
-    std::atomic<int>  count{0};
-
-    pn->broadcastMessage.connect([&](const std::string& /*msg*/) {
-        count.fetch_add(1);
-        received.store(true);
-    });
+    auto probe = std::make_shared<BroadcastProbe>();
+    ScopedConnection connection(pn->broadcastMessage.connect([probe](const std::string& /*msg*/) {
+        probe->count.fetch_add(1);
+        probe->done.store(true);
+    }));
 
     // Push more than PROFILER_CHUNK_SIZE events to trigger a flush.
     pushEvents(PROFILER_CHUNK_SIZE + 10);
 
-    runUntil(received, 400ms);
+    runUntil(probe->done, 400ms);
 
-    EXPECT_TRUE(received.load())
+    EXPECT_TRUE(probe->done.load())
         << "broadcastMessage was never emitted within 400 ms";
-    EXPECT_GT(count.load(), 0);
+    EXPECT_GT(probe->count.load(), 0);
 }
 
 TEST_F(ProfilerNodeFixture, BroadcastMessageContainsValidJson)
@@ -125,19 +148,26 @@ TEST_F(ProfilerNodeFixture, BroadcastMessageContainsValidJson)
     auto* pn = snf::profiler::detail::profilerNode();
     ASSERT_NE(pn, nullptr);
 
-    std::string firstMsg;
-    std::atomic<bool> got{false};
-
-    pn->broadcastMessage.connect([&](const std::string& msg) {
-        if (!got.exchange(true))
-            firstMsg = msg;
-    });
+    auto probe = std::make_shared<BroadcastProbe>();
+    ScopedConnection connection(pn->broadcastMessage.connect([probe](const std::string& msg) {
+        std::lock_guard<std::mutex> lock(probe->mutex);
+        if (!probe->done.load()) {
+            // Publish the message before the flag the main thread waits on.
+            probe->firstMessage = msg;
+            probe->done.store(true);
+        }
+    }));
 
     pushEvents(PROFILER_CHUNK_SIZE + 5);
 
-    runUntil(got, 400ms);
+    runUntil(probe->done, 400ms);
 
-    ASSERT_TRUE(got.load()) << "no broadcast within 400 ms";
+    ASSERT_TRUE(probe->done.load()) << "no broadcast within 400 ms";
+    std::string firstMsg;
+    {
+        std::lock_guard<std::mutex> lock(probe->mutex);
+        firstMsg = probe->firstMessage;
+    }
     EXPECT_FALSE(firstMsg.empty());
     EXPECT_EQ(firstMsg.front(), '{');
     EXPECT_NE(firstMsg.find("\"type\""), std::string::npos);
@@ -148,15 +178,15 @@ TEST_F(ProfilerNodeFixture, TraceFileIsCreatedOnChunkFlush)
     auto* pn = snf::profiler::detail::profilerNode();
     ASSERT_NE(pn, nullptr);
 
-    std::atomic<bool> flushed{false};
-    pn->broadcastMessage.connect([&](const std::string&) {
-        flushed.store(true);
-    });
+    auto probe = std::make_shared<BroadcastProbe>();
+    ScopedConnection connection(pn->broadcastMessage.connect([probe](const std::string&) {
+        probe->done.store(true);
+    }));
 
     pushEvents(PROFILER_CHUNK_SIZE + 1);
-    runUntil(flushed, 400ms);
+    runUntil(probe->done, 400ms);
 
-    EXPECT_TRUE(flushed.load());
+    EXPECT_TRUE(probe->done.load());
 
     auto hasTraceFileInDir = [](const std::string& dirPath) {
         if (DIR* d = opendir(dirPath.c_str())) {
@@ -197,24 +227,22 @@ TEST_F(ProfilerNodeFixture, MacroEventsReachBroadcast)
     auto* pn = snf::profiler::detail::profilerNode();
     ASSERT_NE(pn, nullptr);
 
-    std::atomic<int> spanCount{0};
-    std::atomic<bool> gotSpan{false};
-
-    pn->broadcastMessage.connect([&](const std::string& msg) {
+    auto probe = std::make_shared<BroadcastProbe>();
+    ScopedConnection connection(pn->broadcastMessage.connect([probe](const std::string& msg) {
         if (msg.find("\"type\":\"span\"") != std::string::npos) {
-            spanCount.fetch_add(1);
-            gotSpan.store(true);
+            probe->count.fetch_add(1);
+            probe->done.store(true);
         }
-    });
+    }));
 
     for (int i = 0; i < static_cast<int>(PROFILER_CHUNK_SIZE) + 5; ++i) {
         TRACE_EVENT_BEGIN("macro_cat", "macro_fn");
         TRACE_EVENT_END("macro_cat");
     }
 
-    runUntil(gotSpan, 500ms);
+    runUntil(probe->done, 500ms);
 
-    EXPECT_GT(spanCount.load(), 0)
+    EXPECT_GT(probe->count.load(), 0)
         << "no 'span' JSON messages broadcast within 500 ms";
 }
 
@@ -223,17 +251,16 @@ TEST_F(ProfilerNodeFixture, MemSnapshotBroadcastAfterFlush)
     auto* pn = snf::profiler::detail::profilerNode();
     ASSERT_NE(pn, nullptr);
 
-    std::atomic<bool> gotMem{false};
-
-    pn->broadcastMessage.connect([&](const std::string& msg) {
+    auto probe = std::make_shared<BroadcastProbe>();
+    ScopedConnection connection(pn->broadcastMessage.connect([probe](const std::string& msg) {
         if (msg.find("\"type\":\"mem\"") != std::string::npos)
-            gotMem.store(true);
-    });
+            probe->done.store(true);
+    }));
 
     pushEvents(PROFILER_CHUNK_SIZE + 1);
-    runUntil(gotMem, 500ms);
+    runUntil(probe->done, 500ms);
 
-    EXPECT_TRUE(gotMem.load())
+    EXPECT_TRUE(probe->done.load())
         << "no 'mem' JSON snapshot broadcast within 500 ms";
 }
 
