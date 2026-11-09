@@ -92,9 +92,9 @@ std::uint16_t WebSocket::peerPort() const
     return m_backend ? m_backend->peerPort() : 0;
 }
 
-void WebSocket::beginServerConnection()
+void WebSocket::beginServerConnection(std::string initialData)
 {
-    m_backend->beginServerConnection();
+    m_backend->beginServerConnection(std::move(initialData));
 }
 
 }  // namespace snf

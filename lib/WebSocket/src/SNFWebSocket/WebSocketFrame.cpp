@@ -70,6 +70,15 @@ void WebSocketFrameParser::feed(Span<const std::byte> data)
     m_buffer.insert(m_buffer.end(), data.begin(), data.end());
     while (!hasError() && tryParseOne()) {
     }
+
+    // Drop consumed bytes once per feed() instead of once per frame, which
+    // would make many small frames quadratic in the buffered size.
+    if (m_offset == m_buffer.size()) {
+        m_buffer.clear();
+    } else if (m_offset > 0) {
+        m_buffer.erase(m_buffer.begin(), m_buffer.begin() + static_cast<std::ptrdiff_t>(m_offset));
+    }
+    m_offset = 0;
 }
 
 bool WebSocketFrameParser::hasFrame() const
@@ -84,7 +93,7 @@ WebSocketFrame WebSocketFrameParser::nextFrame()
     }
 
     WebSocketFrame frame = std::move(m_frames.front());
-    m_frames.erase(m_frames.begin());
+    m_frames.pop_front();
     return frame;
 }
 
@@ -101,18 +110,20 @@ const std::string& WebSocketFrameParser::error() const
 void WebSocketFrameParser::reset()
 {
     m_buffer.clear();
+    m_offset = 0;
     m_frames.clear();
     m_error.clear();
 }
 
 bool WebSocketFrameParser::tryParseOne()
 {
-    if (m_buffer.size() < 2) {
+    const std::size_t available = m_buffer.size() - m_offset;
+    if (available < 2) {
         return false;
     }
 
-    const std::uint8_t first = std::to_integer<std::uint8_t>(m_buffer[0]);
-    const std::uint8_t second = std::to_integer<std::uint8_t>(m_buffer[1]);
+    const std::uint8_t first = std::to_integer<std::uint8_t>(m_buffer[m_offset]);
+    const std::uint8_t second = std::to_integer<std::uint8_t>(m_buffer[m_offset + 1]);
     const bool fin = (first & 0x80u) != 0;
     const bool hasReservedBits = (first & 0x70u) != 0;
     const auto opcodeByte = static_cast<std::uint8_t>(first & 0x0Fu);
@@ -133,20 +144,20 @@ bool WebSocketFrameParser::tryParseOne()
 
     std::size_t offset = 2;
     if (payloadLength == 126) {
-        if (m_buffer.size() < offset + 2) {
+        if (available < offset + 2) {
             return false;
         }
-        payloadLength = readBigEndian(m_buffer, offset, 2);
+        payloadLength = readBigEndian(m_buffer, m_offset + offset, 2);
         offset += 2;
         if (payloadLength < 126) {
             setError("Non-minimal 16-bit WebSocket payload length");
             return false;
         }
     } else if (payloadLength == 127) {
-        if (m_buffer.size() < offset + 8) {
+        if (available < offset + 8) {
             return false;
         }
-        payloadLength = readBigEndian(m_buffer, offset, 8);
+        payloadLength = readBigEndian(m_buffer, m_offset + offset, 8);
         offset += 8;
         if ((payloadLength & (1ull << 63u)) != 0) {
             setError("Invalid 64-bit WebSocket payload length");
@@ -171,10 +182,10 @@ bool WebSocketFrameParser::tryParseOne()
 
     std::array<std::uint8_t, 4> maskKey{};
     if (masked) {
-        if (m_buffer.size() < offset + maskKey.size()) {
+        if (available < offset + maskKey.size()) {
             return false;
         }
-        std::copy_n(reinterpret_cast<const std::uint8_t*>(m_buffer.data() + offset),
+        std::copy_n(reinterpret_cast<const std::uint8_t*>(m_buffer.data() + m_offset + offset),
                 maskKey.size(), maskKey.begin());
         offset += maskKey.size();
     }
@@ -185,17 +196,17 @@ bool WebSocketFrameParser::tryParseOne()
     }
 
     const auto payloadSize = static_cast<std::size_t>(payloadLength);
-    if (m_buffer.size() < offset + payloadSize) {
+    if (available - offset < payloadSize) {
         return false;
     }
 
+    const std::byte* payloadStart = m_buffer.data() + m_offset + offset;
     WebSocketFrame frame;
     frame.fin = fin;
     frame.opcode = opcode;
     frame.masked = masked;
-    frame.payload.assign(
-        reinterpret_cast<const std::uint8_t*>(m_buffer.data() + offset),
-        reinterpret_cast<const std::uint8_t*>(m_buffer.data() + offset + payloadSize));
+    frame.payload.assign(reinterpret_cast<const std::uint8_t*>(payloadStart),
+                         reinterpret_cast<const std::uint8_t*>(payloadStart + payloadSize));
 
     if (masked) {
         for (std::size_t i = 0; i < frame.payload.size(); ++i) {
@@ -203,7 +214,7 @@ bool WebSocketFrameParser::tryParseOne()
         }
     }
 
-    m_buffer.erase(m_buffer.begin(), m_buffer.begin() + static_cast<std::ptrdiff_t>(offset + payloadSize));
+    m_offset += offset + payloadSize;
     m_frames.push_back(std::move(frame));
     return true;
 }
@@ -211,6 +222,72 @@ bool WebSocketFrameParser::tryParseOne()
 void WebSocketFrameParser::setError(std::string message)
 {
     m_error = std::move(message);
+}
+
+bool Utf8Validator::feed(const std::uint8_t* data, std::size_t size)
+{
+    for (std::size_t i = 0; i < size && m_valid; ++i) {
+        const std::uint8_t byte = data[i];
+        if (m_remaining > 0) {
+            if (byte < m_lower || byte > m_upper) {
+                m_valid = false;
+                break;
+            }
+            m_lower = 0x80;
+            m_upper = 0xBF;
+            --m_remaining;
+            continue;
+        }
+
+        if (byte <= 0x7F) {
+            continue;
+        }
+        if (byte >= 0xC2 && byte <= 0xDF) {
+            m_remaining = 1;
+        } else if (byte >= 0xE0 && byte <= 0xEF) {
+            m_remaining = 2;
+            if (byte == 0xE0) {
+                m_lower = 0xA0;  // reject overlong 3-byte forms
+            } else if (byte == 0xED) {
+                m_upper = 0x9F;  // reject UTF-16 surrogates U+D800..U+DFFF
+            }
+        } else if (byte >= 0xF0 && byte <= 0xF4) {
+            m_remaining = 3;
+            if (byte == 0xF0) {
+                m_lower = 0x90;  // reject overlong 4-byte forms
+            } else if (byte == 0xF4) {
+                m_upper = 0x8F;  // reject code points above U+10FFFF
+            }
+        } else {
+            m_valid = false;  // 0x80..0xC1 lead bytes and 0xF5..0xFF
+        }
+    }
+    return m_valid;
+}
+
+void Utf8Validator::reset()
+{
+    m_valid = true;
+    m_remaining = 0;
+    m_lower = 0x80;
+    m_upper = 0xBF;
+}
+
+bool isValidUtf8(const std::uint8_t* data, std::size_t size)
+{
+    Utf8Validator validator;
+    return validator.feed(data, size) && validator.isComplete();
+}
+
+bool isValidCloseCode(std::uint16_t code)
+{
+    if (code >= 1000 && code <= 1003) {
+        return true;
+    }
+    if (code >= 1007 && code <= 1014) {
+        return true;
+    }
+    return code >= 3000 && code <= 4999;
 }
 
 std::vector<std::uint8_t> encodeFrame(OpCode opcode,

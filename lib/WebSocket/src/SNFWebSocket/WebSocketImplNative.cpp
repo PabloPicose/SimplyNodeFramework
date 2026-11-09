@@ -1,14 +1,29 @@
+#include "SNFCore/EventLoop.h"
+#include "SNFCore/NodePtr.h"
+#include "SNFCore/Timer.h"
 #include "SNFNetwork/TcpSocket.h"
 #include "SNFWebSocket/WebSocketBackend.h"
 #include "SNFWebSocket/WebSocketFrame.h"
 #include "SNFWebSocket/WebSocketHandshake.h"
 
 #include <algorithm>
+#include <chrono>
 #include <utility>
 
 namespace snf {
 
 namespace {
+
+using websocket::detail::CloseCode::InvalidPayload;
+using websocket::detail::CloseCode::Normal;
+using websocket::detail::CloseCode::ProtocolError;
+
+// Upper bound for the HTTP Upgrade response headers.
+constexpr std::size_t kMaxHandshakeSize = 16 * 1024;
+
+// How long to wait for the peer to answer a Close frame, or for queued bytes
+// to drain, before the TCP connection is dropped anyway.
+constexpr std::chrono::milliseconds kCloseTimeout{5000};
 
 std::vector<std::uint8_t> toBytes(const std::string& text)
 {
@@ -18,6 +33,11 @@ std::vector<std::uint8_t> toBytes(const std::string& text)
 std::string toString(const std::vector<std::uint8_t>& data)
 {
     return std::string(data.begin(), data.end());
+}
+
+std::vector<std::uint8_t> closePayload(std::uint16_t code)
+{
+    return {static_cast<std::uint8_t>(code >> 8u), static_cast<std::uint8_t>(code & 0xFFu)};
 }
 
 bool isWildcardConnectAddress(const HostAddress& address)
@@ -54,6 +74,10 @@ public:
 
     ~WebSocketImplNative() override
     {
+        m_drainConnection.disconnect();
+        if (m_closeTimer) {
+            m_closeTimer->stop();
+        }
         if (m_socket) {
             m_socket->close();
         }
@@ -69,7 +93,7 @@ public:
     WebSocketState state() const override;
     HostAddress peerAddress() const override;
     std::uint16_t peerPort() const override;
-    void beginServerConnection() override;
+    void beginServerConnection(std::string initialData) override;
 
 private:
     void attachSocketSignals();
@@ -81,14 +105,25 @@ private:
     void processHandshakeBytes(Span<const std::byte> data);
     void processFrameBytes(Span<const std::byte> data);
     void processFrame(const websocket::detail::WebSocketFrame& frame);
+    void processDataFrame(const websocket::detail::WebSocketFrame& frame);
+    void processCloseFrame(const websocket::detail::WebSocketFrame& frame);
 
     bool sendFrame(websocket::detail::OpCode opcode,
                    const std::vector<std::uint8_t>& payload,
                    bool requireOpen = true);
 
+    /** @brief Transport-level failure: report it and drop the TCP connection. */
     void fail(std::string errorMessage);
+    /** @brief Protocol violation by the peer: send Close(@p code), then drop TCP. */
+    void failConnection(std::uint16_t code, std::string errorMessage);
+    /** @brief Closes TCP once every queued byte (e.g. a Close frame) has been sent. */
+    void closeTcpWhenFlushed();
+    void armCloseTimer();
+    void resetCloseState();
+
     void setState(WebSocketState state);
     bool shouldMaskOutgoingFrames() const;
+    bool fragmentInProgress() const;
 
 private:
     WebSocket& m_owner;
@@ -97,6 +132,7 @@ private:
     bool m_clientMode = true;
     bool m_handshakeComplete = false;
     bool m_closeFrameSent = false;
+    bool m_closeFrameReceived = false;
     std::string m_handshakeBuffer;
     std::string m_clientKey;
     std::string m_host;
@@ -104,12 +140,17 @@ private:
     std::string m_path = "/";
     std::uint8_t m_fragmentOpcode = 0;
     std::vector<std::uint8_t> m_fragmentPayload;
+    websocket::detail::Utf8Validator m_utf8;
+    std::string m_inboundPrefix;  // bytes received together with the server handshake
     std::unique_ptr<websocket::detail::WebSocketFrameParser> m_frameParser;
+    std::unique_ptr<Timer> m_closeTimer;
+    Connection m_drainConnection;
 };
 
 void WebSocketImplNative::connectToHost(const HostAddress& address, std::uint16_t port, const std::string& path)
 {
     close();
+    resetCloseState();
 
     if (isWildcardConnectAddress(address)) {
         fail("WebSocket client cannot connect to wildcard address '" + address.toString() +
@@ -120,8 +161,8 @@ void WebSocketImplNative::connectToHost(const HostAddress& address, std::uint16_
     m_socket = std::make_unique<TcpSocket>(false);
     m_clientMode = true;
     m_handshakeComplete = false;
-    m_closeFrameSent = false;
     m_handshakeBuffer.clear();
+    m_inboundPrefix.clear();
     m_clientKey = websocket::detail::createClientKey();
     m_host = address.host();
     m_port = port;
@@ -129,6 +170,7 @@ void WebSocketImplNative::connectToHost(const HostAddress& address, std::uint16_
     m_frameParser->reset();
     m_fragmentPayload.clear();
     m_fragmentOpcode = static_cast<std::uint8_t>(websocket::detail::OpCode::Continuation);
+    m_utf8.reset();
 
     attachSocketSignals();
     setState(WebSocketState::Connecting);
@@ -148,7 +190,7 @@ bool WebSocketImplNative::sendBinaryMessage(const std::vector<std::uint8_t>& dat
 bool WebSocketImplNative::ping(const std::vector<std::uint8_t>& payload)
 {
     if (payload.size() > 125) {
-        fail("WebSocket ping payload is too large");
+        // Caller error, not a connection failure: refuse the ping only.
         return false;
     }
     return sendFrame(websocket::detail::OpCode::Ping, payload);
@@ -157,18 +199,23 @@ bool WebSocketImplNative::ping(const std::vector<std::uint8_t>& payload)
 void WebSocketImplNative::close()
 {
     if (m_socket && m_state == WebSocketState::Open && !m_closeFrameSent) {
-        sendFrame(websocket::detail::OpCode::Close, {}, false);
+        sendFrame(websocket::detail::OpCode::Close, closePayload(Normal), false);
         m_closeFrameSent = true;
         setState(WebSocketState::Closing);
         // RFC 6455 §7.1.2: after initiating the close handshake the TCP
-        // connection must stay open until the peer echoes the Close frame
-        // back.  The TCP socket is closed in processFrame(OpCode::Close)
-        // when the echo arrives, or in the destructor as a last resort.
+        // connection stays open until the peer echoes the Close frame back
+        // (handled in processCloseFrame()). The timer bounds that wait.
+        armCloseTimer();
         return;
     }
 
-    // For any state other than Open (Closing, Closed, Error, Connecting)
-    // force-close the underlying TCP socket immediately.
+    if (m_state == WebSocketState::Closing) {
+        // Close handshake already in progress; let it finish or time out.
+        return;
+    }
+
+    // Closed, Error or Connecting: drop the TCP connection immediately.
+    m_drainConnection.disconnect();
     if (m_socket) {
         m_socket->close();
     }
@@ -213,7 +260,7 @@ std::uint16_t WebSocketImplNative::peerPort() const
     return m_port;
 }
 
-void WebSocketImplNative::beginServerConnection()
+void WebSocketImplNative::beginServerConnection(std::string initialData)
 {
     if (!m_socket) {
         fail("WebSocket server connection has no TCP socket");
@@ -222,10 +269,29 @@ void WebSocketImplNative::beginServerConnection()
 
     m_clientMode = false;
     m_handshakeComplete = true;
-    m_closeFrameSent = false;
+    resetCloseState();
     m_frameParser->reset();
+    m_utf8.reset();
+    m_fragmentOpcode = static_cast<std::uint8_t>(websocket::detail::OpCode::Continuation);
     attachSocketSignals();
     setState(WebSocketState::Open);
+
+    if (initialData.empty()) {
+        return;
+    }
+
+    // Frames that arrived in the same TCP read as the Upgrade request. They
+    // are processed on the next loop iteration so the application can first
+    // connect its slots from WebSocketServer::newConnection. Any later
+    // readyRead consumes m_inboundPrefix first, so ordering is preserved.
+    m_inboundPrefix = std::move(initialData);
+    if (Executor* executor = m_owner.ownerExecutor()) {
+        executor->post([guard = NodePtr<WebSocket>(&m_owner), this]() {
+            if (guard) {
+                handleTcpReadyRead();
+            }
+        });
+    }
 }
 
 void WebSocketImplNative::attachSocketSignals()
@@ -257,7 +323,13 @@ void WebSocketImplNative::handleTcpReadyRead()
         return;
     }
 
-    const ByteArray data = m_socket->readAll();
+    ByteArray data = m_socket->readAll();
+    if (!m_inboundPrefix.empty()) {
+        ByteArray combined(m_inboundPrefix);
+        m_inboundPrefix.clear();
+        combined.append(data.bytesView());
+        data = std::move(combined);
+    }
     if (data.empty()) {
         return;
     }
@@ -271,6 +343,11 @@ void WebSocketImplNative::handleTcpReadyRead()
 
 void WebSocketImplNative::handleTcpDisconnected()
 {
+    m_drainConnection.disconnect();
+    if (m_closeTimer) {
+        m_closeTimer->stop();
+    }
+
     if (m_state == WebSocketState::Connecting && !m_handshakeComplete) {
         setState(WebSocketState::Error);
         m_owner.errorOccurred.emit("WebSocket connection closed before the handshake completed");
@@ -280,7 +357,9 @@ void WebSocketImplNative::handleTcpDisconnected()
     const bool wasActive = m_state == WebSocketState::Connecting ||
                            m_state == WebSocketState::Open ||
                            m_state == WebSocketState::Closing;
-    setState(WebSocketState::Closed);
+    if (m_state != WebSocketState::Error) {
+        setState(WebSocketState::Closed);
+    }
     if (wasActive) {
         m_owner.disconnected.emit();
     }
@@ -288,6 +367,10 @@ void WebSocketImplNative::handleTcpDisconnected()
 
 void WebSocketImplNative::handleTcpError(const std::string& errorMessage)
 {
+    if (m_state == WebSocketState::Closing || m_state == WebSocketState::Closed) {
+        // The close handshake already ran; a reset at this point is noise.
+        return;
+    }
     fail(errorMessage);
 }
 
@@ -297,6 +380,9 @@ void WebSocketImplNative::processHandshakeBytes(Span<const std::byte> data)
 
     const auto headerEnd = m_handshakeBuffer.find("\r\n\r\n");
     if (headerEnd == std::string::npos) {
+        if (m_handshakeBuffer.size() > kMaxHandshakeSize) {
+            fail("WebSocket handshake response exceeds " + std::to_string(kMaxHandshakeSize) + " bytes");
+        }
         return;
     }
 
@@ -314,7 +400,7 @@ void WebSocketImplNative::processHandshakeBytes(Span<const std::byte> data)
     setState(WebSocketState::Open);
     m_owner.connected.emit();
 
-    if (!remaining.empty()) {
+    if (!remaining.empty() && m_state == WebSocketState::Open) {
         const ByteArray remainingBytes(remaining);
         processFrameBytes(remainingBytes.bytesView());
     }
@@ -322,17 +408,23 @@ void WebSocketImplNative::processHandshakeBytes(Span<const std::byte> data)
 
 void WebSocketImplNative::processFrameBytes(Span<const std::byte> data)
 {
-    m_frameParser->feed(data);
-    if (m_frameParser->hasError()) {
-        fail(m_frameParser->error());
+    if (m_closeFrameReceived || m_state == WebSocketState::Error) {
+        // RFC 6455 §5.5.1: nothing may follow the peer's Close frame.
         return;
     }
 
+    m_frameParser->feed(data);
+
     while (m_frameParser->hasFrame()) {
         processFrame(m_frameParser->nextFrame());
-        if (m_state == WebSocketState::Error || m_state == WebSocketState::Closed) {
+        if (m_closeFrameReceived || m_state == WebSocketState::Error || m_state == WebSocketState::Closed) {
             return;
         }
+    }
+
+    // Frames that parsed before the malformed one have already been delivered.
+    if (m_frameParser->hasError()) {
+        failConnection(ProtocolError, m_frameParser->error());
     }
 }
 
@@ -341,48 +433,20 @@ void WebSocketImplNative::processFrame(const websocket::detail::WebSocketFrame& 
     using websocket::detail::OpCode;
 
     if (!m_clientMode && !frame.masked) {
-        fail("WebSocket client frames must be masked");
+        failConnection(ProtocolError, "WebSocket client frames must be masked");
         return;
     }
 
     if (m_clientMode && frame.masked) {
-        fail("WebSocket server frames must not be masked");
+        failConnection(ProtocolError, "WebSocket server frames must not be masked");
         return;
     }
 
     switch (frame.opcode) {
     case OpCode::Text:
     case OpCode::Binary:
-        if (frame.fin) {
-            if (frame.opcode == OpCode::Text) {
-                m_owner.textMessageReceived.emit(toString(frame.payload));
-            } else {
-                m_owner.binaryMessageReceived.emit(frame.payload);
-            }
-            return;
-        }
-
-        m_fragmentOpcode = static_cast<std::uint8_t>(frame.opcode);
-        m_fragmentPayload = frame.payload;
-        return;
-
     case OpCode::Continuation:
-        if (m_fragmentOpcode == static_cast<std::uint8_t>(OpCode::Continuation)) {
-            fail("Unexpected WebSocket continuation frame");
-            return;
-        }
-        m_fragmentPayload.insert(m_fragmentPayload.end(), frame.payload.begin(), frame.payload.end());
-        if (frame.fin) {
-            const auto originalOpcode = static_cast<OpCode>(m_fragmentOpcode);
-            auto completePayload = std::move(m_fragmentPayload);
-            m_fragmentPayload.clear();
-            m_fragmentOpcode = static_cast<std::uint8_t>(OpCode::Continuation);
-            if (originalOpcode == OpCode::Text) {
-                m_owner.textMessageReceived.emit(toString(completePayload));
-            } else {
-                m_owner.binaryMessageReceived.emit(completePayload);
-            }
-        }
+        processDataFrame(frame);
         return;
 
     case OpCode::Ping:
@@ -394,16 +458,103 @@ void WebSocketImplNative::processFrame(const websocket::detail::WebSocketFrame& 
         return;
 
     case OpCode::Close:
-        if (!m_closeFrameSent) {
-            sendFrame(OpCode::Close, frame.payload, false);
-            m_closeFrameSent = true;
+        processCloseFrame(frame);
+        return;
+    }
+}
+
+bool WebSocketImplNative::fragmentInProgress() const
+{
+    return m_fragmentOpcode != static_cast<std::uint8_t>(websocket::detail::OpCode::Continuation);
+}
+
+void WebSocketImplNative::processDataFrame(const websocket::detail::WebSocketFrame& frame)
+{
+    using websocket::detail::OpCode;
+
+    OpCode messageOpcode = frame.opcode;
+    if (frame.opcode == OpCode::Continuation) {
+        if (!fragmentInProgress()) {
+            failConnection(ProtocolError, "Unexpected WebSocket continuation frame");
+            return;
         }
-        setState(WebSocketState::Closing);
-        if (m_socket) {
-            m_socket->close();
+        messageOpcode = static_cast<OpCode>(m_fragmentOpcode);
+    } else {
+        if (fragmentInProgress()) {
+            failConnection(ProtocolError, "New WebSocket data frame while a fragmented message is in progress");
+            return;
+        }
+        m_utf8.reset();
+    }
+
+    // Text is validated incrementally so an invalid fragment fails fast.
+    if (messageOpcode == OpCode::Text) {
+        if (!m_utf8.feed(frame.payload) || (frame.fin && !m_utf8.isComplete())) {
+            failConnection(InvalidPayload, "WebSocket text message is not valid UTF-8");
+            return;
+        }
+    }
+
+    if (frame.opcode != OpCode::Continuation && frame.fin) {
+        // Single-frame message: deliver without copying into the fragment buffer.
+        if (messageOpcode == OpCode::Text) {
+            m_owner.textMessageReceived.emit(toString(frame.payload));
+        } else {
+            m_owner.binaryMessageReceived.emit(frame.payload);
         }
         return;
     }
+
+    if (frame.opcode != OpCode::Continuation) {
+        m_fragmentOpcode = static_cast<std::uint8_t>(frame.opcode);
+        m_fragmentPayload = frame.payload;
+    } else {
+        m_fragmentPayload.insert(m_fragmentPayload.end(), frame.payload.begin(), frame.payload.end());
+    }
+
+    if (!frame.fin) {
+        return;
+    }
+
+    auto completePayload = std::move(m_fragmentPayload);
+    m_fragmentPayload.clear();
+    m_fragmentOpcode = static_cast<std::uint8_t>(OpCode::Continuation);
+    if (messageOpcode == OpCode::Text) {
+        m_owner.textMessageReceived.emit(toString(completePayload));
+    } else {
+        m_owner.binaryMessageReceived.emit(completePayload);
+    }
+}
+
+void WebSocketImplNative::processCloseFrame(const websocket::detail::WebSocketFrame& frame)
+{
+    using websocket::detail::OpCode;
+
+    std::vector<std::uint8_t> reply;
+    if (frame.payload.size() == 1) {
+        failConnection(ProtocolError, "WebSocket Close frame payload of 1 byte is invalid");
+        return;
+    }
+    if (frame.payload.size() >= 2) {
+        const auto code = static_cast<std::uint16_t>((frame.payload[0] << 8u) | frame.payload[1]);
+        if (!websocket::detail::isValidCloseCode(code)) {
+            failConnection(ProtocolError, "WebSocket Close frame has invalid status code " + std::to_string(code));
+            return;
+        }
+        if (!websocket::detail::isValidUtf8(frame.payload.data() + 2, frame.payload.size() - 2)) {
+            failConnection(InvalidPayload, "WebSocket Close reason is not valid UTF-8");
+            return;
+        }
+        reply = closePayload(code);
+    }
+
+    m_closeFrameReceived = true;
+    if (!m_closeFrameSent) {
+        sendFrame(OpCode::Close, reply, false);
+        m_closeFrameSent = true;
+    }
+    setState(WebSocketState::Closing);
+    closeTcpWhenFlushed();
 }
 
 bool WebSocketImplNative::sendFrame(websocket::detail::OpCode opcode,
@@ -423,10 +574,84 @@ bool WebSocketImplNative::sendFrame(websocket::detail::OpCode opcode,
 
 void WebSocketImplNative::fail(std::string errorMessage)
 {
+    if (m_state == WebSocketState::Error) {
+        return;
+    }
     setState(WebSocketState::Error);
+    m_drainConnection.disconnect();
     m_owner.errorOccurred.emit(std::move(errorMessage));
     if (m_socket) {
         m_socket->close();
+    }
+}
+
+void WebSocketImplNative::failConnection(std::uint16_t code, std::string errorMessage)
+{
+    if (m_state == WebSocketState::Error) {
+        return;
+    }
+
+    // RFC 6455 §7.1.7: send a Close frame with the reason, then drop TCP.
+    if (m_socket && m_handshakeComplete && !m_closeFrameSent) {
+        sendFrame(websocket::detail::OpCode::Close, closePayload(code), false);
+        m_closeFrameSent = true;
+    }
+    m_frameParser->reset();
+
+    setState(WebSocketState::Error);
+    m_owner.errorOccurred.emit(std::move(errorMessage));
+    closeTcpWhenFlushed();
+}
+
+void WebSocketImplNative::closeTcpWhenFlushed()
+{
+    if (!m_socket) {
+        return;
+    }
+
+    if (m_socket->bytesToWrite() == 0) {
+        m_drainConnection.disconnect();
+        m_socket->close();
+        return;
+    }
+
+    // TcpSocket::close() discards unsent bytes, so wait for the queue to drain.
+    if (!m_drainConnection.connected()) {
+        m_drainConnection = m_socket->bytesWritten.connect([this](std::size_t) {
+            if (m_socket && m_socket->bytesToWrite() == 0) {
+                m_drainConnection.disconnect();
+                m_socket->close();
+            }
+        });
+    }
+    armCloseTimer();
+}
+
+void WebSocketImplNative::armCloseTimer()
+{
+    if (!m_closeTimer) {
+        m_closeTimer = std::make_unique<Timer>();
+        // Child of the owner so that it follows it between threads and is not
+        // tracked as a root node; the unique_ptr still controls its lifetime.
+        m_owner.addChild(m_closeTimer.get());
+        m_closeTimer->setSingleShot(true);
+        m_closeTimer->timeout.connect([this]() {
+            m_drainConnection.disconnect();
+            if (m_socket) {
+                m_socket->close();
+            }
+        });
+    }
+    m_closeTimer->start(kCloseTimeout);
+}
+
+void WebSocketImplNative::resetCloseState()
+{
+    m_closeFrameSent = false;
+    m_closeFrameReceived = false;
+    m_drainConnection.disconnect();
+    if (m_closeTimer) {
+        m_closeTimer->stop();
     }
 }
 

@@ -131,7 +131,7 @@ private:
 #ifndef __EMSCRIPTEN__
     explicit WebSocket(std::unique_ptr<TcpSocket> acceptedSocket, Node* parent = nullptr);
 #endif
-    void beginServerConnection();
+    void beginServerConnection(std::string initialData = {});
 
 private:
     std::unique_ptr<websocket::detail::WebSocketBackend> m_backend;

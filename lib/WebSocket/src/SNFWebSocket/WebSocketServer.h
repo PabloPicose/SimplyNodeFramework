@@ -47,6 +47,21 @@ public:
     bool hasPendingConnections() const;
     WebSocket* nextPendingConnection();
 
+    /**
+     * @brief Restricts which browser origins may open a connection.
+     *
+     * Browsers do not apply CORS to WebSockets: any page the user visits can
+     * open `ws://127.0.0.1:<port>`. Browsers always send an `Origin` header,
+     * so when this list is non-empty an Upgrade request whose `Origin` is not
+     * in it (compared case-insensitively, e.g. `"http://localhost:8080"`) is
+     * answered with HTTP 403 and `errorOccurred` is emitted. Requests without
+     * `Origin` (native clients such as `snf::WebSocket`) are still accepted.
+     *
+     * An empty list (the default) accepts every origin.
+     */
+    void setAllowedOrigins(std::vector<std::string> origins);
+    const std::vector<std::string>& allowedOrigins() const;
+
     Signal<> newConnection;
     Signal<std::string> errorOccurred;
 
@@ -67,6 +82,7 @@ private:
     std::unique_ptr<TcpServer> m_tcpServer;
     std::vector<std::shared_ptr<PendingUpgrade>> m_pendingUpgrades;
     std::deque<std::unique_ptr<WebSocket>> m_pendingConnections;
+    std::vector<std::string> m_allowedOrigins;  // lower-cased
 };
 
 }  // namespace snf

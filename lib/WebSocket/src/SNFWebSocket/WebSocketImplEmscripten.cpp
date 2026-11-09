@@ -234,7 +234,7 @@ public:
     HostAddress peerAddress() const override { return m_peerAddress; }
     std::uint16_t peerPort() const override { return m_peerPort; }
 
-    void beginServerConnection() override
+    void beginServerConnection(std::string /*initialData*/) override
     {
         fail("WebSocketServer is not supported in Emscripten builds");
     }

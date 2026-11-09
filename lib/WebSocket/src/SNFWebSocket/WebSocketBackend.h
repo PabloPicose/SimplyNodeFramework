@@ -36,7 +36,8 @@ public:
     virtual void connectToCurrentHost(std::uint16_t port, const std::string& path) = 0;
 #endif
 
-    virtual void beginServerConnection() = 0;
+    // initialData: bytes that followed the Upgrade request in the same read.
+    virtual void beginServerConnection(std::string initialData) = 0;
 };
 
 std::unique_ptr<WebSocketBackend> createWebSocketBackend(WebSocket& owner);

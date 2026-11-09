@@ -3,6 +3,7 @@ add_executable(SNFWebSocketTests
     WebSocketHandshakeTests.cpp
     WebSocketTests.cpp
     WebSocketServerTests.cpp
+    WebSocketProtocolTests.cpp
 )
 
 target_link_libraries(SNFWebSocketTests
