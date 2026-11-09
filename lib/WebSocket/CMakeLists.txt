@@ -74,3 +74,9 @@ install(
 if(SNF_ENABLE_TESTS AND NOT SNF_WEB_ASSEMBLY)
     add_subdirectory(test)
 endif()
+
+option(SNF_ENABLE_WEBSOCKET_CONFORMANCE
+    "Build the Autobahn|Testsuite drivers for SNFWebSocket" OFF)
+if(SNF_ENABLE_WEBSOCKET_CONFORMANCE AND NOT SNF_WEB_ASSEMBLY)
+    add_subdirectory(conformance)
+endif()

@@ -1,0 +1,67 @@
+# RFC 6455 conformance of SNFWebSocket with the Autobahn|Testsuite (docker).
+# Runs only when the WebSocket or Network code changes, or on demand.
+# See lib/WebSocket/conformance/README.md.
+name: WebSocket conformance (Autobahn)
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "lib/WebSocket/**"
+      - "lib/Network/**"
+      - ".github/workflows/websocket-conformance.yml"
+  pull_request:
+    paths:
+      - "lib/WebSocket/**"
+      - "lib/Network/**"
+      - ".github/workflows/websocket-conformance.yml"
+  workflow_dispatch:
+
+env:
+  # Opt into Node.js 24 for JavaScript-based GitHub Actions.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  autobahn:
+    name: Autobahn server + client
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends cmake ninja-build
+
+    - name: Pull Autobahn image
+      run: docker pull crossbario/autobahn-testsuite:latest
+
+    # Only the modules the drivers need; Release keeps the 9.x
+    # performance cases well inside Autobahn's timeouts.
+    - name: Configure CMake
+      run: >
+        cmake -S . -B build/conformance -G Ninja
+        -DCMAKE_BUILD_TYPE=Release
+        -DSNF_ENABLE_TESTS=OFF
+        -DSNF_ENABLE_EXAMPLES=OFF
+        -DSNF_ENABLE_STANDALONE=OFF
+        -DSNF_ENABLE_WIDGETS=OFF
+        -DSNF_ENABLE_WEBSOCKET_CONFORMANCE=ON
+
+    - name: Build drivers
+      run: cmake --build build/conformance --target SNFWebSocketEchoServer SNFWebSocketAutobahnClient
+
+    - name: Run Autobahn
+      run: lib/WebSocket/conformance/run_autobahn.sh build/conformance all
+
+    - name: Upload Autobahn reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: autobahn-reports
+        path: lib/WebSocket/conformance/reports/
+        if-no-files-found: ignore
