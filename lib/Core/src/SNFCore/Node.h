@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <atomic>
 #include <vector>
 
 namespace snf {
@@ -321,6 +322,9 @@ private:
     Node* m_parent = nullptr;
     std::vector<Node*> m_children;
     std::vector<Node*> m_childrenToDelete;
+    // Root moved to a new owner whose end-of-move task (onMovedToThread())
+    // has not run yet: run() does nothing until then.
+    std::atomic<bool> m_arriving{false};
     bool m_isRoot = false;
     std::string m_name;
     std::uint64_t m_generation = 0;

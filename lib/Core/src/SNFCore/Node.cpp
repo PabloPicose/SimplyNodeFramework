@@ -178,6 +178,9 @@ void Node::update() { std::cerr << "Pure virtual function called from Node::upda
 
 void Node::run()
 {
+    if (m_arriving.load(std::memory_order_acquire)) {
+        return;  // moved here, onMovedToThread() still pending: not ticked yet
+    }
     // delete childs to delete using iterator
     for (auto child : m_childrenToDelete) {
         NodePtr nodePtr(child);
@@ -488,7 +491,7 @@ void Node::applyMoveTo(Executor* target)
         // Step 4 below is a handful of atomic stores on the moving thread.
         ownersSet.wait();
         if (isRoot && blocks.front()->alive.load(std::memory_order_acquire)) {
-            target->addRootNode(this);  // ticked from now on
+            m_arriving.store(false, std::memory_order_release);  // ticked from now on
         }
         // A hook may destroy other nodes of the subtree: skip dead ones.
         for (std::size_t i = 0; i < nodes.size(); ++i) {
@@ -498,10 +501,20 @@ void Node::applyMoveTo(Executor* target)
         }
     });
 
-    // 4. Hand the subtree over. From here on this thread must not touch it.
+    // 4. Hand the subtree over. The root is registered right away, so that
+    //    the destination's shutdown destroys the subtree even if the task
+    //    above never runs; until it does, the root is not ticked. That
+    //    registration is the last access: from then on the destination may
+    //    destroy the subtree.
+    if (isRoot) {
+        m_arriving.store(true, std::memory_order_release);
+    }
     for (Node* node : nodes) {
         node->setOwnerExecutor(target);
         target->addNode(node);
+    }
+    if (isRoot) {
+        target->addRootNode(this);
     }
     ownersReady->set_value();
 }

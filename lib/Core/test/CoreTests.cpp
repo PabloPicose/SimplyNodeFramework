@@ -2015,9 +2015,6 @@ TEST_F(CoreFixture, moveToThreadUpdatesNodeAndRootBookkeepingExactly)
     const std::size_t workerRootsBefore = workerLoop->getRootNodesCount();
 
     ASSERT_TRUE(root->moveToThread(workerId));
-    // The root is registered as such (ticked) on the new owner, right before
-    // the onMovedToThread() hooks run there.
-    ASSERT_TRUE(runOnLoopAndWait(workerLoop, []() {}));
 
     // All three nodes change loop, but only the root is a root on the target.
     EXPECT_EQ(mainLoop->registeredNodesCount(), mainNodesBefore - 3);

@@ -1822,3 +1822,47 @@ TEST_F(PooledFixture, moveToTaskPoolSignalFromAHookNeverRunsConcurrentlyWithTheM
     root->deleteLater();
     pool.waitForDone();
 }
+
+// ── A subtree moved to a destination that never runs again ─────────────────
+// The end of the move (root registration for ticks, onMovedToThread()) is a
+// task on the destination. If that never runs, shutdown must still find and
+// destroy the root, or the whole subtree leaks without its destructors.
+
+namespace {
+
+class DestructionFlag final : public Node
+{
+public:
+    explicit DestructionFlag(std::shared_ptr<std::atomic<bool>> destroyed) : Node(nullptr), m_destroyed(std::move(destroyed))
+    {
+    }
+    ~DestructionFlag() override { m_destroyed->store(true); }
+    void update() override {}
+
+private:
+    std::shared_ptr<std::atomic<bool>> m_destroyed;
+};
+
+}  // namespace
+
+TEST_F(PooledFixture, rootMovedToALoopThatNeverRunsAgainIsDestroyedWithIt)
+{
+    auto pool = std::make_unique<ThreadPool>(1);
+    const std::thread::id worker = pool->workerThreadIds().at(0);
+    EventLoop* workerLoop = app->getEventLoopByThreadId(worker);
+    ASSERT_NE(workerLoop, nullptr);
+
+    // Stopped but not retired: the move is accepted, its last task never runs.
+    workerLoop->stop();
+    ASSERT_TRUE(waitFor([&]() { return ! workerLoop->isRunning(); }));
+
+    auto destroyed = std::make_shared<std::atomic<bool>>(false);
+    auto* node = new DestructionFlag(destroyed);
+    ASSERT_TRUE(node->moveToThread(worker));
+
+    pool.reset();
+    delete app;  // destroys the worker's loop, and the roots it owns
+    app = nullptr;
+
+    EXPECT_TRUE(destroyed->load());
+}
