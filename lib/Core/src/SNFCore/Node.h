@@ -260,6 +260,9 @@ protected:
      * to release those resources from the current loop before the affinity
      * fields are updated. The default implementation is a no-op.
      *
+     * It runs for every node of the moving subtree before any of them is
+     * handed over; the destination keeps running meanwhile.
+     *
      * @param newLoop The EventLoop the node is about to be moved to.
      */
     virtual void onAboutToMoveToThread(EventLoop* newLoop);
@@ -270,6 +273,12 @@ protected:
      *
      * Override in subclasses to re-acquire EventLoop resources on the new
      * loop. The default implementation is a no-op.
+     *
+     * It runs on the new owner thread (EventLoop or TaskPool strand), for
+     * every node of the moved subtree in pre-order, after all of them have
+     * their new owner and before any other work of the subtree runs there.
+     * The migration call may already have returned by then. Like any slot,
+     * it must not wait for work of its own thread.
      *
      * @param oldLoop The EventLoop the node was migrated away from.
      */
@@ -293,9 +302,10 @@ private:
                                 std::function<void(Node*)> apply);
 
     // Moves this subtree to @p target. Must run inside the current owner.
+    // onAboutToMoveToThread() runs here, onMovedToThread() later on @p target.
     void applyMoveTo(Executor* target);
-    // applyMoveTo() with @p target held (EventLoop::hold()) for the whole move.
-    void applyMoveToHeld(EventLoop* target);
+    void notifyAboutToMove(EventLoop* newLoop);
+    void collectSubtree(std::vector<Node*>& nodes);
 
     // Sets the owner; only from inside the owner (or during construction).
     void setOwnerExecutor(Executor* executor);

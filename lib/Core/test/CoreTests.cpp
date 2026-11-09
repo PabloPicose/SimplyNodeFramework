@@ -1956,22 +1956,26 @@ TEST_F(CoreFixture, moveToThreadInvokesHooksInOrderForWholeSubtree)
 
     ASSERT_TRUE(root->moveToThread(workerId));  // synchronous: called on owner thread
 
+    // onAboutToMoveToThread() for the whole subtree has run here, on the old
+    // owner, before anything was handed over; onMovedToThread() runs on the
+    // new owner thread (FIFO: done once a later task there has run).
+    ASSERT_TRUE(runOnLoopAndWait(workerLoop, []() {}));
     ASSERT_EQ(events.size(), 4u);
-    // Root first, then the child; each gets AboutToMove before Moved.
+
     EXPECT_EQ(events[0].kind, HookEvent::AboutToMove);
     EXPECT_EQ(events[0].node, root);
     EXPECT_EQ(events[0].ownerAtCall, mainLoop);
     EXPECT_EQ(events[0].argument, workerLoop);
 
-    EXPECT_EQ(events[1].kind, HookEvent::Moved);
-    EXPECT_EQ(events[1].node, root);
-    EXPECT_EQ(events[1].ownerAtCall, workerLoop);
-    EXPECT_EQ(events[1].argument, mainLoop);
+    EXPECT_EQ(events[1].kind, HookEvent::AboutToMove);
+    EXPECT_EQ(events[1].node, child);
+    EXPECT_EQ(events[1].ownerAtCall, mainLoop);
+    EXPECT_EQ(events[1].argument, workerLoop);
 
-    EXPECT_EQ(events[2].kind, HookEvent::AboutToMove);
-    EXPECT_EQ(events[2].node, child);
-    EXPECT_EQ(events[2].ownerAtCall, mainLoop);
-    EXPECT_EQ(events[2].argument, workerLoop);
+    EXPECT_EQ(events[2].kind, HookEvent::Moved);
+    EXPECT_EQ(events[2].node, root);
+    EXPECT_EQ(events[2].ownerAtCall, workerLoop);
+    EXPECT_EQ(events[2].argument, mainLoop);
 
     EXPECT_EQ(events[3].kind, HookEvent::Moved);
     EXPECT_EQ(events[3].node, child);
@@ -2011,6 +2015,9 @@ TEST_F(CoreFixture, moveToThreadUpdatesNodeAndRootBookkeepingExactly)
     const std::size_t workerRootsBefore = workerLoop->getRootNodesCount();
 
     ASSERT_TRUE(root->moveToThread(workerId));
+    // The root is registered as such (ticked) on the new owner, right before
+    // the onMovedToThread() hooks run there.
+    ASSERT_TRUE(runOnLoopAndWait(workerLoop, []() {}));
 
     // All three nodes change loop, but only the root is a root on the target.
     EXPECT_EQ(mainLoop->registeredNodesCount(), mainNodesBefore - 3);
@@ -2095,6 +2102,7 @@ TEST_F(CoreFixture, chainedMigrationsKeepAffinityAndBookkeepingConsistent)
     // B -> main (asynchronous: posted to B)
     ASSERT_TRUE(root->moveToThread(mainId));
     ASSERT_TRUE(runOnLoopAndWait(loopB, []() {}));
+    mainLoop->runPendingWork();  // the end of the move runs on the new owner
     EXPECT_EQ(root->ownerThreadId(), mainId);
     EXPECT_EQ(child->ownerThreadId(), mainId);
     EXPECT_EQ(loopB->registeredNodesCount(), 0u);

@@ -720,6 +720,7 @@ TEST_F(PooledFixture, migrationHooksGetNullForTheStrandSide)
     ASSERT_TRUE(worker->moveToTaskPool(&pool));
     ASSERT_TRUE(worker->moveToThread(mainId));  // posted to the strand
     pool.waitForDone();
+    mainLoop->runPendingWork();  // onMovedToThread() runs on the new owner
 
     std::lock_guard<std::mutex> lock(record->mutex);
     ASSERT_EQ(record->aboutToMoveArgs.size(), 2u);
@@ -1582,78 +1583,242 @@ TEST_F(PooledFixture, ioServiceDeliversReadinessAndSurvivesAClosedDescriptor)
     detail::Strand::release(strand);
 }
 
-// ── A move hook may wait for work it hands to the destination ──────────────
-// The destination is held while the subtree moves; work posted by the moving
-// thread itself must still run, or such a hook would wait forever.
+// ── Move hooks and the destination ─────────────────────────────────────────
+// onAboutToMoveToThread() runs on the old owner thread while the destination
+// keeps running; onMovedToThread() runs on the new owner thread, after every
+// node of the subtree has its new owner, before any other work of the subtree.
 
 namespace {
 
-struct HookWaitResult {
-    std::atomic<bool> ranInTarget{false};
-    std::atomic<bool> timedOut{false};
+struct HookThreads {
+    std::atomic<bool> aboutToMoveOnOldOwner{false};
+    std::atomic<bool> movedOnNewOwner{false};
+    std::atomic<bool> movedOffMover{false};
+    std::thread::id mover = std::this_thread::get_id();
 };
 
-void postToOwnerAndWait(Node& node, HookWaitResult& result)
-{
-    auto done = std::make_shared<std::promise<void>>();
-    std::future<void> finished = done->get_future();
-    Executor* target = node.ownerExecutor();  // already the destination
-    target->post([&result, done, target]() {
-        result.ranInTarget.store(target->isCurrent());
-        done->set_value();
-    });
-    result.timedOut.store(finished.wait_for(1s) != std::future_status::ready);
-}
-
-class LoopHookWaiter final : public Node
+template <typename Base>
+class HookThreadProbe final : public Base
 {
 public:
-    explicit LoopHookWaiter(HookWaitResult& result) : Node(nullptr), m_result(result) {}
+    explicit HookThreadProbe(HookThreads& threads) : m_threads(threads) {}
+
+protected:
+    void onAboutToMoveToThread(EventLoop* /*newLoop*/) override
+    {
+        m_threads.aboutToMoveOnOldOwner.store(this->ownerExecutor()->isCurrent()
+                                              && std::this_thread::get_id() == m_threads.mover);
+    }
+    void onMovedToThread(EventLoop* /*oldLoop*/) override
+    {
+        m_threads.movedOnNewOwner.store(this->ownerExecutor()->isCurrent());
+        m_threads.movedOffMover.store(std::this_thread::get_id() != m_threads.mover);
+    }
+
+private:
+    HookThreads& m_threads;
+};
+
+class PlainRoot : public Node
+{
+public:
+    PlainRoot() : Node(nullptr) {}
+    void update() override {}
+};
+
+class PlainChild : public Node
+{
+public:
+    explicit PlainChild(Node* parent) : Node(parent) {}
+    void update() override {}
+};
+
+// Ticks on whatever loop owns it.
+class Ticker final : public Node
+{
+public:
+    Ticker() : Node(nullptr), m_timer(new Timer(this))
+    {
+        m_timer->timeout.connect([this]() { ticks.fetch_add(1); });
+        m_timer->start(5ms);
+    }
+    void update() override {}
+    std::atomic<int> ticks{0};
+
+private:
+    Timer* m_timer;
+};
+
+// Its onAboutToMoveToThread() waits for the destination: for work posted to
+// it and for timers of a node that already lives there.
+class WaitsForDestination final : public Node
+{
+public:
+    WaitsForDestination(Ticker& ticker, std::atomic<bool>& postedRan, std::atomic<bool>& ticked)
+        : Node(nullptr), m_ticker(ticker), m_postedRan(postedRan), m_ticked(ticked)
+    {
+    }
     void update() override {}
 
 protected:
-    void onMovedToThread(EventLoop* /*oldLoop*/) override { postToOwnerAndWait(*this, m_result); }
+    void onAboutToMoveToThread(EventLoop* newLoop) override
+    {
+        auto done = std::make_shared<std::promise<void>>();
+        std::future<void> finished = done->get_future();
+        std::atomic<bool>& postedRan = m_postedRan;
+        newLoop->post([&postedRan, done]() {
+            postedRan.store(true);
+            done->set_value();
+        });
+        finished.wait_for(1s);
+
+        const int before = m_ticker.ticks.load();
+        const auto deadline = std::chrono::steady_clock::now() + 1s;
+        while (m_ticker.ticks.load() < before + 3 && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(1ms);
+        }
+        m_ticked.store(m_ticker.ticks.load() >= before + 3);
+    }
 
 private:
-    HookWaitResult& m_result;
+    Ticker& m_ticker;
+    std::atomic<bool>& m_postedRan;
+    std::atomic<bool>& m_ticked;
 };
 
-class StrandHookWaiter final : public PooledNode
+// A child whose onMovedToThread() emits a signal to a sibling and then keeps
+// working; the sibling's slot reports whether it ran while that hook was
+// still running on another thread.
+struct EmitOverlap {
+    std::atomic<std::thread::id> emitterRunning{std::thread::id()};
+    std::atomic<bool> slotRan{false};
+    std::atomic<bool> overlapped{false};
+};
+
+class EmittingChild final : public Node
 {
 public:
-    explicit StrandHookWaiter(HookWaitResult& result) : m_result(result) {}
+    EmittingChild(Node* parent, EmitOverlap& overlap) : Node(parent), m_overlap(overlap) {}
+    void update() override {}
+    Signal<> ping;
 
 protected:
-    void onMovedToThread(EventLoop* /*oldLoop*/) override { postToOwnerAndWait(*this, m_result); }
+    void onMovedToThread(EventLoop* /*oldLoop*/) override
+    {
+        m_overlap.emitterRunning.store(std::this_thread::get_id());
+        ping.emit();
+        std::this_thread::sleep_for(100ms);
+        m_overlap.emitterRunning.store(std::thread::id());
+    }
 
 private:
-    HookWaitResult& m_result;
+    EmitOverlap& m_overlap;
 };
+
+template <typename Root>
+Root* buildEmittingSubtree(EmitOverlap& overlap)
+{
+    auto* root = new Root();
+    auto* receiver = new PlainChild(root);  // moves first: already on the destination
+    auto* emitter = new EmittingChild(root, overlap);
+    emitter->ping.connect(NodePtr<PlainChild>(receiver), [&overlap](PlainChild&) {
+        const std::thread::id running = overlap.emitterRunning.load();
+        overlap.overlapped.store(running != std::thread::id() && running != std::this_thread::get_id());
+        overlap.slotRan.store(true);
+    });
+    return root;
+}
+
+class PooledRoot : public PooledNode
+{
+};
+
+template <typename Predicate>
+bool waitFor(Predicate predicate, std::chrono::milliseconds timeout = 2s)
+{
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (! predicate()) {
+        if (std::chrono::steady_clock::now() > deadline) {
+            return false;
+        }
+        std::this_thread::sleep_for(1ms);
+    }
+    return true;
+}
 
 }  // namespace
 
-TEST_F(PooledFixture, moveToThreadHookCanWaitForWorkPostedToTheTargetLoop)
+TEST_F(PooledFixture, moveToThreadRunsEachHookOnItsDocumentedThread)
 {
     ThreadPool pool(1);
-    HookWaitResult result;
-    auto* node = new LoopHookWaiter(result);
+    HookThreads threads;
+    auto* node = new HookThreadProbe<PlainRoot>(threads);
     ASSERT_TRUE(node->moveToThread(pool.workerThreadIds().at(0)));
+    ASSERT_TRUE(waitFor([&]() { return threads.movedOffMover.load(); }));
 
-    EXPECT_FALSE(result.timedOut.load());
-    EXPECT_TRUE(result.ranInTarget.load());
+    EXPECT_TRUE(threads.aboutToMoveOnOldOwner.load());
+    EXPECT_TRUE(threads.movedOnNewOwner.load());
     node->deleteLater();
 }
 
-TEST_F(PooledFixture, moveToTaskPoolHookCanWaitForWorkPostedToTheStrand)
+TEST_F(PooledFixture, moveToTaskPoolRunsEachHookOnItsDocumentedThread)
 {
     TaskPool pool(1);
-    HookWaitResult result;
-    auto* node = new StrandHookWaiter(result);
+    HookThreads threads;
+    auto* node = new HookThreadProbe<PooledRoot>(threads);
     ASSERT_TRUE(node->moveToTaskPool(&pool));
-
-    EXPECT_FALSE(result.timedOut.load());
-    EXPECT_TRUE(result.ranInTarget.load());
     pool.waitForDone();
+
+    EXPECT_TRUE(threads.aboutToMoveOnOldOwner.load());
+    EXPECT_TRUE(threads.movedOnNewOwner.load());
+    EXPECT_TRUE(threads.movedOffMover.load());
     node->deleteLater();
+    pool.waitForDone();
+}
+
+TEST_F(PooledFixture, destinationLoopKeepsRunningWhileASubtreeMovesOntoIt)
+{
+    // A hook may wait for the destination (posted work, timers of nodes
+    // already there); the destination's other nodes are not stalled.
+    ThreadPool pool(1);
+    const std::thread::id worker = pool.workerThreadIds().at(0);
+    auto* ticker = new Ticker();
+    ASSERT_TRUE(ticker->moveToThread(worker));
+    ASSERT_TRUE(waitFor([&]() { return ticker->ticks.load() >= 2; }));
+
+    std::atomic<bool> postedRan{false};
+    std::atomic<bool> ticked{false};
+    auto* node = new WaitsForDestination(*ticker, postedRan, ticked);
+    ASSERT_TRUE(node->moveToThread(worker));
+
+    EXPECT_TRUE(postedRan.load());
+    EXPECT_TRUE(ticked.load());
+    node->deleteLater();
+    ticker->deleteLater();
+}
+
+TEST_F(PooledFixture, moveToThreadSignalFromAHookNeverRunsConcurrentlyWithTheMove)
+{
+    ThreadPool pool(1);
+    EmitOverlap overlap;
+    auto* root = buildEmittingSubtree<PlainRoot>(overlap);
+    ASSERT_TRUE(root->moveToThread(pool.workerThreadIds().at(0)));
+    ASSERT_TRUE(waitFor([&]() { return overlap.slotRan.load(); }));
+
+    EXPECT_FALSE(overlap.overlapped.load());
+    root->deleteLater();
+}
+
+TEST_F(PooledFixture, moveToTaskPoolSignalFromAHookNeverRunsConcurrentlyWithTheMove)
+{
+    TaskPool pool(1);
+    EmitOverlap overlap;
+    auto* root = buildEmittingSubtree<PooledRoot>(overlap);
+    ASSERT_TRUE(root->moveToTaskPool(&pool));
+    ASSERT_TRUE(waitFor([&]() { return overlap.slotRan.load(); }));
+
+    EXPECT_FALSE(overlap.overlapped.load());
+    pool.waitForDone();
+    root->deleteLater();
     pool.waitForDone();
 }

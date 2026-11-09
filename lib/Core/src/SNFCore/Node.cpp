@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <future>
 #include <iostream>
 #include <stdexcept>
 
@@ -395,7 +396,7 @@ bool Node::moveToThread(std::thread::id targetThreadId)
 
     if (currentOwner->isCurrent()) {
         // Synchronous path: execute migration immediately.
-        applyMoveToHeld(targetLoop);
+        applyMoveTo(targetLoop);
         return true;
     }
 
@@ -410,7 +411,7 @@ bool Node::moveToThread(std::thread::id targetThreadId)
         if (targetLoop->isRetired()) {
             return;
         }
-        node->applyMoveToHeld(targetLoop);
+        node->applyMoveTo(targetLoop);
     });
     return true;
 }
@@ -443,22 +444,6 @@ bool Node::moveToThreadPool(ThreadPool* pool)
     return false;
 }
 
-void Node::applyMoveToHeld(EventLoop* target)
-{
-    // The subtree is published to the target node by node and a child's hook
-    // may already arm I/O or timers there. Hold the target loop so none of
-    // those callbacks runs (and maybe destroys the subtree) on its thread
-    // before the whole move is done.
-    struct Hold {
-        EventLoop* loop;
-        explicit Hold(EventLoop* l) : loop(l) { loop->hold(); }
-        ~Hold() { loop->resume(); }
-        Hold(const Hold&) = delete;
-        Hold& operator=(const Hold&) = delete;
-    } hold(target);
-    applyMoveTo(target);
-}
-
 void Node::applyMoveTo(Executor* target)
 {
     Executor* old = ownerExecutor();
@@ -467,31 +452,74 @@ void Node::applyMoveTo(Executor* target)
         return;
     }
 
-    // 1. Let the subclass release resources on the old owner. The hooks get
-    //    EventLoops; a strand side is passed as nullptr.
-    onAboutToMoveToThread(target->eventLoop());
+    // 1. On the old owner: let every node of the subtree release its
+    //    resources there (disarm I/O, cancel timers). Nothing has been handed
+    //    to the destination yet, so it keeps running undisturbed and a hook
+    //    may even wait for work done there. The hooks get EventLoops; a
+    //    strand side is passed as nullptr.
+    notifyAboutToMove(target->eventLoop());
 
-    // 2. Update the executors' node registrations.
-    if (old) {
-        old->removeNode(this);
-        if (m_isRoot) {
-            old->removeRootNode(this);
+    // 2. The subtree, pre-order, as it stands now that no more code of it
+    //    runs here before the move.
+    std::vector<Node*> nodes;
+    collectSubtree(nodes);
+    std::vector<std::shared_ptr<NodeLifetimeBlock>> blocks;
+    blocks.reserve(nodes.size());
+    for (Node* node : nodes) {
+        blocks.push_back(node->m_lifetimeBlock);
+        if (old) {
+            old->removeNode(node);
         }
     }
-
-    setOwnerExecutor(target);
-
-    target->addNode(this);
-    if (m_isRoot) {
-        target->addRootNode(this);
+    if (old && m_isRoot) {
+        old->removeRootNode(this);
     }
 
-    // 3. Let the subclass acquire resources on the new owner.
-    onMovedToThread(old ? old->eventLoop() : nullptr);
+    // 3. Queue the rest of the move on the destination BEFORE any node gets
+    //    its new owner: work for the subtree can only reach the destination
+    //    after that (posted or forwarded once the owner changes, and I/O and
+    //    timers re-armed by the hooks below), so it all runs after this task,
+    //    on the destination thread, never alongside the move.
+    auto ownersReady = std::make_shared<std::promise<void>>();
+    std::shared_future<void> ownersSet = ownersReady->get_future().share();
+    EventLoop* const oldLoop = old ? old->eventLoop() : nullptr;
+    const bool isRoot = m_isRoot;
+    target->post([this, target, oldLoop, isRoot, nodes, blocks, ownersSet]() {
+        // Step 4 below is a handful of atomic stores on the moving thread.
+        ownersSet.wait();
+        if (isRoot && blocks.front()->alive.load(std::memory_order_acquire)) {
+            target->addRootNode(this);  // ticked from now on
+        }
+        // A hook may destroy other nodes of the subtree: skip dead ones.
+        for (std::size_t i = 0; i < nodes.size(); ++i) {
+            if (blocks[i]->alive.load(std::memory_order_acquire)) {
+                nodes[i]->onMovedToThread(oldLoop);
+            }
+        }
+    });
 
-    // 4. Recurse into children.
+    // 4. Hand the subtree over. From here on this thread must not touch it.
+    for (Node* node : nodes) {
+        node->setOwnerExecutor(target);
+        target->addNode(node);
+    }
+    ownersReady->set_value();
+}
+
+void Node::notifyAboutToMove(EventLoop* newLoop)
+{
+    onAboutToMoveToThread(newLoop);
+    // By index: a hook may add or remove children.
+    for (std::size_t i = 0; i < m_children.size(); ++i) {
+        m_children[i]->notifyAboutToMove(newLoop);
+    }
+}
+
+void Node::collectSubtree(std::vector<Node*>& nodes)
+{
+    nodes.push_back(this);
     for (Node* child : m_children) {
-        child->applyMoveTo(target);
+        child->collectSubtree(nodes);
     }
 }
 

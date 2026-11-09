@@ -64,8 +64,8 @@ void Strand::post(Task task)
     bool needsSchedule = false;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        m_queue.push_back(PostedTask{std::move(task), std::this_thread::get_id()});
-        if (! m_scheduled && nextRunnableTaskLocked() < m_queue.size()) {
+        m_queue.push_back(std::move(task));
+        if (! m_scheduled) {
             m_scheduled = true;
             m_active.store(true, std::memory_order_release);
             needsSchedule = true;
@@ -85,47 +85,6 @@ void Strand::schedule()
         m_scheduled = false;
         m_active.store(false, std::memory_order_release);
     }
-}
-
-void Strand::hold()
-{
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_holders.push_back(std::this_thread::get_id());
-}
-
-void Strand::resume()
-{
-    bool needsSchedule = false;
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        const auto it = std::find(m_holders.begin(), m_holders.end(), std::this_thread::get_id());
-        if (it != m_holders.end()) {
-            m_holders.erase(it);
-        }
-        if (! m_scheduled && nextRunnableTaskLocked() < m_queue.size()) {
-            m_scheduled = true;
-            m_active.store(true, std::memory_order_release);
-            needsSchedule = true;
-        }
-    }
-    if (needsSchedule) {
-        schedule();
-    }
-}
-
-std::size_t Strand::nextRunnableTaskLocked() const
-{
-    if (m_holders.empty()) {
-        return 0;
-    }
-    // Held: the first task posted by a holder. Each poster's tasks keep their
-    // order; tasks of other threads wait for resume().
-    for (std::size_t i = 0; i < m_queue.size(); ++i) {
-        if (std::find(m_holders.begin(), m_holders.end(), m_queue[i].poster) != m_holders.end()) {
-            return i;
-        }
-    }
-    return m_queue.size();
 }
 
 bool Strand::isCurrent() const noexcept { return t_currentStrand == this; }
@@ -194,12 +153,11 @@ void Strand::drain()
             Task task;
             {
                 std::lock_guard<std::mutex> lock(m_mutex);
-                const std::size_t index = nextRunnableTaskLocked();
-                if (index >= m_queue.size()) {
+                if (m_queue.empty()) {
                     break;
                 }
-                task = std::move(m_queue[index].task);
-                m_queue.erase(m_queue.begin() + static_cast<std::ptrdiff_t>(index));
+                task = std::move(m_queue.front());
+                m_queue.pop_front();
             }
             // Caught here, not by the pool: an escaping exception would leave
             // m_scheduled set and the strand would never run again.
@@ -218,7 +176,7 @@ void Strand::drain()
     bool more = false;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        more = nextRunnableTaskLocked() < m_queue.size();  // the rest is rescheduled by resume()
+        more = ! m_queue.empty();
         if (! more) {
             m_scheduled = false;
             m_active.store(false, std::memory_order_release);
