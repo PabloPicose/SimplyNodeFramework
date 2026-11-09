@@ -1581,3 +1581,79 @@ TEST_F(PooledFixture, ioServiceDeliversReadinessAndSurvivesAClosedDescriptor)
     ::close(fds[1]);
     detail::Strand::release(strand);
 }
+
+// ── A move hook may wait for work it hands to the destination ──────────────
+// The destination is held while the subtree moves; work posted by the moving
+// thread itself must still run, or such a hook would wait forever.
+
+namespace {
+
+struct HookWaitResult {
+    std::atomic<bool> ranInTarget{false};
+    std::atomic<bool> timedOut{false};
+};
+
+void postToOwnerAndWait(Node& node, HookWaitResult& result)
+{
+    auto done = std::make_shared<std::promise<void>>();
+    std::future<void> finished = done->get_future();
+    Executor* target = node.ownerExecutor();  // already the destination
+    target->post([&result, done, target]() {
+        result.ranInTarget.store(target->isCurrent());
+        done->set_value();
+    });
+    result.timedOut.store(finished.wait_for(1s) != std::future_status::ready);
+}
+
+class LoopHookWaiter final : public Node
+{
+public:
+    explicit LoopHookWaiter(HookWaitResult& result) : Node(nullptr), m_result(result) {}
+    void update() override {}
+
+protected:
+    void onMovedToThread(EventLoop* /*oldLoop*/) override { postToOwnerAndWait(*this, m_result); }
+
+private:
+    HookWaitResult& m_result;
+};
+
+class StrandHookWaiter final : public PooledNode
+{
+public:
+    explicit StrandHookWaiter(HookWaitResult& result) : m_result(result) {}
+
+protected:
+    void onMovedToThread(EventLoop* /*oldLoop*/) override { postToOwnerAndWait(*this, m_result); }
+
+private:
+    HookWaitResult& m_result;
+};
+
+}  // namespace
+
+TEST_F(PooledFixture, moveToThreadHookCanWaitForWorkPostedToTheTargetLoop)
+{
+    ThreadPool pool(1);
+    HookWaitResult result;
+    auto* node = new LoopHookWaiter(result);
+    ASSERT_TRUE(node->moveToThread(pool.workerThreadIds().at(0)));
+
+    EXPECT_FALSE(result.timedOut.load());
+    EXPECT_TRUE(result.ranInTarget.load());
+    node->deleteLater();
+}
+
+TEST_F(PooledFixture, moveToTaskPoolHookCanWaitForWorkPostedToTheStrand)
+{
+    TaskPool pool(1);
+    HookWaitResult result;
+    auto* node = new StrandHookWaiter(result);
+    ASSERT_TRUE(node->moveToTaskPool(&pool));
+
+    EXPECT_FALSE(result.timedOut.load());
+    EXPECT_TRUE(result.ranInTarget.load());
+    pool.waitForDone();
+    node->deleteLater();
+    pool.waitForDone();
+}

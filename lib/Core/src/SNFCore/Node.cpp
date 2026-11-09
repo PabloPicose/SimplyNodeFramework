@@ -395,7 +395,7 @@ bool Node::moveToThread(std::thread::id targetThreadId)
 
     if (currentOwner->isCurrent()) {
         // Synchronous path: execute migration immediately.
-        applyMoveTo(targetLoop);
+        applyMoveToHeld(targetLoop);
         return true;
     }
 
@@ -410,7 +410,7 @@ bool Node::moveToThread(std::thread::id targetThreadId)
         if (targetLoop->isRetired()) {
             return;
         }
-        node->applyMoveTo(targetLoop);
+        node->applyMoveToHeld(targetLoop);
     });
     return true;
 }
@@ -441,6 +441,22 @@ bool Node::moveToThreadPool(ThreadPool* pool)
         return true;
     }
     return false;
+}
+
+void Node::applyMoveToHeld(EventLoop* target)
+{
+    // The subtree is published to the target node by node and a child's hook
+    // may already arm I/O or timers there. Hold the target loop so none of
+    // those callbacks runs (and maybe destroys the subtree) on its thread
+    // before the whole move is done.
+    struct Hold {
+        EventLoop* loop;
+        explicit Hold(EventLoop* l) : loop(l) { loop->hold(); }
+        ~Hold() { loop->resume(); }
+        Hold(const Hold&) = delete;
+        Hold& operator=(const Hold&) = delete;
+    } hold(target);
+    applyMoveTo(target);
 }
 
 void Node::applyMoveTo(Executor* target)

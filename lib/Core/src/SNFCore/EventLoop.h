@@ -12,6 +12,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -67,6 +68,24 @@ public:
      * owning event loop thread.
      */
     void post(Task t) override;
+
+    /**
+     * @brief Stops starting new work until resume(); thread-safe.
+     *
+     * While held, the loop runs no deferred delete, timer, I/O callback,
+     * root node tick or task posted by other threads: they wait until the
+     * last resume(). Work already running finishes. Used while a subtree
+     * moves onto this loop from another thread, so none of its callbacks runs
+     * before every node of it has moved. Holds nest.
+     *
+     * Tasks posted by a thread that holds the loop still run, in order: a
+     * move hook may hand work to this loop and wait for it without blocking
+     * forever.
+     */
+    void hold();
+
+    /** @brief Undoes one hold() and wakes the loop. */
+    void resume();
 
     /** @brief Enqueues @p node for deferred deletion on the next iteration. */
     void enqueueDelete(Node* node) override;
@@ -249,7 +268,11 @@ private:
 private:
     mutable std::mutex m_mutex;
     std::condition_variable m_condition;
-    std::queue<Task> m_tasks;
+    struct PostedTask {
+        Task task;
+        std::thread::id poster;
+    };
+    std::deque<PostedTask> m_tasks;
     std::vector<Node*> m_nodesToDelete;
     std::vector<Node*> m_nodes;
     std::vector<Node*> m_rootNodes;
@@ -261,6 +284,11 @@ private:
     bool m_ioThreadStarted = false;
     std::atomic_bool m_ioThreadStop{false};
     bool m_stop = false;
+    std::size_t m_holdCount = 0;               // guarded by m_mutex; see hold()
+    std::vector<std::thread::id> m_holders;    // one entry per hold(), guarded by m_mutex
+
+    // Index in m_tasks of the next task allowed to run, or m_tasks.size().
+    std::size_t nextRunnableTaskLocked() const;
     std::atomic_bool m_running{false};
     std::atomic_bool m_retired{false};
     const std::thread::id m_owner;

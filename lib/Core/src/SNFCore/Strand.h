@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <deque>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 namespace snf {
@@ -71,16 +72,18 @@ public:
 
     // ── Executor ────────────────────────────────────────────────────────────
     /**
-     * @brief Stops running tasks until resume(); posted tasks (I/O and timer
-     *        callbacks included) are queued meanwhile.
+     * @brief Stops running tasks posted by other threads until resume();
+     *        they (I/O and timer callbacks included) are queued meanwhile.
      *
      * Used while a subtree moves onto the strand, so that none of its
      * callbacks runs before every node of it has moved. A task already
-     * running finishes; no further task starts.
+     * running finishes. Tasks posted by the holding thread still run, in
+     * order: a move hook may hand work to the strand and wait for it without
+     * blocking forever. Holds nest.
      */
     void hold();
 
-    /** @brief Undoes hold() and runs the tasks queued meanwhile. */
+    /** @brief Undoes one hold() and runs the tasks queued meanwhile. */
     void resume();
 
     void post(Task task) override;
@@ -105,6 +108,9 @@ private:
     // Pool task: runs one batch, the pending deletes, then reschedules or
     // offers the strand for recycling.
     void drain();
+    // Index in m_queue of the next task allowed to run, or m_queue.size().
+    // Caller holds m_mutex.
+    std::size_t nextRunnableTaskLocked() const;
     void schedule();
 
     // Destroys pending deletes and the remaining root nodes, as if running
@@ -120,11 +126,15 @@ private:
     TaskPool& m_pool;
 
     mutable std::mutex m_mutex;
-    std::deque<Task> m_queue;
+    struct PostedTask {
+        Task task;
+        std::thread::id poster;
+    };
+    std::deque<PostedTask> m_queue;
     std::vector<Node*> m_rootNodes;
     std::vector<Node*> m_pendingDeletes;  // only touched inside the strand
     bool m_scheduled = false;             // a drain is queued or running
-    bool m_held = false;                  // reserved: tasks queue but do not run
+    std::vector<std::thread::id> m_holders;  // one entry per hold(); see hold()
 
     std::atomic<bool> m_active{false};  // mirrors m_scheduled for lock-free reads
     std::atomic<bool> m_retired{false};

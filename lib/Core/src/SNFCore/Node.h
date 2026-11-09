@@ -294,6 +294,8 @@ private:
 
     // Moves this subtree to @p target. Must run inside the current owner.
     void applyMoveTo(Executor* target);
+    // applyMoveTo() with @p target held (EventLoop::hold()) for the whole move.
+    void applyMoveToHeld(EventLoop* target);
 
     // Sets the owner; only from inside the owner (or during construction).
     void setOwnerExecutor(Executor* executor);

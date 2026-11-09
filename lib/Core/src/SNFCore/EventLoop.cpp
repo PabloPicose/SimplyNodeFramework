@@ -163,7 +163,9 @@ void EventLoop::run()
         std::vector<Node*> roots;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            roots = m_rootNodes;
+            if (m_holdCount == 0) {
+                roots = m_rootNodes;
+            }
         }
         for (Node* node : roots) {
             node->run();
@@ -182,6 +184,14 @@ void EventLoop::run()
             std::unique_lock<std::mutex> lock(m_mutex);
             if (m_stop) {
                 stopRequested = true;
+                m_stop = false;
+            } else if (m_holdCount > 0) {
+                // Only the holders' tasks may start while held: sleep until
+                // one arrives, resume() or stop.
+                m_condition.wait(lock, [this]() {
+                    return m_stop || m_holdCount == 0 || nextRunnableTaskLocked() < m_tasks.size();
+                });
+                stopRequested = m_stop;
                 m_stop = false;
             } else {
                 std::chrono::steady_clock::time_point nextDeadline;
@@ -265,7 +275,9 @@ void EventLoop::runPendingWork()
     std::vector<Node*> roots;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        roots = m_rootNodes;
+        if (m_holdCount == 0) {
+            roots = m_rootNodes;
+        }
     }
     for (Node* node : roots) {
         node->run();
@@ -280,9 +292,27 @@ void EventLoop::post(EventLoop::Task t)
 {
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        m_tasks.push(std::move(t));
+        m_tasks.push_back(PostedTask{std::move(t), std::this_thread::get_id()});
     }
     m_condition.notify_one();
+}
+
+void EventLoop::hold()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    ++m_holdCount;
+    m_holders.push_back(std::this_thread::get_id());
+}
+
+void EventLoop::resume()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const auto it = std::find(m_holders.begin(), m_holders.end(), std::this_thread::get_id());
+    if (it != m_holders.end()) {
+        m_holders.erase(it);
+        --m_holdCount;
+    }
+    m_condition.notify_all();
 }
 
 std::size_t EventLoop::pendingDeleteCount() const
@@ -421,19 +451,38 @@ bool EventLoop::hasPendingWorkLocked() const
 bool EventLoop::popNextTask(Task& task)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_tasks.empty()) {
+    const std::size_t index = nextRunnableTaskLocked();
+    if (index >= m_tasks.size()) {
         return false;
     }
 
-    task = std::move(m_tasks.front());
-    m_tasks.pop();
+    task = std::move(m_tasks[index].task);
+    m_tasks.erase(m_tasks.begin() + static_cast<std::ptrdiff_t>(index));
     return true;
+}
+
+std::size_t EventLoop::nextRunnableTaskLocked() const
+{
+    if (m_holdCount == 0) {
+        return 0;
+    }
+    // Held: the first task posted by a holder. Each poster's tasks keep their
+    // order; tasks of other threads wait for resume().
+    for (std::size_t i = 0; i < m_tasks.size(); ++i) {
+        if (std::find(m_holders.begin(), m_holders.end(), m_tasks[i].poster) != m_holders.end()) {
+            return i;
+        }
+    }
+    return m_tasks.size();
 }
 
 std::vector<Node*> EventLoop::takePendingDeletes()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::vector<Node*> nodesToDelete;
+    if (m_holdCount > 0) {
+        return nodesToDelete;
+    }
     nodesToDelete.swap(m_nodesToDelete);
     return nodesToDelete;
 }
@@ -456,6 +505,9 @@ std::vector<EventLoop::TimerEntry> EventLoop::takeDueTimers(std::chrono::steady_
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::vector<TimerEntry> dueTimers;
+    if (m_holdCount > 0) {
+        return dueTimers;
+    }
     auto it = m_timers.begin();
     while (it != m_timers.end()) {
         if (it->deadline <= now) {
@@ -472,6 +524,9 @@ std::vector<EventLoop::ReadyIOEntry> EventLoop::takeReadyIO()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::vector<ReadyIOEntry> ready;
+    if (m_holdCount > 0) {
+        return ready;
+    }
     ready.swap(m_readyIO);
     return ready;
 }

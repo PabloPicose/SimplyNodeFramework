@@ -12,10 +12,19 @@
 
 #include <SNFCore/Application.h>
 #include <SNFCore/EventLoop.h>
+#include <SNFCore/NodePtr.h>
 #include <SNFCore/ThreadPool.h>
 #include <SNFCore/Timer.h>
 #include <SNFNetwork/TcpServer.h>
 #include <SNFNetwork/TcpSocket.h>
+
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
+
+#include <atomic>
 
 using namespace snf;
 using namespace std::chrono_literals;
@@ -851,4 +860,117 @@ TEST_F(TcpServerFixture, deleteLaterOnAcceptedSocketDisconnectedDoesNotCrash)
 
     EXPECT_TRUE(clientDidConnect);
     EXPECT_TRUE(serverPeerDisconnected);
+}
+
+// ── Moving a subtree to another EventLoop ──────────────────────────────────
+
+namespace {
+
+int connectPosix(std::uint16_t port)
+{
+    const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        return -1;
+    }
+    timeval timeout{3, 0};
+    ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    ::inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
+    if (::connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+        ::close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+// Moved after the socket: its hook runs on the moving thread while the socket
+// already watches its descriptor on the target loop.
+class SlowMoveProbe final : public Node
+{
+public:
+    SlowMoveProbe(Node* parent, const std::atomic<bool>& readSeen, std::atomic<bool>& readSeenDuringMove)
+        : Node(parent), m_readSeen(readSeen), m_readSeenDuringMove(readSeenDuringMove)
+    {
+    }
+
+protected:
+    void onMovedToThread(EventLoop* /*oldLoop*/) override
+    {
+        std::this_thread::sleep_for(100ms);
+        m_readSeenDuringMove.store(m_readSeen.load());
+    }
+
+private:
+    const std::atomic<bool>& m_readSeen;
+    std::atomic<bool>& m_readSeenDuringMove;
+};
+
+class EarlyDataHandler final : public Node
+{
+public:
+    EarlyDataHandler(TcpSocket* socket, std::atomic<bool>& readSeen, std::atomic<bool>& readSeenDuringMove)
+        : m_socket(socket), m_readSeen(readSeen)
+    {
+        m_socket->setParent(this);
+        new SlowMoveProbe(this, readSeen, readSeenDuringMove);
+        m_socket->readyRead.connect(NodePtr<EarlyDataHandler>(this), [](EarlyDataHandler& self) {
+            self.m_readSeen.store(true);
+            self.m_socket->write(self.m_socket->readAll());
+        });
+        m_socket->disconnected.connect(NodePtr<EarlyDataHandler>(this), [](EarlyDataHandler& self) {
+            self.deleteLater();
+        });
+    }
+
+    void update() override {}
+
+private:
+    TcpSocket* m_socket;
+    std::atomic<bool>& m_readSeen;
+};
+
+}  // namespace
+
+TEST_F(TcpServerFixture, moveToThreadRunsNoCallbackBeforeTheWholeSubtreeHasMoved)
+{
+    // The subtree is published to the target loop node by node. If the loop
+    // ran the socket's callbacks before the move finished, the handler could
+    // be destroyed there while the moving thread still walks its children.
+    ThreadPool pool(1);
+    const std::thread::id workerThreadId = pool.workerThreadIds().at(0);
+
+    TcpServer server;
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+    const int fd = connectPosix(server.serverPort());
+    ASSERT_GE(fd, 0);
+    ASSERT_EQ(::send(fd, "early", 5, MSG_NOSIGNAL), 5);  // already pending when the socket moves
+
+    TcpSocket* socket = nullptr;
+    const auto deadline = std::chrono::steady_clock::now() + 3s;
+    while (!(socket = server.nextPendingConnection()) && std::chrono::steady_clock::now() < deadline) {
+        app->loopOnce();
+        std::this_thread::sleep_for(1ms);
+    }
+    ASSERT_NE(socket, nullptr);
+
+    std::atomic<bool> readSeen{false};
+    std::atomic<bool> readSeenDuringMove{false};
+    auto* handler = new EarlyDataHandler(socket, readSeen, readSeenDuringMove);
+    ASSERT_TRUE(handler->moveToThread(workerThreadId));
+
+    EXPECT_FALSE(readSeenDuringMove.load());
+
+    char echo[5] = {};
+    std::size_t received = 0;
+    while (received < sizeof(echo)) {
+        const ssize_t n = ::recv(fd, echo + received, sizeof(echo) - received, 0);
+        if (n <= 0) {
+            break;
+        }
+        received += static_cast<std::size_t>(n);
+    }
+    EXPECT_EQ(std::string(echo, received), "early");
+    ::close(fd);
 }
