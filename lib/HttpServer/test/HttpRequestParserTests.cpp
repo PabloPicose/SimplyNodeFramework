@@ -312,8 +312,68 @@ TEST_F(HttpRequestParserTest, QueryStringWithSpecialCharacters)
     EXPECT_TRUE(parser.isComplete());
 
     HttpRequest req = parser.parse();
-    EXPECT_EQ(req.getQueryParam("q"), "hello+world");
+    EXPECT_EQ(req.getQueryParam("q"), "hello world");
     EXPECT_EQ(req.getQueryParam("filter"), "active");
+}
+
+// ============================================================================
+// Query String Decoding (application/x-www-form-urlencoded)
+// ============================================================================
+
+namespace {
+
+HttpRequest parseTarget(const std::string& target)
+{
+    HttpRequestParser parser;
+    parser.feed("GET " + target + " HTTP/1.1\r\n\r\n");
+    EXPECT_TRUE(parser.isComplete());
+    return parser.parse();
+}
+
+} // namespace
+
+TEST_F(HttpRequestParserTest, QueryPercentEncodedValueIsDecoded)
+{
+    HttpRequest req = parseTarget("/api/frames?a=A%7C0%7C3");
+    EXPECT_EQ(req.getQueryParam("a"), "A|0|3");
+}
+
+TEST_F(HttpRequestParserTest, QueryPlusAndPercent20AreSpaces)
+{
+    EXPECT_EQ(parseTarget("/x?a=EVA+12").getQueryParam("a"), "EVA 12");
+    EXPECT_EQ(parseTarget("/x?a=EVA%2012").getQueryParam("a"), "EVA 12");
+}
+
+TEST_F(HttpRequestParserTest, QueryEncodedSeparatorsDoNotSplitTheParameter)
+{
+    HttpRequest req = parseTarget("/x?a=x%26y%3Dz");
+    EXPECT_EQ(req.queryParams.size(), 1u);
+    EXPECT_EQ(req.getQueryParam("a"), "x&y=z");
+}
+
+TEST_F(HttpRequestParserTest, QueryMalformedPercentIsLeftAsIs)
+{
+    EXPECT_EQ(parseTarget("/x?a=100%").getQueryParam("a"), "100%");
+    EXPECT_EQ(parseTarget("/x?a=%zz").getQueryParam("a"), "%zz");
+    EXPECT_EQ(parseTarget("/x?a=%4").getQueryParam("a"), "%4");
+}
+
+TEST_F(HttpRequestParserTest, QueryKeyIsDecoded)
+{
+    HttpRequest req = parseTarget("/x?%61=1");
+    EXPECT_EQ(req.getQueryParam("a"), "1");
+}
+
+TEST_F(HttpRequestParserTest, QueryUtf8BytesAreDecodedVerbatim)
+{
+    EXPECT_EQ(parseTarget("/x?a=%c3%b1").getQueryParam("a"), "\xC3\xB1");
+    EXPECT_EQ(parseTarget("/x?a=%C3%B1").getQueryParam("a"), "\xC3\xB1");
+}
+
+TEST_F(HttpRequestParserTest, QueryKeyWithoutValueIsDecoded)
+{
+    HttpRequest req = parseTarget("/x?a%20b");
+    EXPECT_EQ(req.queryParams.count("a b"), 1u);
 }
 
 TEST_F(HttpRequestParserTest, QueryParameterWithoutValue)

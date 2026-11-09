@@ -30,7 +30,12 @@ public:
     /** @brief Request path (e.g., "/api/status"). */
     std::string path;
 
-    /** @brief Query parameters parsed from the URL (e.g., ?a=1&b=2 → {a:1, b:2}). */
+    /**
+     * @brief Query parameters parsed from the URL (e.g., ?a=1&b=2 → {a:1, b:2}).
+     * @details Keys and values are already decoded as
+     *          application/x-www-form-urlencoded: "%XX" is the byte 0xXX and
+     *          '+' is a space. A '%' not followed by two hex digits is kept.
+     */
     std::map<std::string, std::string> queryParams;
 
     /** @brief HTTP headers as key-value pairs (case-insensitive keys). */

@@ -6,6 +6,48 @@
 
 namespace snf {
 
+namespace {
+
+int hexValue(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
+// Decodes one key or value of an application/x-www-form-urlencoded query:
+// "%XX" becomes the byte 0xXX and '+' becomes a space. A '%' not followed by
+// two hex digits is kept as is.
+std::string formUrlDecode(const std::string& in)
+{
+    std::string out;
+    out.reserve(in.size());
+    for (std::size_t i = 0; i < in.size(); ++i)
+    {
+        const char c = in[i];
+        if (c == '+')
+        {
+            out += ' ';
+        }
+        else if (c == '%' && i + 2 < in.size() && hexValue(in[i + 1]) >= 0 && hexValue(in[i + 2]) >= 0)
+        {
+            out += static_cast<char>((hexValue(in[i + 1]) << 4) | hexValue(in[i + 2]));
+            i += 2;
+        }
+        else
+        {
+            out += c;
+        }
+    }
+    return out;
+}
+
+} // namespace
+
 HttpRequestParser::HttpRequestParser() = default;
 
 void HttpRequestParser::feed(const uint8_t* data, std::size_t size)
@@ -110,7 +152,8 @@ void HttpRequestParser::_parseRequestLine()
         _request.path = path.substr(0, queryPos);
         std::string queryStr = path.substr(queryPos + 1);
 
-        // Parse key=value&key=value
+        // Parse key=value&key=value. Keys and values are decoded after
+        // splitting, so an encoded '&' or '=' stays inside its value.
         std::istringstream queryStream(queryStr);
         std::string param;
         while (std::getline(queryStream, param, '&'))
@@ -118,13 +161,13 @@ void HttpRequestParser::_parseRequestLine()
             std::size_t eqPos = param.find('=');
             if (eqPos != std::string::npos)
             {
-                std::string key = param.substr(0, eqPos);
-                std::string value = param.substr(eqPos + 1);
+                std::string key = formUrlDecode(param.substr(0, eqPos));
+                std::string value = formUrlDecode(param.substr(eqPos + 1));
                 _request.queryParams[key] = value;
             }
             else
             {
-                _request.queryParams[param] = "";
+                _request.queryParams[formUrlDecode(param)] = "";
             }
         }
     }
