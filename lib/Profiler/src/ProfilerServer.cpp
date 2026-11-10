@@ -36,6 +36,15 @@ uint16_t ProfilerServer::port() const {
     return m_wsServer->serverPort();
 }
 
+size_t ProfilerServer::clientCount() const {
+    return static_cast<size_t>(std::count_if(m_clients.begin(), m_clients.end(),
+                                             [](const Client& c) { return c.socket->isOpen(); }));
+}
+
+void ProfilerServer::setMaxPendingBytes(size_t bytes) {
+    m_maxPendingBytes = bytes;
+}
+
 void ProfilerServer::onNewConnection() {
     while (m_wsServer->hasPendingConnections()) {
         snf::WebSocket* client = m_wsServer->nextPendingConnection();
@@ -44,27 +53,37 @@ void ProfilerServer::onNewConnection() {
         client->sendTextMessage(
             R"({"type":"hello","version":2,"capabilities":["trace","memory","sys"]})");
 
-        auto discConn = client->disconnected.connect([this, client]() {
+        auto conn = client->disconnected.connect([this, client]() {
             onClientDisconnected(client);
         });
-        m_clientConns.push_back(discConn);
-        m_clients.push_back(client);
+        m_clients.push_back({client, conn});
     }
 }
 
 void ProfilerServer::broadcast(const std::string& msg) {
-    for (auto it = m_clients.begin(); it != m_clients.end(); ) {
-        if ((*it)->isOpen()) {
-            (*it)->sendTextMessage(msg);
-            ++it;
-        } else {
-            it = m_clients.erase(it);
+    for (Client& c : m_clients) {
+        if (!c.socket->isOpen())
+            continue;  // closing; removed once disconnected fires
+        if (c.socket->bytesToWrite() > m_maxPendingBytes) {
+            std::fprintf(stderr,
+                "[SNFProfiler] closing dashboard client %s:%u: %zu bytes not sent (reads too slowly)\n",
+                c.socket->peerAddress().toString().c_str(),
+                static_cast<unsigned>(c.socket->peerPort()),
+                c.socket->bytesToWrite());
+            c.socket->close();
+            continue;
         }
+        c.socket->sendTextMessage(msg);
     }
 }
 
 void ProfilerServer::onClientDisconnected(snf::WebSocket* client) {
-    m_clients.erase(std::remove(m_clients.begin(), m_clients.end(), client), m_clients.end());
+    auto it = std::find_if(m_clients.begin(), m_clients.end(),
+                           [client](const Client& c) { return c.socket == client; });
+    if (it != m_clients.end()) {
+        it->disconnected.disconnect();
+        m_clients.erase(it);
+    }
     client->deleteLater();
 }
 

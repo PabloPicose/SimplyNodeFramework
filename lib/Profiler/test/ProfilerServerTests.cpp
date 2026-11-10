@@ -24,6 +24,12 @@
 #include <thread>
 #include <vector>
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
+
 using namespace snf;
 using namespace snf::profiler;
 using namespace std::chrono_literals;
@@ -319,5 +325,84 @@ TEST_F(ProfilerServerFixture, DisconnectedClientDoesNotCrash)
 }
 
 
+
+// A client that stops reading (stalled tab, debugger break) must not make the
+// server queue the whole stream in memory.
+TEST_F(ProfilerServerFixture, SlowClientIsDisconnected)
+{
+    auto* pn = snf::profiler::detail::profilerNode();
+    auto* sm = snf::profiler::detail::sysMonitor();
+    ASSERT_NE(pn, nullptr);
+    ASSERT_NE(sm, nullptr);
+
+    auto* server = new ProfilerServer(pn, sm, nullptr, 0);
+    server->setMaxPendingBytes(1024 * 1024);
+    const uint16_t port = server->port();
+
+    // Raw TCP client: WebSocket handshake, then it never reads again.
+    auto handshakeDone = std::make_shared<std::atomic<bool>>(false);
+    auto fd = std::make_shared<std::atomic<int>>(-1);
+    std::thread rawClient([port, handshakeDone, fd]() {
+        int s = ::socket(AF_INET, SOCK_STREAM, 0);
+        int rcv = 4096;
+        ::setsockopt(s, SOL_SOCKET, SO_RCVBUF, &rcv, sizeof(rcv));
+        timeval tv{2, 0};
+        ::setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        sockaddr_in addr{};
+        addr.sin_family      = AF_INET;
+        addr.sin_port        = htons(port);
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        if (::connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+            ::close(s);
+            return;
+        }
+        const std::string req =
+            "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\n"
+            "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+            "Sec-WebSocket-Version: 13\r\n\r\n";
+        ::send(s, req.data(), req.size(), 0);
+        std::string resp;
+        char c;
+        while (resp.find("\r\n\r\n") == std::string::npos && ::recv(s, &c, 1, 0) == 1)
+            resp += c;
+        fd->store(s);
+        handshakeDone->store(resp.find(" 101 ") != std::string::npos);
+    });
+    runUntil(*handshakeDone, 2s);
+    rawClient.join();
+    ASSERT_TRUE(handshakeDone->load()) << "handshake failed";
+
+    // Wait until the server counts the client.
+    std::atomic<bool> registered{false};
+    Timer poll;
+    auto pollConn = poll.timeout.connect([&]() { if (server->clientCount() == 1) registered.store(true); });
+    poll.start(10ms);
+    runUntil(registered, 2s);
+    ASSERT_EQ(server->clientCount(), 1u);
+
+    // About 19 MB of stream: far more than the socket buffers hold.
+    static const char kLongName[] =
+        "a_rather_long_span_name_so_that_every_event_takes_a_few_hundred_bytes_on_the_wire_"
+        "a_rather_long_span_name_so_that_every_event_takes_a_few_hundred_bytes_on_the_wire_";
+    for (int i = 0; i < 60000; ++i) {
+        TraceEvent e{};
+        e.thread_id = 1;
+        e.phase     = EventPhase::INSTANT;
+        e.category  = "slow";
+        e.name      = kLongName;
+        TraceBuffer::current().push(e);
+    }
+
+    std::atomic<bool> gone{false};
+    pollConn.disconnect();
+    pollConn = poll.timeout.connect([&]() { if (server->clientCount() == 0) gone.store(true); });
+    runUntil(gone, 3s);
+    poll.stop();
+    pollConn.disconnect();
+
+    EXPECT_EQ(server->clientCount(), 0u) << "the slow client is still being fed";
+    ::close(fd->load());
+    delete server;
+}
 
 } // namespace
