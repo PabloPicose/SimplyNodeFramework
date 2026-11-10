@@ -1,8 +1,6 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
-#include <mutex>
-#include <unordered_map>
 
 namespace snf::profiler {
 
@@ -16,36 +14,34 @@ struct MemSnapshot {
 };
 
 /**
- * @brief Tracks heap allocations while profiling is enabled.
+ * @brief Tracks heap allocations made through operator new while enabled.
+ *
+ * Linking SNFProfiler replaces the global operator new/delete. Every block
+ * carries a 16-byte header with its size and the tracking session it was
+ * allocated in, so counting needs no lock and no lookup table. A block
+ * allocated while tracking was disabled, or in an earlier session, is not
+ * subtracted when freed.
+ *
+ * live_count and live_bytes are exact. peak_bytes is refreshed on every
+ * snapshot() and whenever a thread's allocations grow by 64 KB, so a spike
+ * shorter than that may be underestimated by up to 64 KB per thread.
  */
 class MemoryTracker {
 public:
-    /// Enables allocation tracking.
+    /// Starts a new tracking session with zeroed counters (no-op if enabled).
     static void enable();
 
-    /// Disables allocation tracking.
+    /// Stops tracking. Safe to call while other threads allocate.
     static void disable();
 
     /// Returns whether tracking is currently active.
     static bool isEnabled();
 
-    /// Records a heap allocation.
-    static void recordAlloc(void* ptr, size_t size);
-
-    /// Records a heap deallocation.
-    static void recordFree(void* ptr);
-
-    /// Returns the current memory usage snapshot.
+    /// Returns the current session's counters, or zeros when disabled.
     static MemSnapshot snapshot();
 
 private:
-    MemoryTracker() = default;
-
-    std::mutex m_mutex;
-    std::unordered_map<void*, size_t> m_map;
-    size_t m_live_bytes{0};
-    size_t m_live_count{0};
-    size_t m_peak_bytes{0};
+    MemoryTracker() = delete;
 };
 
 } // namespace snf::profiler

@@ -66,9 +66,7 @@ Application::~Application()
     // deletes its root nodes (and their subtrees) in the correct owner thread.
     // It also stops and joins each EventLoop's I/O thread.
     m_eventLoops.clear();
-    // Disable the MemoryTracker only after all EventLoop I/O threads have been
-    // joined — those threads may call operator new (recordAlloc) and must not
-    // race with MemoryTracker::disable() destroying the tracker instance.
+    // Stop memory tracking last, so that it covers the whole shutdown.
     snf::profiler::detail::disableMemoryTracker();
     m_instance = nullptr;
 }

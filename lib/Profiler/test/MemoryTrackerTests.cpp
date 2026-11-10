@@ -7,6 +7,7 @@
 
 #include <cstdlib>
 #include <memory>
+#include <thread>
 #include <vector>
 
 using namespace snf::profiler;
@@ -169,6 +170,60 @@ TEST_F(MemoryTrackerFixture, InternalAllocationsDoNotCorruptState)
     auto snap = MemoryTracker::snapshot();
     EXPECT_TRUE(MemoryTracker::isEnabled());
     EXPECT_GT(snap.live_count, 0u);
+}
+
+// ── Blocks that outlive a tracking session ────────────────────────────────────
+
+TEST(MemoryTrackerSessions, FreeOfBlockAllocatedBeforeEnableIsIgnored)
+{
+    MemoryTracker::disable();
+    void* p = ::operator new(1000);
+    MemoryTracker::enable();
+    auto base = MemoryTracker::snapshot();
+    ::operator delete(p);
+    auto after = MemoryTracker::snapshot();
+    MemoryTracker::disable();
+
+    EXPECT_EQ(after.live_bytes, base.live_bytes);
+    EXPECT_EQ(after.live_count, base.live_count);
+}
+
+TEST(MemoryTrackerSessions, FreeOfBlockFromPreviousSessionIsIgnored)
+{
+    MemoryTracker::enable();
+    void* p = ::operator new(1000);
+    MemoryTracker::disable();
+    MemoryTracker::enable();
+    auto base = MemoryTracker::snapshot();
+    ::operator delete(p);
+    auto after = MemoryTracker::snapshot();
+    MemoryTracker::disable();
+
+    EXPECT_EQ(after.live_bytes, base.live_bytes);
+    EXPECT_EQ(after.live_count, base.live_count);
+}
+
+TEST(MemoryTrackerSessions, ConcurrentAllocationsBalance)
+{
+    std::vector<std::thread> threads;
+    threads.reserve(8);  // its storage would otherwise count as live
+    MemoryTracker::enable();
+    auto base = MemoryTracker::snapshot();
+    for (int t = 0; t < 8; ++t)
+        threads.emplace_back([]() {
+            for (int i = 0; i < 20000; ++i) {
+                void* p = ::operator new(static_cast<size_t>(16 + i % 256));
+                ::operator delete(p);
+            }
+        });
+    for (auto& th : threads) th.join();
+    // Threads allocate their own bookkeeping; measure after they are gone.
+    auto after = MemoryTracker::snapshot();
+    MemoryTracker::disable();
+
+    EXPECT_EQ(after.live_bytes, base.live_bytes);
+    EXPECT_EQ(after.live_count, base.live_count);
+    EXPECT_GE(after.peak_bytes, after.live_bytes);
 }
 
 } // namespace

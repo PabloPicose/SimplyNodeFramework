@@ -129,9 +129,7 @@ void shutdown() {
 }
 
 void disableMemoryTracker() {
-    // Called by Application after m_eventLoops.clear() — all I/O threads are
-    // guaranteed to have been joined by this point, so no thread can be inside
-    // recordAlloc/recordFree while we destroy the MemoryTracker instance.
+    // Safe while other threads allocate: disabling only clears the session id.
     MemoryTracker::disable();
 }
 

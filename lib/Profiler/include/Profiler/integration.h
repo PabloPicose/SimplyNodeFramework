@@ -21,10 +21,8 @@ namespace snf::profiler::detail {
 
     /// Shuts down the profiler subsystem.
     void shutdown();
-    // Called by Application AFTER m_eventLoops.clear() to disable the memory
-    // tracker once all I/O threads have been joined and can no longer call
-    // operator new / recordAlloc.
-    /// Disables the memory tracker after all event loops have been cleared.
+    /// Stops memory tracking. Application calls it last, after the event
+    /// loops are gone, so the graph covers the whole run.
     void disableMemoryTracker();
 
     // Accessors for the globally auto-initialised instances.
