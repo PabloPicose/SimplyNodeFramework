@@ -7,6 +7,8 @@
 #include "Profiler/TraceEvent.h"
 
 #include <atomic>
+#include <cstring>
+#include <pthread.h>
 #include <string>
 #include <thread>
 #include <vector>
@@ -243,6 +245,33 @@ TEST(TraceBufferTest, DrainAllOnEmptyIsHarmless)
     TraceBuffer::drainAll(out);
     EXPECT_EQ(out.size(), 0u);
     (void)countAfterFirst;
+}
+
+// The ring storage used to be a thread_local array of kCapacity events
+// (2.6 MB) in static TLS. glibc carves static TLS out of every thread's stack,
+// so creating any thread with a stack of 2 MB or less failed with EINVAL.
+TEST(TraceBufferTest, ThreadWithSmallStackCanBeCreated)
+{
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 512 * 1024);
+
+    pthread_t th;
+    const int rc = pthread_create(&th, &attr, [](void*) -> void* {
+        TraceBuffer::current().push(makeEvent(EventPhase::INSTANT, "small_stack", "fn"));
+        return nullptr;
+    }, nullptr);
+    pthread_attr_destroy(&attr);
+
+    ASSERT_EQ(rc, 0) << std::strerror(rc);
+    pthread_join(th, nullptr);
+
+    std::vector<TraceEvent> out;
+    TraceBuffer::drainAll(out);
+    bool found = false;
+    for (const auto& e : out)
+        if (std::string(e.category) == "small_stack") found = true;
+    EXPECT_TRUE(found);
 }
 
 } // namespace

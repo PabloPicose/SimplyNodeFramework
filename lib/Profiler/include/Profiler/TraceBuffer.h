@@ -1,6 +1,5 @@
 #pragma once
 #include "TraceEvent.h"
-#include <array>
 #include <atomic>
 #include <cstdint>
 #include <vector>
@@ -24,6 +23,8 @@ public:
 
     TraceBuffer();
     ~TraceBuffer();
+    TraceBuffer(const TraceBuffer&) = delete;
+    TraceBuffer& operator=(const TraceBuffer&) = delete;
 
     /// Pushes one event into the buffer.
     bool push(const TraceEvent& e) noexcept;
@@ -47,7 +48,11 @@ private:
     std::atomic<uint32_t> m_head{0};
     std::atomic<uint32_t> m_tail{0};
     std::atomic<uint64_t> m_dropped{0};
-    std::array<TraceEvent, kCapacity> m_data{};
+    // kCapacity events on the heap, not inline: the thread_local instance
+    // lives in static TLS, which glibc takes from every thread's stack.
+    // Allocated with malloc (not tracked) and not zeroed, so pages are only
+    // committed once the ring reaches them.
+    TraceEvent*           m_data;
 };
 
 } // namespace snf::profiler

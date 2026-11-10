@@ -1,5 +1,7 @@
 #include "Profiler/TraceBuffer.h"
 #include <algorithm>
+#include <cstdlib>
+#include <new>
 #include <mutex>
 #include <vector>
 
@@ -19,7 +21,10 @@ namespace {
     constexpr size_t kMaxOrphanEvents = TraceBuffer::kCapacity;
 } // anonymous namespace
 
-TraceBuffer::TraceBuffer() {
+TraceBuffer::TraceBuffer()
+    : m_data(static_cast<TraceEvent*>(std::malloc(sizeof(TraceEvent) * kCapacity)))
+{
+    if (!m_data) throw std::bad_alloc();
     std::lock_guard<std::mutex> lk(g_registryMutex);
     g_registry.push_back(this);
 }
@@ -35,6 +40,7 @@ TraceBuffer::~TraceBuffer() {
     const size_t kept = std::min(room, pending.size());
     g_orphanEvents.insert(g_orphanEvents.end(), pending.begin(), pending.begin() + kept);
     g_orphanDropped += (pending.size() - kept) + takeDropped();
+    std::free(m_data);
 }
 
 bool TraceBuffer::push(const TraceEvent& e) noexcept {
