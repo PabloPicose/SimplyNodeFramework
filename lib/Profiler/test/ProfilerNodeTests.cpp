@@ -246,6 +246,41 @@ TEST_F(ProfilerNodeFixture, MacroEventsReachBroadcast)
         << "no 'span' JSON messages broadcast within 500 ms";
 }
 
+// The dashboard reads every "ts" as nanoseconds (mem and sys already are), so a
+// span must carry its TraceEvent timestamp unchanged.
+TEST_F(ProfilerNodeFixture, SpanTimestampIsInNanoseconds)
+{
+    auto* pn = snf::profiler::detail::profilerNode();
+    ASSERT_NE(pn, nullptr);
+
+    auto probe = std::make_shared<BroadcastProbe>();
+    ScopedConnection connection(pn->broadcastMessage.connect([probe](const std::string& msg) {
+        std::lock_guard<std::mutex> lock(probe->mutex);
+        if (!probe->done.load() && msg.find("\"name\":\"units_probe\"") != std::string::npos) {
+            probe->firstMessage = msg;
+            probe->done.store(true);
+        }
+    }));
+
+    constexpr uint64_t kTsNs = 1234567890123ULL;
+    for (int i = 0; i < static_cast<int>(PROFILER_CHUNK_SIZE) + 1; ++i) {
+        TraceEvent e{};
+        e.timestamp_ns = kTsNs;
+        e.thread_id    = 7;
+        e.phase        = EventPhase::BEGIN;
+        e.category     = "units";
+        e.name         = "units_probe";
+        TraceBuffer::current().push(e);
+    }
+
+    runUntil(probe->done, 500ms);
+
+    ASSERT_TRUE(probe->done.load()) << "no units_probe span within 500 ms";
+    std::lock_guard<std::mutex> lock(probe->mutex);
+    EXPECT_NE(probe->firstMessage.find("\"ts\":1234567890123,"), std::string::npos)
+        << probe->firstMessage;
+}
+
 TEST_F(ProfilerNodeFixture, MemSnapshotBroadcastAfterFlush)
 {
     auto* pn = snf::profiler::detail::profilerNode();

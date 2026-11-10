@@ -94,14 +94,15 @@ std::string ProfilerNode::serializeEvent(const TraceEvent& e) const {
         case EventPhase::FREE:    ph = 'I'; break;
         default:                  ph = 'I'; break;
     }
-    uint64_t ts_us = e.timestamp_ns / 1000;
+    // Nanoseconds, the same unit as the "mem" and "sys" messages and what the
+    // dashboard expects.
     char buf[512];
     std::snprintf(buf, sizeof(buf),
         R"({"type":"span","ph":"%c","cat":"%s","name":"%s","ts":%llu,"pid":0,"tid":%u})",
         ph,
         e.category ? e.category : "",
         e.name     ? e.name     : "",
-        (unsigned long long)ts_us,
+        (unsigned long long)e.timestamp_ns,
         e.thread_id);
     return buf;
 }
