@@ -186,6 +186,25 @@ TEST(MacrosTest, TraceMemoryAllocPayloadBytesPreserved)
     EXPECT_EQ(events[0].payload_bytes, 9999u);
 }
 
+// Two guards in one scope need distinct variable names; they nest like any
+// other RAII objects (second one closes first).
+TEST(MacrosTest, TwoTraceEventsInSameScope)
+{
+    drainCurrent();
+    {
+        TRACE_EVENT("scope", "outer");
+        TRACE_EVENT("scope", "inner");
+    }
+    auto events = drainCurrent();
+    ASSERT_EQ(events.size(), 4u);
+    EXPECT_EQ(events[0].phase, EventPhase::BEGIN);
+    EXPECT_STREQ(events[0].name, "outer");
+    EXPECT_EQ(events[1].phase, EventPhase::BEGIN);
+    EXPECT_STREQ(events[1].name, "inner");
+    EXPECT_EQ(events[2].phase, EventPhase::END);
+    EXPECT_EQ(events[3].phase, EventPhase::END);
+}
+
 // ── Thread-local isolation ────────────────────────────────────────────────────
 
 TEST(MacrosTest, EventsFromOtherThreadNotVisible)

@@ -51,13 +51,20 @@ struct ScopeGuard {
 };
 }
 
+// The guard name must be unique per use. Pasting needs two levels so that
+// __COUNTER__ expands before ## (a direct _snf_scope_##__LINE__ yields the
+// literal _snf_scope___LINE__ every time).
+#  define SNF_PROFILER_CONCAT_IMPL(_a_, _b_) _a_##_b_
+#  define SNF_PROFILER_CONCAT(_a_, _b_)      SNF_PROFILER_CONCAT_IMPL(_a_, _b_)
+#  define SNF_PROFILER_SCOPE_VAR             SNF_PROFILER_CONCAT(_snf_scope_, __COUNTER__)
+
 /// Starts a scope trace using the current function name.
 #  define TRACE_EVENT_1(_snf_cat_) \
-    ::snf::profiler::ScopeGuard _snf_scope_##__LINE__(_snf_cat_, __func__, __FILE__, __LINE__)
+    ::snf::profiler::ScopeGuard SNF_PROFILER_SCOPE_VAR(_snf_cat_, __func__, __FILE__, __LINE__)
 
 /// Starts a scope trace using an explicit span name.
 #  define TRACE_EVENT_2(_snf_cat_, _snf_name_) \
-    ::snf::profiler::ScopeGuard _snf_scope_##__LINE__(_snf_cat_, _snf_name_, __FILE__, __LINE__)
+    ::snf::profiler::ScopeGuard SNF_PROFILER_SCOPE_VAR(_snf_cat_, _snf_name_, __FILE__, __LINE__)
 
 #  define TRACE_EVENT_GET_MACRO(_1, _2, MACRO, ...) MACRO
 #  define TRACE_EVENT(...) TRACE_EVENT_GET_MACRO(__VA_ARGS__, TRACE_EVENT_2, TRACE_EVENT_1)(__VA_ARGS__)
