@@ -3,9 +3,26 @@
 #include "SNFCore/Node.h"
 #include <chrono>
 #include <cstdint>
+#include <istream>
 #include <map>
 #include <string>
 #include <vector>
+
+namespace snf::profiler::detail {
+
+/// Cumulative byte counters of one network interface.
+struct NetCounters {
+    uint64_t rx;
+    uint64_t tx;
+};
+
+/// Parses the contents of /proc/net/dev into per-interface byte counters.
+std::map<std::string, NetCounters> parseNetDev(std::istream& in);
+
+/// Rate between two readings of a cumulative counter.
+uint64_t bytesPerSecond(uint64_t prev, uint64_t cur, std::chrono::nanoseconds elapsed);
+
+} // namespace snf::profiler::detail
 
 namespace snf::profiler {
 
@@ -40,10 +57,11 @@ private:
     void onTimer();
 
     struct CpuStat { uint64_t idle; uint64_t total; };
-    struct NetStat { uint64_t rx; uint64_t tx; };
+    using NetStat = detail::NetCounters;
 
     std::vector<CpuStat>           m_prevCpu;
     std::map<std::string, NetStat> m_prevNet;
+    uint64_t                       m_prevTs{0};
     bool                           m_firstSample{true};
 
     std::vector<CpuStat> readCpuStats();

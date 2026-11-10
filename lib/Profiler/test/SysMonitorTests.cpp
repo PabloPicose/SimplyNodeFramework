@@ -13,6 +13,7 @@
 #include <chrono>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -61,6 +62,59 @@ public:
 
     Application* m_app = nullptr;
 };
+
+// ── /proc/net/dev parsing and rates (no Application needed) ───────────────────
+
+// Layout of /proc/net/dev: 8 receive columns, then 8 transmit columns.
+// Every column holds a different value so a wrong offset is visible.
+static const char* kNetDev =
+    "Inter-|   Receive                                                |  Transmit\n"
+    " face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n"
+    "    lo: 1000 11 12 13 14 15 16 17 2000 21 22 23 24 25 26 27\n"
+    "  eno1: 3000 31 32 33 34 35 36 37 4000 41 42 43 44 45 46 47\n";
+
+TEST(SysMonitorParse, NetDevReadsReceiveAndTransmitBytes)
+{
+    std::istringstream in(kNetDev);
+    auto stats = snf::profiler::detail::parseNetDev(in);
+
+    ASSERT_EQ(stats.size(), 2u);
+    EXPECT_EQ(stats["lo"].rx, 1000u);
+    EXPECT_EQ(stats["lo"].tx, 2000u);
+    EXPECT_EQ(stats["eno1"].rx, 3000u);
+    EXPECT_EQ(stats["eno1"].tx, 4000u);
+}
+
+TEST(SysMonitorParse, NetDevAcceptsNoSpaceAfterColon)
+{
+    // Older kernels print the receive bytes right after the colon.
+    std::istringstream in(
+        "Inter-|   Receive\n"
+        " face |bytes\n"
+        "  eth0:5000 1 2 3 4 5 6 7 6000 1 2 3 4 5 6 7\n");
+    auto stats = snf::profiler::detail::parseNetDev(in);
+
+    ASSERT_EQ(stats.count("eth0"), 1u);
+    EXPECT_EQ(stats["eth0"].rx, 5000u);
+    EXPECT_EQ(stats["eth0"].tx, 6000u);
+}
+
+TEST(SysMonitorParse, RateUsesElapsedTime)
+{
+    EXPECT_EQ(snf::profiler::detail::bytesPerSecond(0, 1000, 250ms), 4000u);
+    EXPECT_EQ(snf::profiler::detail::bytesPerSecond(500, 1500, 2s), 500u);
+}
+
+TEST(SysMonitorParse, RateIsZeroWhenCounterGoesBack)
+{
+    // Interface reset or counter wrap: no huge value from unsigned underflow.
+    EXPECT_EQ(snf::profiler::detail::bytesPerSecond(1000, 10, 1s), 0u);
+}
+
+TEST(SysMonitorParse, RateIsZeroWithoutElapsedTime)
+{
+    EXPECT_EQ(snf::profiler::detail::bytesPerSecond(0, 1000, 0ns), 0u);
+}
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 

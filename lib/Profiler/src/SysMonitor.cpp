@@ -59,32 +59,51 @@ bool SysMonitor::readMemInfo(uint64_t& used, uint64_t& free_bytes) {
 }
 
 std::map<std::string, SysMonitor::NetStat> SysMonitor::readNetStats() {
-    std::map<std::string, NetStat> result;
     std::ifstream f("/proc/net/dev");
-    if (!f.is_open()) return result;
+    if (!f.is_open()) return {};
+    return detail::parseNetDev(f);
+}
+
+} // namespace snf::profiler
+
+namespace snf::profiler::detail {
+
+std::map<std::string, NetCounters> parseNetDev(std::istream& f) {
+    std::map<std::string, NetCounters> result;
     std::string line;
     // skip 2 header lines
     std::getline(f, line);
     std::getline(f, line);
     while (std::getline(f, line)) {
-        std::istringstream ss(line);
-        std::string iface;
-        ss >> iface;
-        // iface ends with ':'
-        if (!iface.empty() && iface.back() == ':')
-            iface.pop_back();
-        uint64_t rx = 0, tx = 0;
-        uint64_t tmp;
-        // field[1] = rx_bytes
-        ss >> rx;
-        // fields[2..8] — skip 6 more
-        for (int i = 0; i < 6; ++i) ss >> tmp;
-        // field[9] = tx_bytes
-        ss >> tx;
-        result[iface] = {rx, tx};
+        // "<iface>: <8 receive columns> <8 transmit columns>". Split on ':'
+        // because older kernels print no space between the name and rx bytes.
+        auto colon = line.find(':');
+        if (colon == std::string::npos) continue;
+        std::string iface = line.substr(0, colon);
+        iface.erase(0, iface.find_first_not_of(" \t"));
+        if (iface.empty()) continue;
+
+        std::istringstream ss(line.substr(colon + 1));
+        uint64_t col[9] = {};
+        // col[0] = rx bytes, col[1..7] = rest of receive, col[8] = tx bytes.
+        int read = 0;
+        while (read < 9 && ss >> col[read]) ++read;
+        if (read < 9) continue;
+        result[iface] = {col[0], col[8]};
     }
     return result;
 }
+
+uint64_t bytesPerSecond(uint64_t prev, uint64_t cur, std::chrono::nanoseconds elapsed) {
+    // A counter that went back (interface reset, 32-bit wrap) has no meaningful delta.
+    if (cur < prev || elapsed.count() <= 0) return 0;
+    const long double seconds = static_cast<long double>(elapsed.count()) / 1e9L;
+    return static_cast<uint64_t>(static_cast<long double>(cur - prev) / seconds);
+}
+
+} // namespace snf::profiler::detail
+
+namespace snf::profiler {
 
 void SysMonitor::onTimer() {
     uint64_t ts = static_cast<uint64_t>(
@@ -99,6 +118,7 @@ void SysMonitor::onTimer() {
     if (m_firstSample) {
         m_prevCpu     = curCpu;
         m_prevNet     = curNet;
+        m_prevTs      = ts;
         m_firstSample = false;
         return;
     }
@@ -116,18 +136,21 @@ void SysMonitor::onTimer() {
         sample.cpu_usage.push_back(usage);
     }
 
-    // Network deltas (divide by 0.5 for 500ms interval → Bps)
+    // Network rates over the time actually elapsed since the previous sample
+    // (timers can fire late, and the interval is configurable).
+    const std::chrono::nanoseconds elapsed(ts - m_prevTs);
     for (auto& [iface, cur] : curNet) {
         auto it = m_prevNet.find(iface);
         if (it != m_prevNet.end()) {
-            uint64_t rx_Bps = static_cast<uint64_t>((cur.rx - it->second.rx) / 0.5);
-            uint64_t tx_Bps = static_cast<uint64_t>((cur.tx - it->second.tx) / 0.5);
+            uint64_t rx_Bps = detail::bytesPerSecond(it->second.rx, cur.rx, elapsed);
+            uint64_t tx_Bps = detail::bytesPerSecond(it->second.tx, cur.tx, elapsed);
             sample.net[iface] = {rx_Bps, tx_Bps};
         }
     }
 
     m_prevCpu = curCpu;
     m_prevNet = curNet;
+    m_prevTs  = ts;
 
     sampleReady.emit(sample);
 }
