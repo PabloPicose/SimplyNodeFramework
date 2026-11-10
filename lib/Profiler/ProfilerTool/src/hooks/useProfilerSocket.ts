@@ -1,12 +1,19 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
+// One trace event. Events arrive in batches: {"type":"spans","events":[...]}.
+// Every "ts" in the stream is in nanoseconds.
 export interface SpanMessage {
-  type: 'span';
   ts: number;
   tid: number;
   cat: string;
   name: string;
   ph: 'B' | 'E' | 'X' | 'I';
+  bytes?: number;  // allocation size, ALLOC events only
+}
+
+interface SpansMessage {
+  type: 'spans';
+  events: SpanMessage[];
 }
 
 export interface MemMessage {
@@ -68,8 +75,8 @@ export function useProfilerSocket(): UseProfilerSocketResult {
     ws.onmessage = (ev) => {
       if (!mounted.current) return;
       try {
-        const msg = JSON.parse(ev.data as string) as SpanMessage | MemMessage | SysMessage | { type: string };
-        if      (msg.type === 'span') spanBuf.current.push(msg as SpanMessage);
+        const msg = JSON.parse(ev.data as string) as SpansMessage | MemMessage | SysMessage | { type: string };
+        if      (msg.type === 'spans') spanBuf.current.push(...(msg as SpansMessage).events);
         else if (msg.type === 'mem')  memBuf.current.push(msg as MemMessage);
         else if (msg.type === 'sys')  sysBuf.current.push(msg as SysMessage);
       } catch { /* ignore malformed */ }

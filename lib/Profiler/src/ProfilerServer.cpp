@@ -42,7 +42,7 @@ void ProfilerServer::onNewConnection() {
         client->setParent(this); // server owns client
 
         client->sendTextMessage(
-            R"({"type":"hello","version":1,"capabilities":["trace","memory","sys"]})");
+            R"({"type":"hello","version":2,"capabilities":["trace","memory","sys"]})");
 
         auto discConn = client->disconnected.connect([this, client]() {
             onClientDisconnected(client);

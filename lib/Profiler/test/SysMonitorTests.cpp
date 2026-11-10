@@ -41,13 +41,9 @@ public:
     {
         EventLoop* mainLoop = m_app->getOrCreateCurrentThreadEventLoop();
 
-        Timer guard;
-        guard.setSingleShot(true);
-        guard.timeout.connect([mainLoop]() {
-            mainLoop->post([mainLoop]() { mainLoop->stop(); });
-        });
-        guard.start(timeout);
-
+        // Exactly one stop per call: a second one (e.g. from an extra
+        // watchdog timer) would stay queued and end the next run() at once.
+        // The watcher stops the loop when done or at the deadline.
         std::thread watcher([&]() {
             auto deadline = std::chrono::steady_clock::now() + timeout;
             while (!done.load() &&

@@ -9,6 +9,7 @@
 #include "SNFJson/JsonObject.h"
 
 #include <string>
+#include <vector>
 
 using namespace snf;
 using namespace snf::profiler;
@@ -68,6 +69,29 @@ TEST(Serialization, SysSampleWithManyInterfacesIsComplete)
 
     EXPECT_EQ(obj["cpu"].asArray().size(), 64u);
     EXPECT_EQ(obj["net"].asObject().size(), 40u);
+}
+
+TEST(Serialization, BatchHoldsEveryEventInOrder)
+{
+    std::vector<TraceEvent> events = {
+        makeEvent(EventPhase::BEGIN, "c", "first"),
+        makeEvent(EventPhase::END,   "c", ""),
+        makeEvent(EventPhase::BEGIN, "c", "second"),
+    };
+    events[1].timestamp_ns = 43;
+    events[2].timestamp_ns = 44;
+
+    auto obj = parseObject(profiler::detail::serializeEventBatch(events.data(), events.size()));
+
+    EXPECT_EQ(obj["type"].asString(), "spans");
+    auto arr = obj["events"].asArray();
+    ASSERT_EQ(arr.size(), 3u);
+    EXPECT_EQ(arr.value(0).asObject()["name"].asString(), "first");
+    EXPECT_EQ(arr.value(0).asObject()["ph"].asString(), "B");
+    EXPECT_EQ(arr.value(1).asObject()["ph"].asString(), "E");
+    EXPECT_EQ(arr.value(1).asObject()["ts"].asUInt64(), 43u);
+    EXPECT_EQ(arr.value(2).asObject()["name"].asString(), "second");
+    EXPECT_EQ(arr.value(2).asObject()["tid"].asUInt64(), 7u);
 }
 
 } // namespace

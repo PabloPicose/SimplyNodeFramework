@@ -4,6 +4,7 @@
 #include "Profiler/SysMonitor.h"
 #include "Profiler/TraceBuffer.h"
 #include "SNFCore/Timer.h"
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <functional>
@@ -39,7 +40,7 @@ ProfilerNode::ProfilerNode(snf::Node* parent)
 
     auto* timer = new snf::Timer(this);
     timer->timeout.connect([this]() { drainAndProcess(); });
-    timer->start(std::chrono::milliseconds(16));
+    timer->start(std::chrono::milliseconds(PROFILER_FLUSH_INTERVAL_MS));
     moveToThreadPool();
 }
 
@@ -49,40 +50,29 @@ ProfilerNode::~ProfilerNode() {
 }
 
 void ProfilerNode::drainAndProcess() {
-    std::vector<TraceEvent> tmp;
-    TraceBuffer::drainAll(tmp);
-    std::lock_guard<std::mutex> lk(m_chunkMutex);
-    m_chunk.insert(m_chunk.end(), tmp.begin(), tmp.end());
-    if (m_chunk.size() >= PROFILER_CHUNK_SIZE)
-        flushChunk();
-}
+    // One message per batch, not per event: each message is a task on the
+    // server's EventLoop and a WebSocket frame, and every loop wake-up is
+    // itself traced.
+    m_events.clear();
+    TraceBuffer::drainAll(m_events);
 
-void ProfilerNode::flushChunk() {
-    // Caller must hold m_chunkMutex.
-    uint64_t ts_ns = static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count());
-
-    // Snapshot the chunk and clear before emitting to avoid holding the lock
-    // across signal emission (which may reenter drainAndProcess via Queued slots).
-    std::vector<TraceEvent> snapshot;
-    snapshot.swap(m_chunk);
-    m_chunkMutex.unlock();
-
-    for (const auto& e : snapshot) {
-        std::string json = detail::serializeEvent(e);
-        if (m_fileOpen)
-            m_traceFile << json << '\n';
-        broadcastMessage.emit(json);
+    for (size_t first = 0; first < m_events.size(); first += PROFILER_CHUNK_SIZE) {
+        const size_t count = std::min<size_t>(PROFILER_CHUNK_SIZE, m_events.size() - first);
+        if (m_fileOpen) {
+            for (size_t i = first; i < first + count; ++i)
+                m_traceFile << detail::serializeEvent(m_events[i]) << '\n';
+        }
+        broadcastMessage.emit(detail::serializeEventBatch(m_events.data() + first, count));
     }
 
-    // Emit memory snapshot
+    // Sent on every tick, even without events, so the memory graph keeps moving.
+    const uint64_t ts_ns = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
     std::string memJson = detail::serializeMemSnapshot(MemoryTracker::snapshot(), ts_ns);
     if (m_fileOpen)
         m_traceFile << memJson << '\n';
     broadcastMessage.emit(memJson);
-
-    m_chunkMutex.lock();
 }
 
 } // namespace snf::profiler

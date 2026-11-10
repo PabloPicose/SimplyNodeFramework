@@ -44,12 +44,8 @@ char phaseChar(EventPhase phase) {
     }
 }
 
-} // namespace
-
-std::string serializeEvent(const TraceEvent& e) {
-    std::string out;
-    out.reserve(128);
-    out += R"({"type":"span","ph":")";
+void appendEvent(std::string& out, const TraceEvent& e) {
+    out += R"({"ph":")";
     out += phaseChar(e.phase);
     out += R"(","cat":)";
     appendJsonString(out, e.category);
@@ -58,13 +54,33 @@ std::string serializeEvent(const TraceEvent& e) {
     // Nanoseconds, the same unit as "mem" and "sys".
     out += R"(,"ts":)";
     out += std::to_string(e.timestamp_ns);
-    out += R"(,"pid":0,"tid":)";
+    out += R"(,"tid":)";
     out += std::to_string(e.thread_id);
     if (e.phase == EventPhase::ALLOC) {
         out += R"(,"bytes":)";
         out += std::to_string(e.payload_bytes);
     }
     out += '}';
+}
+
+} // namespace
+
+std::string serializeEvent(const TraceEvent& e) {
+    std::string out;
+    out.reserve(128);
+    appendEvent(out, e);
+    return out;
+}
+
+std::string serializeEventBatch(const TraceEvent* events, size_t count) {
+    std::string out;
+    out.reserve(32 + count * 96);
+    out += R"({"type":"spans","events":[)";
+    for (size_t i = 0; i < count; ++i) {
+        if (i) out += ',';
+        appendEvent(out, events[i]);
+    }
+    out += "]}";
     return out;
 }
 

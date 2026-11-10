@@ -54,13 +54,9 @@ public:
     {
         EventLoop* mainLoop = m_app->getOrCreateCurrentThreadEventLoop();
 
-        Timer guard;
-        guard.setSingleShot(true);
-        guard.timeout.connect([mainLoop]() {
-            mainLoop->post([mainLoop]() { mainLoop->stop(); });
-        });
-        guard.start(timeout);
-
+        // Exactly one stop per call: a second one (e.g. from an extra
+        // watchdog timer) would stay queued and end the next run() at once.
+        // The watcher stops the loop when done or at the deadline.
         std::thread watcher([&]() {
             auto deadline = std::chrono::steady_clock::now() + timeout;
             while (!done.load() &&
@@ -195,7 +191,7 @@ TEST_F(ProfilerServerFixture, ClientReceivesSpanAfterChunkFlush)
     auto c2 = client->textMessageReceived.connect([gotHello, gotSpan](const std::string& msg) {
         if (msg.find("\"type\":\"hello\"") != std::string::npos)
             gotHello->store(true);
-        if (msg.find("\"type\":\"span\"") != std::string::npos)
+        if (msg.find("\"type\":\"spans\"") != std::string::npos)
             gotSpan->store(true);
     });
     client->connectToHost(HostAddress::LocalHost, port);
@@ -224,6 +220,62 @@ TEST_F(ProfilerServerFixture, ClientReceivesSpanAfterChunkFlush)
     c2.disconnect();
     EXPECT_TRUE(gotSpan->load())
         << "client did not receive a 'span' message within 3 s";
+}
+
+// One WebSocket message per trace event: every message wakes the server's
+// EventLoop, and each wake-up is itself traced. A quiet app streamed about 170
+// messages per second (the profiler's own loops), and under load the main
+// thread recorded thousands of loop iterations per second.
+TEST_F(ProfilerServerFixture, QuietAppSendsFewMessages)
+{
+    auto* server = snf::profiler::detail::profilerServer();
+    ASSERT_NE(server, nullptr);
+
+    struct Counter {
+        std::atomic<int>    messages{0};
+        std::atomic<size_t> bytes{0};
+    };
+    auto counter  = std::make_shared<Counter>();
+    auto gotHello = std::make_shared<std::atomic<bool>>(false);
+
+    auto* client = new WebSocket();
+    m_clients.push_back(client);
+    auto conn = client->textMessageReceived.connect([counter, gotHello](const std::string& msg) {
+        if (msg.find("\"type\":\"hello\"") != std::string::npos) {
+            gotHello->store(true);
+            return;
+        }
+        if (gotHello->load()) {
+            counter->messages.fetch_add(1);
+            counter->bytes.fetch_add(msg.size());
+        }
+    });
+    client->connectToHost(HostAddress::LocalHost, server->port());
+    runUntil(*gotHello, 2s);
+    ASSERT_TRUE(gotHello->load());
+
+    // One burst, then nothing: let it reach the client.
+    for (int i = 0; i < static_cast<int>(PROFILER_CHUNK_SIZE) + 1; ++i) {
+        TraceEvent e{};
+        e.timestamp_ns = static_cast<uint64_t>(i);
+        e.thread_id    = 1;
+        e.phase        = EventPhase::INSTANT;
+        e.category     = "burst";
+        e.name         = "burst_fn";
+        TraceBuffer::current().push(e);
+    }
+    std::atomic<bool> never{false};
+    runUntil(never, 500ms);
+
+    // Measure the quiet period that follows.
+    counter->messages.store(0);
+    counter->bytes.store(0);
+    runUntil(never, 1500ms);
+    conn.disconnect();
+
+    // Expected: a few flushes per second plus a "sys" sample every 500 ms.
+    EXPECT_LT(counter->messages.load(), 100) << counter->bytes.load() << " bytes";
+    EXPECT_LT(counter->bytes.load(), 200u * 1024u);
 }
 
 TEST_F(ProfilerServerFixture, DisconnectedClientDoesNotCrash)
@@ -265,5 +317,7 @@ TEST_F(ProfilerServerFixture, DisconnectedClientDoesNotCrash)
     // If we reach here without crashing the test passes.
     SUCCEED();
 }
+
+
 
 } // namespace

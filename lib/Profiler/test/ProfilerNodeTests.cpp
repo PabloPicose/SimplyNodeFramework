@@ -48,14 +48,9 @@ public:
     {
         EventLoop* mainLoop = m_app->getOrCreateCurrentThreadEventLoop();
 
-        // Watchdog timer: stops main loop after timeout regardless.
-        Timer guard;
-        guard.setSingleShot(true);
-        guard.timeout.connect([mainLoop]() {
-            mainLoop->post([mainLoop]() { mainLoop->stop(); });
-        });
-        guard.start(timeout);
-
+        // Exactly one stop per call: a second one (e.g. from an extra
+        // watchdog timer) would stay queued and end the next run() at once.
+        // The watcher stops the loop when done or at the deadline.
         // Poll in a background thread; stop main loop once condition is met.
         std::thread watcher([&]() {
             auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -229,7 +224,7 @@ TEST_F(ProfilerNodeFixture, MacroEventsReachBroadcast)
 
     auto probe = std::make_shared<BroadcastProbe>();
     ScopedConnection connection(pn->broadcastMessage.connect([probe](const std::string& msg) {
-        if (msg.find("\"type\":\"span\"") != std::string::npos) {
+        if (msg.find("\"type\":\"spans\"") != std::string::npos) {
             probe->count.fetch_add(1);
             probe->done.store(true);
         }
@@ -279,6 +274,25 @@ TEST_F(ProfilerNodeFixture, SpanTimestampIsInNanoseconds)
     std::lock_guard<std::mutex> lock(probe->mutex);
     EXPECT_NE(probe->firstMessage.find("\"ts\":1234567890123,"), std::string::npos)
         << probe->firstMessage;
+}
+
+// A quiet application never fills a chunk; its events must still reach the
+// dashboard after a short delay.
+TEST_F(ProfilerNodeFixture, FewEventsAreFlushedByTime)
+{
+    auto* pn = snf::profiler::detail::profilerNode();
+    ASSERT_NE(pn, nullptr);
+
+    auto probe = std::make_shared<BroadcastProbe>();
+    ScopedConnection connection(pn->broadcastMessage.connect([probe](const std::string& msg) {
+        if (msg.find("\"name\":\"few_events\"") != std::string::npos)
+            probe->done.store(true);
+    }));
+
+    pushEvents(3, "few", "few_events");
+    runUntil(probe->done, 400ms);
+
+    EXPECT_TRUE(probe->done.load()) << "3 events were not flushed within 400 ms";
 }
 
 TEST_F(ProfilerNodeFixture, MemSnapshotBroadcastAfterFlush)

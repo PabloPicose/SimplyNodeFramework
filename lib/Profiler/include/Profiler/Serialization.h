@@ -2,6 +2,7 @@
 #include "MemoryTracker.h"
 #include "SysMonitor.h"
 #include "TraceEvent.h"
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -12,8 +13,11 @@
  */
 namespace snf::profiler::detail {
 
-/// One trace event as a "span" message.
+/// One trace event as a JSON object (an element of a "spans" message).
 std::string serializeEvent(const TraceEvent& e);
+
+/// @p count events as one "spans" message: {"type":"spans","events":[...]}.
+std::string serializeEventBatch(const TraceEvent* events, size_t count);
 
 /// Heap usage as a "mem" message.
 std::string serializeMemSnapshot(const MemSnapshot& snap, uint64_t ts_ns);
