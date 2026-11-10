@@ -93,6 +93,7 @@ public:
     WebSocketState state() const override;
     HostAddress peerAddress() const override;
     std::uint16_t peerPort() const override;
+    std::size_t bytesToWrite() const override;
     void beginServerConnection(std::string initialData) override;
 
 private:
@@ -258,6 +259,11 @@ std::uint16_t WebSocketImplNative::peerPort() const
     }
 
     return m_port;
+}
+
+std::size_t WebSocketImplNative::bytesToWrite() const
+{
+    return m_socket ? m_socket->bytesToWrite() : 0;
 }
 
 void WebSocketImplNative::beginServerConnection(std::string initialData)

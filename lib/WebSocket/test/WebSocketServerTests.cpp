@@ -746,3 +746,44 @@ TEST_F(WebSocketServerFixture, LargeTextMessageRoundTrip)
     EXPECT_EQ(received, payload);
 }
 
+
+// A server pushing data to clients needs to see when one does not keep up.
+TEST_F(WebSocketServerFixture, BytesToWriteReportsUnsentData)
+{
+    WebSocketServer server;
+    ASSERT_TRUE(server.listen(HostAddress::LocalHost, 0));
+
+    WebSocket unconnected;
+    EXPECT_EQ(unconnected.bytesToWrite(), 0u);
+
+    // Far more than the kernel socket buffers take at once.
+    const std::string big(64 * 1024 * 1024, 'x');
+    std::size_t pendingAfterSend = 0;
+    WebSocket* peer = nullptr;
+    bool received = false;
+
+    server.newConnection.connect([&]() {
+        peer = server.nextPendingConnection();
+        ASSERT_NE(peer, nullptr);
+        acceptedSockets.push_back(peer);
+        peer->sendTextMessage(big);
+        pendingAfterSend = peer->bytesToWrite();
+    });
+
+    WebSocket client;
+    client.textMessageReceived.connect([&](const std::string& message) {
+        received = message.size() == big.size();
+        stopLoopFrom(client);
+    });
+
+    Timer shutdown;
+    armShutdown(shutdown, 10s);
+
+    client.connectToHost(HostAddress::LocalHost, server.serverPort());
+    app->run();
+
+    ASSERT_NE(peer, nullptr);
+    EXPECT_GT(pendingAfterSend, 0u);
+    EXPECT_TRUE(received);
+    EXPECT_EQ(peer->bytesToWrite(), 0u) << "everything was delivered";
+}

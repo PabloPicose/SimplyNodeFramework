@@ -10,6 +10,7 @@
 #include "SNFCore/Node.h"
 #include "SNFNetwork/HostAddress.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -99,6 +100,15 @@ public:
 
     /** @brief Starts a graceful WebSocket close. */
     void close();
+
+    /**
+     * @brief Returns the bytes queued for sending that the transport has not
+     * accepted yet.
+     *
+     * Grows when the peer reads slower than this side writes. Native builds
+     * report the underlying TcpSocket queue. Emscripten builds return 0.
+     */
+    std::size_t bytesToWrite() const;
 
     bool isOpen() const;
     bool isValid() const;

@@ -3,6 +3,7 @@
 #include "SNFNetwork/HostAddress.h"
 #include "SNFWebSocket/WebSocket.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -30,6 +31,7 @@ public:
     virtual WebSocketState state() const = 0;
     virtual HostAddress peerAddress() const = 0;
     virtual std::uint16_t peerPort() const = 0;
+    virtual std::size_t bytesToWrite() const { return 0; }
 
 #ifdef __EMSCRIPTEN__
     virtual void connectToCurrentOrigin(const std::string& path) = 0;

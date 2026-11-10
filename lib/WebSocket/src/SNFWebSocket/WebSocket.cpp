@@ -92,6 +92,11 @@ std::uint16_t WebSocket::peerPort() const
     return m_backend ? m_backend->peerPort() : 0;
 }
 
+std::size_t WebSocket::bytesToWrite() const
+{
+    return m_backend ? m_backend->bytesToWrite() : 0;
+}
+
 void WebSocket::beginServerConnection(std::string initialData)
 {
     m_backend->beginServerConnection(std::move(initialData));
