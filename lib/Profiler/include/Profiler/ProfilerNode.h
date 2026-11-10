@@ -34,8 +34,6 @@ public:
 
 private:
     void flushChunk();
-    std::string serializeEvent(const TraceEvent& e) const;
-    std::string serializeMemSnapshot(uint64_t ts_ns) const;
 
     std::vector<TraceEvent> m_chunk;
     std::mutex              m_chunkMutex;

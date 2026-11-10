@@ -33,8 +33,6 @@ private:
     void broadcast(const std::string& msg);
     void onSysSample(const SysSample& s);
 
-    std::string serializeSysSample(const SysSample& s) const;
-
     snf::WebSocketServer*        m_wsServer = nullptr;
     std::vector<snf::WebSocket*> m_clients;
     std::vector<snf::Connection> m_clientConns;

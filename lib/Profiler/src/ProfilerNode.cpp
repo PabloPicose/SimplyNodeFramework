@@ -1,5 +1,6 @@
 #include "Profiler/ProfilerNode.h"
 #include "Profiler/ProfilerServer.h"
+#include "Profiler/Serialization.h"
 #include "Profiler/SysMonitor.h"
 #include "Profiler/TraceBuffer.h"
 #include "SNFCore/Timer.h"
@@ -69,52 +70,19 @@ void ProfilerNode::flushChunk() {
     m_chunkMutex.unlock();
 
     for (const auto& e : snapshot) {
-        std::string json = serializeEvent(e);
+        std::string json = detail::serializeEvent(e);
         if (m_fileOpen)
             m_traceFile << json << '\n';
         broadcastMessage.emit(json);
     }
 
     // Emit memory snapshot
-    std::string memJson = serializeMemSnapshot(ts_ns);
+    std::string memJson = detail::serializeMemSnapshot(MemoryTracker::snapshot(), ts_ns);
     if (m_fileOpen)
         m_traceFile << memJson << '\n';
     broadcastMessage.emit(memJson);
 
     m_chunkMutex.lock();
-}
-
-std::string ProfilerNode::serializeEvent(const TraceEvent& e) const {
-    char ph;
-    switch (e.phase) {
-        case EventPhase::BEGIN:   ph = 'B'; break;
-        case EventPhase::END:     ph = 'E'; break;
-        case EventPhase::INSTANT: ph = 'I'; break;
-        case EventPhase::ALLOC:   ph = 'I'; break;
-        case EventPhase::FREE:    ph = 'I'; break;
-        default:                  ph = 'I'; break;
-    }
-    // Nanoseconds, the same unit as the "mem" and "sys" messages and what the
-    // dashboard expects.
-    char buf[512];
-    std::snprintf(buf, sizeof(buf),
-        R"({"type":"span","ph":"%c","cat":"%s","name":"%s","ts":%llu,"pid":0,"tid":%u})",
-        ph,
-        e.category ? e.category : "",
-        e.name     ? e.name     : "",
-        (unsigned long long)e.timestamp_ns,
-        e.thread_id);
-    return buf;
-}
-
-std::string ProfilerNode::serializeMemSnapshot(uint64_t ts_ns) const {
-    auto snap = MemoryTracker::snapshot();
-    char buf[256];
-    std::snprintf(buf, sizeof(buf),
-        R"({"type":"mem","ts":%llu,"live":%zu,"bytes":%zu,"peak":%zu})",
-        (unsigned long long)ts_ns,
-        snap.live_count, snap.live_bytes, snap.peak_bytes);
-    return buf;
 }
 
 } // namespace snf::profiler

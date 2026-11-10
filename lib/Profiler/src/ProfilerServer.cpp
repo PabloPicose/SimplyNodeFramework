@@ -1,4 +1,5 @@
 #include "Profiler/ProfilerServer.h"
+#include "Profiler/Serialization.h"
 #include "SNFNetwork/HostAddress.h"
 #include "SNFWebSocket/WebSocket.h"
 #include <algorithm>
@@ -68,41 +69,7 @@ void ProfilerServer::onClientDisconnected(snf::WebSocket* client) {
 }
 
 void ProfilerServer::onSysSample(const SysSample& s) {
-    broadcast(serializeSysSample(s));
-}
-
-std::string ProfilerServer::serializeSysSample(const SysSample& s) const {
-    std::string cpu_arr = "[";
-    for (size_t i = 0; i < s.cpu_usage.size(); ++i) {
-        if (i) cpu_arr += ',';
-        char tmp[16];
-        std::snprintf(tmp, sizeof(tmp), "%.4f", s.cpu_usage[i]);
-        cpu_arr += tmp;
-    }
-    cpu_arr += "]";
-
-    std::string net_obj = "{";
-    bool first = true;
-    for (auto& [iface, stat] : s.net) {
-        if (!first) net_obj += ',';
-        char tmp[256];
-        std::snprintf(tmp, sizeof(tmp),
-            R"("%s":{"rx_Bps":%llu,"tx_Bps":%llu})",
-            iface.c_str(), (unsigned long long)stat.rx_Bps, (unsigned long long)stat.tx_Bps);
-        net_obj += tmp;
-        first = false;
-    }
-    net_obj += "}";
-
-    char buf[1024];
-    std::snprintf(buf, sizeof(buf),
-        R"({"type":"sys","ts":%llu,"cpu":%s,"ram_used":%llu,"ram_free":%llu,"net":%s})",
-        (unsigned long long)s.timestamp_ns,
-        cpu_arr.c_str(),
-        (unsigned long long)s.ram_used_bytes,
-        (unsigned long long)s.ram_free_bytes,
-        net_obj.c_str());
-    return buf;
+    broadcast(detail::serializeSysSample(s));
 }
 
 } // namespace snf::profiler

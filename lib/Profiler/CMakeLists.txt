@@ -12,6 +12,7 @@ target_sources(SNFProfiler
         "${SRC_DIR}/ProfilerNode.cpp"
         "${SRC_DIR}/ProfilerServer.cpp"
         "${SRC_DIR}/SysMonitor.cpp"
+        "${SRC_DIR}/Serialization.cpp"
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS "${INCLUDE_DIR}"
@@ -23,6 +24,7 @@ target_sources(SNFProfiler
             "${INCLUDE_DIR}/Profiler/ProfilerServer.h"
             "${INCLUDE_DIR}/Profiler/SysMonitor.h"
             "${INCLUDE_DIR}/Profiler/Macros.h"
+            "${INCLUDE_DIR}/Profiler/Serialization.h"
             "${INCLUDE_DIR}/Profiler/integration.h"
 )
 

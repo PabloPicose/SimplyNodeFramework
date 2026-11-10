@@ -7,11 +7,13 @@ add_executable(SNFProfilerTests
     ProfilerServerTests.cpp
     SysMonitorTests.cpp
     EventLoopProfilingTests.cpp
+    SerializationTests.cpp
 )
 
 target_link_libraries(SNFProfilerTests
     PRIVATE
         SNFProfiler
+        SNFJson
         GTest::gtest_main
 )
 
