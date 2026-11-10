@@ -7,6 +7,7 @@
 #include "Profiler/TraceEvent.h"
 
 #include <atomic>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -180,6 +181,55 @@ TEST(TraceBufferTest, DrainAllCollectsFromMultipleThreads)
     for (auto& th : threads) th.join();
 
     EXPECT_GE(out.size(), static_cast<size_t>(kThreads * kEventsPerThread));
+}
+
+// ── Losses must be visible ────────────────────────────────────────────────────
+
+TEST(TraceBufferTest, DroppedEventsAreCounted)
+{
+    TraceBuffer buf;
+    // The ring holds kCapacity - 1 events; the other 10 do not fit.
+    for (uint32_t i = 0; i < TraceBuffer::kCapacity + 9; ++i)
+        buf.push(makeEvent(EventPhase::INSTANT));
+
+    EXPECT_EQ(buf.takeDropped(), 10u);
+    EXPECT_EQ(buf.takeDropped(), 0u) << "takeDropped() resets the counter";
+}
+
+TEST(TraceBufferTest, DropsOfExitedThreadAreCounted)
+{
+    // Start clean: leftovers of earlier tests would fill the orphan area.
+    { std::vector<TraceEvent> discard; TraceBuffer::drainAll(discard); }
+    TraceBuffer::takeDroppedAll();
+
+    std::thread t([]() {
+        for (uint32_t i = 0; i < TraceBuffer::kCapacity + 9; ++i)
+            TraceBuffer::current().push(makeEvent(EventPhase::INSTANT));
+    });
+    t.join();
+
+    EXPECT_EQ(TraceBuffer::takeDroppedAll(), 10u);
+    std::vector<TraceEvent> discard;
+    TraceBuffer::drainAll(discard);
+}
+
+TEST(TraceBufferTest, EventsOfExitedThreadAreNotLost)
+{
+    { std::vector<TraceEvent> discard; TraceBuffer::drainAll(discard); }
+
+    // A short-lived thread ends before the profiler's next drain.
+    std::thread t([]() {
+        for (int i = 0; i < 5; ++i)
+            TraceBuffer::current().push(makeEvent(EventPhase::INSTANT, "exited", "fn"));
+    });
+    t.join();
+
+    std::vector<TraceEvent> out;
+    TraceBuffer::drainAll(out);
+    size_t fromExited = 0;
+    for (const auto& e : out)
+        if (std::string(e.category) == "exited") ++fromExited;
+    EXPECT_EQ(fromExited, 5u);
 }
 
 TEST(TraceBufferTest, DrainAllOnEmptyIsHarmless)

@@ -55,15 +55,22 @@ void ProfilerNode::drainAndProcess() {
     // itself traced.
     m_events.clear();
     TraceBuffer::drainAll(m_events);
+    // The first message of the tick carries the losses; one is sent even
+    // without events so that a full buffer never goes unnoticed.
+    uint64_t dropped = TraceBuffer::takeDroppedAll();
 
-    for (size_t first = 0; first < m_events.size(); first += PROFILER_CHUNK_SIZE) {
+    size_t first = 0;
+    do {
         const size_t count = std::min<size_t>(PROFILER_CHUNK_SIZE, m_events.size() - first);
+        if (count == 0 && dropped == 0) break;
         if (m_fileOpen) {
             for (size_t i = first; i < first + count; ++i)
                 m_traceFile << detail::serializeEvent(m_events[i]) << '\n';
         }
-        broadcastMessage.emit(detail::serializeEventBatch(m_events.data() + first, count));
-    }
+        broadcastMessage.emit(detail::serializeEventBatch(m_events.data() + first, count, dropped));
+        dropped = 0;
+        first += count;
+    } while (first < m_events.size());
 
     // Sent on every tick, even without events, so the memory graph keeps moving.
     const uint64_t ts_ns = static_cast<uint64_t>(

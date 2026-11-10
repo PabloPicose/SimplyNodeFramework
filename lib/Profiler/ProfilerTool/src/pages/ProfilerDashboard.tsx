@@ -8,7 +8,7 @@ import { SysMonitor } from '../components/SysMonitor';
 import { CallStackPanel } from '../components/CallStackPanel';
 
 export const ProfilerDashboard: React.FC = () => {
-  const { spans, memSamples, sysSamples, connected } = useProfilerSocket();
+  const { spans, memSamples, sysSamples, connected, droppedEvents } = useProfilerSocket();
   const [selectedSpan, setSelectedSpan] = useState<CompleteSpan | null>(null);
 
   const completeSpans = useMemo(() => buildSpans(spans), [spans]);
@@ -34,6 +34,12 @@ export const ProfilerDashboard: React.FC = () => {
         }}>
           {connected ? 'connected' : 'reconnecting…'}
         </span>
+        {droppedEvents > 0 && (
+          <span title="Events lost because a thread's ring buffer was full"
+                style={{ fontSize: 12, color: '#fbbf24' }}>
+            {droppedEvents.toLocaleString()} events dropped
+          </span>
+        )}
       </div>
 
       {/* Main layout: scrollable content + sticky side panel */}

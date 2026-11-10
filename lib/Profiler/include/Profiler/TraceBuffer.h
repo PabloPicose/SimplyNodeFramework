@@ -37,9 +37,16 @@ public:
     /// Drains every registered thread-local buffer into @p out.
     static void drainAll(std::vector<TraceEvent>& out);
 
+    /// Returns how many events push() rejected since the last call, and resets it.
+    uint64_t takeDropped() noexcept;
+
+    /// takeDropped() over every buffer, including those of threads that exited.
+    static uint64_t takeDroppedAll();
+
 private:
     std::atomic<uint32_t> m_head{0};
     std::atomic<uint32_t> m_tail{0};
+    std::atomic<uint64_t> m_dropped{0};
     std::array<TraceEvent, kCapacity> m_data{};
 };
 

@@ -94,4 +94,14 @@ TEST(Serialization, BatchHoldsEveryEventInOrder)
     EXPECT_EQ(arr.value(2).asObject()["tid"].asUInt64(), 7u);
 }
 
+TEST(Serialization, BatchReportsDroppedEvents)
+{
+    auto e = makeEvent(EventPhase::INSTANT, "c", "n");
+    auto obj = parseObject(profiler::detail::serializeEventBatch(&e, 1, 12));
+    EXPECT_EQ(obj["dropped"].asUInt64(), 12u);
+
+    auto none = parseObject(profiler::detail::serializeEventBatch(&e, 1));
+    EXPECT_EQ(none["dropped"].asUInt64(), 0u);
+}
+
 } // namespace

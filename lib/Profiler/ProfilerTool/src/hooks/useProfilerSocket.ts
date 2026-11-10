@@ -13,6 +13,7 @@ export interface SpanMessage {
 
 interface SpansMessage {
   type: 'spans';
+  dropped: number;  // events lost on the server since the previous message
   events: SpanMessage[];
 }
 
@@ -38,6 +39,7 @@ export interface UseProfilerSocketResult {
   memSamples: MemMessage[];
   sysSamples: SysMessage[];
   connected: boolean;
+  droppedEvents: number;  // total events lost on the server (ring buffer full)
 }
 
 const MAX_SPANS   = 8000;
@@ -50,6 +52,7 @@ export function useProfilerSocket(): UseProfilerSocketResult {
   const [memSamples, setMemSamples] = useState<MemMessage[]>([]);
   const [sysSamples, setSysSamples] = useState<SysMessage[]>([]);
   const [connected,  setConnected]  = useState(false);
+  const [droppedEvents, setDroppedEvents] = useState(0);
 
   const wsRef      = useRef<WebSocket | null>(null);
   const retryDelay = useRef(1000);
@@ -60,6 +63,7 @@ export function useProfilerSocket(): UseProfilerSocketResult {
   const spanBuf = useRef<SpanMessage[]>([]);
   const memBuf  = useRef<MemMessage[]>([]);
   const sysBuf  = useRef<SysMessage[]>([]);
+  const droppedBuf = useRef(0);
 
   const connect = useCallback(() => {
     if (!mounted.current) return;
@@ -76,7 +80,11 @@ export function useProfilerSocket(): UseProfilerSocketResult {
       if (!mounted.current) return;
       try {
         const msg = JSON.parse(ev.data as string) as SpansMessage | MemMessage | SysMessage | { type: string };
-        if      (msg.type === 'spans') spanBuf.current.push(...(msg as SpansMessage).events);
+        if      (msg.type === 'spans') {
+          const batch = msg as SpansMessage;
+          spanBuf.current.push(...batch.events);
+          droppedBuf.current += batch.dropped ?? 0;
+        }
         else if (msg.type === 'mem')  memBuf.current.push(msg as MemMessage);
         else if (msg.type === 'sys')  sysBuf.current.push(msg as SysMessage);
       } catch { /* ignore malformed */ }
@@ -113,6 +121,11 @@ export function useProfilerSocket(): UseProfilerSocketResult {
           return next.length > MAX_SAMPLES ? next.slice(-MAX_SAMPLES) : next;
         });
       }
+      if (droppedBuf.current) {
+        const n = droppedBuf.current;
+        droppedBuf.current = 0;
+        setDroppedEvents(prev => prev + n);
+      }
       if (sysBuf.current.length) {
         const batch = sysBuf.current.splice(0);
         setSysSamples(prev => {
@@ -134,5 +147,5 @@ export function useProfilerSocket(): UseProfilerSocketResult {
     };
   }, [connect]);
 
-  return { spans, memSamples, sysSamples, connected };
+  return { spans, memSamples, sysSamples, connected, droppedEvents };
 }

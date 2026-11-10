@@ -72,10 +72,12 @@ std::string serializeEvent(const TraceEvent& e) {
     return out;
 }
 
-std::string serializeEventBatch(const TraceEvent* events, size_t count) {
+std::string serializeEventBatch(const TraceEvent* events, size_t count, uint64_t dropped) {
     std::string out;
-    out.reserve(32 + count * 96);
-    out += R"({"type":"spans","events":[)";
+    out.reserve(48 + count * 96);
+    out += R"({"type":"spans","dropped":)";
+    out += std::to_string(dropped);
+    out += R"(,"events":[)";
     for (size_t i = 0; i < count; ++i) {
         if (i) out += ',';
         appendEvent(out, events[i]);

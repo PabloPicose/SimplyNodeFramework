@@ -16,8 +16,10 @@ namespace snf::profiler::detail {
 /// One trace event as a JSON object (an element of a "spans" message).
 std::string serializeEvent(const TraceEvent& e);
 
-/// @p count events as one "spans" message: {"type":"spans","events":[...]}.
-std::string serializeEventBatch(const TraceEvent* events, size_t count);
+/// @p count events as one "spans" message:
+/// {"type":"spans","dropped":N,"events":[...]}, where @p dropped is the number
+/// of events lost (ring buffer full) since the previous message.
+std::string serializeEventBatch(const TraceEvent* events, size_t count, uint64_t dropped = 0);
 
 /// Heap usage as a "mem" message.
 std::string serializeMemSnapshot(const MemSnapshot& snap, uint64_t ts_ns);
